@@ -51,14 +51,14 @@ export function MatchmakingPage() {
           Matchmaking Queue
         </h1>
         <p className="text-[var(--color-muted-foreground)] mt-2">
-          Join the queue to get paired with an opponent by skill tier.
+          Join the queue for Tekken-style random pairing with the next available opponent.
         </p>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Queue Status</CardTitle>
-          <CardDescription>Skill-tier matching with 30s / 90s expansion windows</CardDescription>
+          <CardDescription>Random pairing — first in queue meets the next available opponent</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {isLoading ? (

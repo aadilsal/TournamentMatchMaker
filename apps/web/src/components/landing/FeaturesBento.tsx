@@ -23,8 +23,8 @@ const features = [
   },
   {
     icon: BarChart3,
-    title: 'Skill-tier queues',
-    description: 'Matchmaking expands tier range over time — fair games without endless waits.',
+    title: 'Random queues',
+    description: 'Tekken-style random pairing — jump in fast and fight whoever\'s next in line.',
     className: 'md:col-span-1',
   },
   {

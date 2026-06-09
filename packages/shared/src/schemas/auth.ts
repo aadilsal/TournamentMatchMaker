@@ -8,6 +8,8 @@ export const registerSchema = z.object({
   city: z.string().max(100).optional(),
   hasVrHeadset: z.boolean().optional().default(false),
   vrDeviceType: z.string().max(100).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 
 export const loginSchema = z.object({

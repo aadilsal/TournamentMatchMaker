@@ -23,6 +23,8 @@ interface UserRow {
   city: string | null;
   has_vr_headset: boolean;
   vr_device_type: string | null;
+  latitude: number | null;
+  longitude: number | null;
   skill_tier: number;
   role: string;
   created_at: Date;
@@ -72,6 +74,8 @@ export function mapUser(row: UserRow): User {
     city: row.city,
     hasVrHeadset: row.has_vr_headset,
     vrDeviceType: row.vr_device_type,
+    latitude: row.latitude ?? null,
+    longitude: row.longitude ?? null,
     skillTier: row.skill_tier,
     role: row.role as UserRole,
     createdAt: row.created_at.toISOString(),

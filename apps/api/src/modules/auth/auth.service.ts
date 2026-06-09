@@ -24,8 +24,8 @@ export class AuthService {
 
     try {
       const result = await this.pool.query(
-        `INSERT INTO users (email, password_hash, username, country, city, has_vr_headset, vr_device_type)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO users (email, password_hash, username, country, city, has_vr_headset, vr_device_type, latitude, longitude)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
         [
           input.email,
@@ -35,6 +35,8 @@ export class AuthService {
           input.city ?? null,
           input.hasVrHeadset ?? false,
           input.vrDeviceType ?? null,
+          input.latitude ?? null,
+          input.longitude ?? null,
         ]
       );
 

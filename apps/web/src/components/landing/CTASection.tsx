@@ -22,7 +22,7 @@ export function CTASection() {
             </h2>
             <p className="mt-6 text-lg text-[var(--color-muted-foreground)] max-w-xl mx-auto">
               Join players across Lahore, Karachi, and beyond. Create your profile,
-              book your first slot, and be first in line when matchmaking goes live.
+              book your first slot, and enter the matchmaking queue.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link to="/register">

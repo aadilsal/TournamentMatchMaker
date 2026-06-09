@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
@@ -9,9 +9,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { MapPin, Users } from 'lucide-react';
 
 export function VenuesPage() {
+  const [searchParams] = useSearchParams();
   const [city, setCity] = useState('');
   const [useGeo, setUseGeo] = useState(false);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const showWelcome = searchParams.get('welcome') === '1';
+
+  useEffect(() => {
+    const cityParam = searchParams.get('city');
+    const latParam = searchParams.get('lat');
+    const lngParam = searchParams.get('lng');
+    if (cityParam) setCity(cityParam);
+    if (latParam && lngParam) {
+      const lat = parseFloat(latParam);
+      const lng = parseFloat(lngParam);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        setCoords({ lat, lng });
+        setUseGeo(true);
+      }
+    }
+  }, [searchParams]);
 
   const { data: venues = [], isLoading, refetch } = useQuery({
     queryKey: ['venues', city, coords],
@@ -42,6 +59,11 @@ export function VenuesPage() {
         <p className="text-[var(--color-muted-foreground)]">
           Find tournament venues near you
         </p>
+        {showWelcome && (
+          <p className="mt-3 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-3 text-sm">
+            Welcome! Book a slot at a nearby arena, then head to matchmaking when you&apos;re ready to fight.
+          </p>
+        )}
       </div>
 
       <div className="flex gap-4 mb-6 flex-wrap">

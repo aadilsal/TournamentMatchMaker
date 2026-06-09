@@ -43,7 +43,7 @@ const chapters = [
     label: 'Match',
     title: 'Enter the queue',
     description:
-      'Skill-tier matchmaking pairs you with worthy opponents. Both on VR? Play remote. Need a venue? We auto-book the nearest shared arena.',
+      'Random matchmaking pairs you with the next available opponent. Both on Meta Quest? Play remote. Need a venue? We auto-book the nearest shared arena.',
     accent: 'from-indigo-600/40 via-blue-900/30 to-transparent',
     glow: 'shadow-indigo-500/20',
     visual: 'queue' as const,
@@ -55,7 +55,7 @@ const chapters = [
     label: 'Win',
     title: 'Claim the bracket',
     description:
-      'Tournament brackets, Socket.IO live updates, and email/SMS alerts keep you in the fight. From queue pop to trophy lift — sub-second feedback.',
+      'Tournament brackets, Socket.IO live updates, and email alerts keep you in the fight. From queue pop to trophy lift — sub-second feedback.',
     accent: 'from-amber-500/35 via-orange-900/25 to-transparent',
     glow: 'shadow-amber-500/20',
     visual: 'bracket' as const,

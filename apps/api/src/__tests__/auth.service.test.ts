@@ -41,6 +41,8 @@ describe('AuthService', () => {
             city: null,
             has_vr_headset: false,
             vr_device_type: null,
+            latitude: null,
+            longitude: null,
             skill_tier: 3,
             role: 'player',
             created_at: new Date(),
@@ -71,7 +73,7 @@ describe('AuthService', () => {
       const hash = await bcrypt.hash('password123', 12);
       const mockPool = {
         query: jest.fn().mockResolvedValue({
-          rows: [{ password_hash: hash, id: '1', email: 'test@example.com', username: 'u', country: null, city: null, has_vr_headset: false, vr_device_type: null, skill_tier: 3, role: 'player', created_at: new Date(), updated_at: new Date() }],
+          rows: [{ password_hash: hash, id: '1', email: 'test@example.com', username: 'u', country: null, city: null, has_vr_headset: false, vr_device_type: null, latitude: null, longitude: null, skill_tier: 3, role: 'player', created_at: new Date(), updated_at: new Date() }],
         }),
       } as never;
       const mockRedis = {} as never;
@@ -93,6 +95,8 @@ describe('AuthService', () => {
             city: null,
             has_vr_headset: false,
             vr_device_type: null,
+            latitude: null,
+            longitude: null,
             skill_tier: 3,
             role: 'player',
             created_at: new Date(),

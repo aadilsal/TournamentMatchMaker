@@ -27,7 +27,7 @@ docker compose up -d postgres redis
 
 cp .env.example .env
 
-pnpm migrate:up
+pnpm migrate:up   # auto-baselines an existing schema, then applies pending migrations only
 pnpm seed
 
 pnpm dev   # API :3000, Web :5173, Worker

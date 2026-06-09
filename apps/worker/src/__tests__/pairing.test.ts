@@ -1,31 +1,41 @@
 import { describe, expect, it } from '@jest/globals';
-import { canPair, findPartner, skillWindow } from '../lib/pairing.js';
+import { findPartner } from '../lib/pairing.js';
 
-describe('pairing algorithm', () => {
-  it('uses tier 1 window initially', () => {
-    expect(skillWindow(10)).toBe(1);
+describe('random pairing algorithm', () => {
+  it('returns null when no other players', () => {
+    const candidate = { userId: 'a', joinedAt: 1000 };
+    expect(findPartner(candidate, [])).toBeNull();
   });
 
-  it('expands to tier 2 after 30s', () => {
-    expect(skillWindow(35)).toBe(2);
+  it('never pairs a player with themselves', () => {
+    const candidate = { userId: 'a', joinedAt: 1000 };
+    const others = [{ userId: 'a', joinedAt: 2000 }];
+    expect(findPartner(candidate, others)).toBeNull();
   });
 
-  it('force pairs after 90s', () => {
-    expect(skillWindow(95)).toBe(99);
-  });
-
-  it('pairs within skill window', () => {
-    const candidate = { userId: 'a', skillTier: 3, joinedAt: 1000 };
+  it('picks a partner from eligible opponents', () => {
+    const candidate = { userId: 'a', joinedAt: 1000 };
     const others = [
-      { userId: 'b', skillTier: 4, joinedAt: 2000 },
-      { userId: 'c', skillTier: 1, joinedAt: 3000 },
+      { userId: 'b', joinedAt: 2000 },
+      { userId: 'c', joinedAt: 3000 },
     ];
-    expect(findPartner(candidate, others, 10)?.userId).toBe('b');
+    const partner = findPartner(candidate, others);
+    expect(partner).not.toBeNull();
+    expect(['b', 'c']).toContain(partner?.userId);
   });
 
-  it('force pairs any opponent after 90s', () => {
-    const candidate = { userId: 'a', skillTier: 1, joinedAt: 1000 };
-    const others = [{ userId: 'b', skillTier: 5, joinedAt: 2000 }];
-    expect(canPair(candidate, others[0], 95)).toBe(true);
+  it('can pair any opponent regardless of wait time', () => {
+    const seen = new Set<string>();
+    const candidate = { userId: 'a', joinedAt: 1000 };
+    const others = [
+      { userId: 'b', joinedAt: 2000 },
+      { userId: 'c', joinedAt: 3000 },
+      { userId: 'd', joinedAt: 4000 },
+    ];
+    for (let i = 0; i < 30; i++) {
+      const partner = findPartner(candidate, others);
+      if (partner) seen.add(partner.userId);
+    }
+    expect(seen.size).toBeGreaterThan(1);
   });
 });

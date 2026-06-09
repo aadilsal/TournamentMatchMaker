@@ -16,6 +16,8 @@ export interface QueuePlayerMeta {
   hasVr: boolean;
   city: string | null;
   country: string | null;
+  latitude: number | null;
+  longitude: number | null;
   joinedAt: number;
   tournamentId: string | null;
 }
@@ -62,7 +64,7 @@ export class MatchmakingService {
     }
 
     const userResult = await this.pool.query(
-      `SELECT skill_tier, has_vr_headset, city, country FROM users WHERE id = $1`,
+      `SELECT skill_tier, has_vr_headset, city, country, latitude, longitude FROM users WHERE id = $1`,
       [userId]
     );
     const user = userResult.rows[0];
@@ -74,12 +76,16 @@ export class MatchmakingService {
     const multi = this.redis.multi();
     multi.zadd(queueKey, joinedAt, userId);
     multi.sadd(QUEUE_MEMBER, userId);
+    const latitude = user.latitude ?? '';
+    const longitude = user.longitude ?? '';
     multi.hset(queuePlayerKey(userId), {
       userId,
       skillTier: String(user.skill_tier),
       hasVr: user.has_vr_headset ? '1' : '0',
       city: input.preferredCity ?? user.city ?? '',
       country: user.country ?? '',
+      latitude: latitude === null || latitude === undefined ? '' : String(latitude),
+      longitude: longitude === null || longitude === undefined ? '' : String(longitude),
       joinedAt: String(joinedAt),
       tournamentId: input.tournamentId ?? '',
     });
@@ -148,6 +154,8 @@ export class MatchmakingService {
       hasVr: meta.hasVr === '1',
       city: meta.city || null,
       country: meta.country || null,
+      latitude: meta.latitude ? parseFloat(meta.latitude) : null,
+      longitude: meta.longitude ? parseFloat(meta.longitude) : null,
       joinedAt: parseInt(meta.joinedAt, 10),
       tournamentId: meta.tournamentId || null,
     };

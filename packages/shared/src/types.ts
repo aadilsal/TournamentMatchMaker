@@ -47,6 +47,8 @@ export interface User {
   city: string | null;
   hasVrHeadset: boolean;
   vrDeviceType: string | null;
+  latitude: number | null;
+  longitude: number | null;
   skillTier: number;
   role: UserRole;
   createdAt: string;

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import type { Venue } from '@vr-tournament/shared';
+import { apiGet } from '@/lib/api';
 import {
   registerFormSchema,
   type AuthTokens,
@@ -18,12 +20,21 @@ import {
   passwordStrengthLabel,
   passwordStrengthScore,
 } from '@/lib/password-strength';
-import { Check, Gamepad2, X } from 'lucide-react';
+import { Check, Gamepad2, MapPin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type FieldErrors = Partial<Record<keyof RegisterFormInput | 'form', string>>;
 
-const VR_DEVICES = ['Meta Quest 2', 'Meta Quest 3', 'Meta Quest 3S', 'PlayStation VR2', 'Valve Index', 'Other'];
+const VR_DEVICES = [
+  'Meta Quest 3',
+  'Meta Quest 3S',
+  'Meta Quest 2',
+  'Meta Quest Pro',
+  'Oculus Rift S',
+  'PlayStation VR2',
+  'Valve Index',
+  'Other',
+];
 
 const initialForm = {
   email: '',
@@ -33,7 +44,9 @@ const initialForm = {
   country: 'Pakistan',
   city: 'Lahore',
   hasVrHeadset: false,
-  vrDeviceType: '',
+  vrDeviceType: 'Meta Quest 3',
+  latitude: undefined as number | undefined,
+  longitude: undefined as number | undefined,
   acceptTerms: false as boolean,
 };
 
@@ -51,12 +64,49 @@ export function RegisterPage() {
   const register = useMutation({
     mutationFn: (payload: RegisterInput) =>
       apiPost<AuthTokens>('/auth/register', payload),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setAccessToken(data.accessToken);
-      navigate('/profile');
+      navigate('/welcome', {
+        state: {
+          hasVrHeadset: variables.hasVrHeadset ?? false,
+          city: variables.city,
+          latitude: variables.latitude,
+          longitude: variables.longitude,
+        },
+      });
     },
     onError: (err: Error) => setServerError(err.message),
   });
+
+  const { data: nearbyVenues = [] } = useQuery({
+    queryKey: ['register-venues', form.latitude, form.longitude, form.city],
+    queryFn: () => {
+      const params = new URLSearchParams({ limit: '3' });
+      if (form.latitude !== undefined && form.longitude !== undefined) {
+        params.set('lat', String(form.latitude));
+        params.set('lng', String(form.longitude));
+      } else if (form.city) {
+        params.set('city', form.city);
+      }
+      return apiGet<Venue[]>(`/venues?${params.toString()}`);
+    },
+    enabled: !form.hasVrHeadset && (!!form.city || (form.latitude !== undefined && form.longitude !== undefined)),
+  });
+
+  const requestLocation = () => {
+    if (!navigator.geolocation) {
+      setServerError('Geolocation is not supported in this browser.');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        update('latitude', pos.coords.latitude);
+        update('longitude', pos.coords.longitude);
+        setServerError('');
+      },
+      () => setServerError('Could not detect your location. Enter your city or try again.')
+    );
+  };
 
   const validate = (): RegisterFormInput | null => {
     const result = registerFormSchema.safeParse(form);
@@ -95,6 +145,11 @@ export function RegisterPage() {
     if (!valid) return;
 
     const { confirmPassword: _, acceptTerms: __, ...payload } = valid;
+    if (!payload.hasVrHeadset) {
+      payload.vrDeviceType = undefined;
+    }
+    if (payload.latitude === undefined) delete payload.latitude;
+    if (payload.longitude === undefined) delete payload.longitude;
     register.mutate(payload);
   };
 
@@ -292,40 +347,80 @@ export function RegisterPage() {
               </div>
             </fieldset>
 
-            {/* VR setup */}
+            {/* Meta Quest / Oculus */}
             <fieldset className="space-y-4">
               <legend className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-                VR setup
+                Meta Quest / Oculus
               </legend>
               <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] p-3 transition-colors hover:bg-[var(--color-muted)]/40">
                 <input
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-primary)]"
                   checked={form.hasVrHeadset}
-                  onChange={(e) => update('hasVrHeadset', e.target.checked)}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setForm((f) => ({
+                      ...f,
+                      hasVrHeadset: checked,
+                      vrDeviceType: checked ? f.vrDeviceType || 'Meta Quest 3' : '',
+                    }));
+                  }}
                 />
                 <span>
-                  <span className="text-sm font-medium">I have a VR headset</span>
+                  <span className="text-sm font-medium">I have a Meta Quest or Oculus headset</span>
                   <span className="mt-0.5 block text-xs text-[var(--color-muted-foreground)]">
-                    Enables remote matches without booking a venue.
+                    Play remote PvP without booking a venue. Quest 2, Quest 3, and Oculus devices supported.
                   </span>
                 </span>
               </label>
 
               {form.hasVrHeadset && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="vrDeviceType">VR device (optional)</Label>
+                  <Label htmlFor="vrDeviceType">Headset model</Label>
                   <select
                     id="vrDeviceType"
                     value={form.vrDeviceType}
                     onChange={(e) => update('vrDeviceType', e.target.value)}
                     className="flex h-10 w-full rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]"
                   >
-                    <option value="">Select device</option>
                     {VR_DEVICES.map((d) => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
+                </div>
+              )}
+
+              {!form.hasVrHeadset && (
+                <div className="space-y-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/20 p-4">
+                  <p className="text-sm text-[var(--color-muted-foreground)]">
+                    No headset? Share your location so we can suggest the closest VR arenas for venue play.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={requestLocation}>
+                    <MapPin className="h-4 w-4" />
+                    Use my location
+                  </Button>
+                  {form.latitude !== undefined && form.longitude !== undefined && (
+                    <p className="text-xs text-emerald-400">
+                      Location saved — we&apos;ll find venues near you when matching.
+                    </p>
+                  )}
+                  {nearbyVenues.length > 0 && (
+                    <ul className="space-y-1.5 pt-1">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                        Nearby venues
+                      </p>
+                      {nearbyVenues.map((venue) => (
+                        <li key={venue.id} className="text-sm">
+                          {venue.name}
+                          <span className="text-[var(--color-muted-foreground)]">
+                            {' '}
+                            — {venue.city}
+                            {venue.distanceM != null && ` (${(venue.distanceM / 1000).toFixed(1)} km)`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </fieldset>

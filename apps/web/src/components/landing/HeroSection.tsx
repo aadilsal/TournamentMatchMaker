@@ -18,7 +18,7 @@ export function HeroSection() {
         >
           <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-1.5 text-xs font-medium text-[var(--color-accent-foreground)] mb-8">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Phase 1–2 live — venues, booking & matchmaking next
+            Live — venues, tournaments & matchmaking
           </span>
         </motion.div>
 
@@ -40,7 +40,7 @@ export function HeroSection() {
           className="mt-8 text-lg sm:text-xl text-[var(--color-muted-foreground)] max-w-2xl mx-auto leading-relaxed"
         >
           The tournament platform built for Tekken-style PvP — find venues near you,
-          book arena slots, and get matched by skill tier. Headset or venue, you play.
+          book arena slots, and get randomly matched with your next opponent. Meta Quest or arena, you play.
         </motion.p>
 
         <motion.div
@@ -69,7 +69,7 @@ export function HeroSection() {
           transition={{ delay: 0.8, duration: 1 }}
           className="mt-20 flex flex-wrap justify-center gap-8 text-sm text-[var(--color-muted-foreground)]"
         >
-          {['PostGIS venue search', 'Real-time slot booking', 'Skill-tier matchmaking'].map((item) => (
+          {['PostGIS venue search', 'Real-time slot booking', 'Random matchmaking'].map((item) => (
             <span key={item} className="flex items-center gap-2">
               <span className="h-1 w-1 rounded-full bg-[var(--color-primary)]" />
               {item}

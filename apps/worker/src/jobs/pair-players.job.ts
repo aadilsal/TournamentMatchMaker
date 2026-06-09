@@ -15,31 +15,90 @@ import { findPartner, type QueueEntry } from '../lib/pairing.js';
 import { lockSlot, SLOT_LOCK_TTL_SEC } from '../lib/slot-lock.js';
 import { emitToUser } from '../lib/socket-bridge.js';
 
+interface SlotSearchHint {
+  lat?: number;
+  lng?: number;
+  city?: string;
+}
+
+function parseCoord(value: string | undefined): number | null {
+  if (!value) return null;
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function resolveMatchPoint(
+  p1Lat: number | null,
+  p1Lng: number | null,
+  p2Lat: number | null,
+  p2Lng: number | null
+): { lat: number; lng: number } | null {
+  if (p1Lat !== null && p1Lng !== null && p2Lat !== null && p2Lng !== null) {
+    return { lat: (p1Lat + p2Lat) / 2, lng: (p1Lng + p2Lng) / 2 };
+  }
+  if (p1Lat !== null && p1Lng !== null) return { lat: p1Lat, lng: p1Lng };
+  if (p2Lat !== null && p2Lng !== null) return { lat: p2Lat, lng: p2Lng };
+  return null;
+}
+
 async function findAvailableSlot(
   client: import('pg').PoolClient,
-  city: string
+  hint: SlotSearchHint
 ): Promise<{ slotId: string; venueId: string; startTime: Date; endTime: Date } | null> {
-  const result = await client.query(
-    `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
-     FROM time_slots ts
-     JOIN venues v ON v.id = ts.venue_id
-     WHERE v.city = $1
-       AND v.active = true
-       AND ts.status = 'available'
-       AND ts.booked_count < ts.max_capacity
-       AND ts.start_time > NOW()
-     ORDER BY ts.start_time ASC
-     LIMIT 1`,
-    [city]
-  );
-  const row = result.rows[0];
-  if (!row) return null;
-  return {
-    slotId: row.slot_id,
-    venueId: row.venue_id,
-    startTime: row.start_time,
-    endTime: row.end_time,
-  };
+  const baseWhere = `
+    v.active = true
+    AND ts.status = 'available'
+    AND ts.booked_count < ts.max_capacity
+    AND ts.start_time > NOW()`;
+
+  if (hint.lat !== undefined && hint.lng !== undefined) {
+    const result = await client.query(
+      `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time,
+              ST_Distance(v.location::geography,
+                ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) AS dist_m
+       FROM time_slots ts
+       JOIN venues v ON v.id = ts.venue_id
+       WHERE ${baseWhere}
+         AND ST_DWithin(v.location::geography,
+           ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 50000)
+       ORDER BY dist_m, ts.start_time ASC
+       LIMIT 1`,
+      [hint.lng, hint.lat]
+    );
+    const row = result.rows[0];
+    if (row) {
+      return {
+        slotId: row.slot_id,
+        venueId: row.venue_id,
+        startTime: row.start_time,
+        endTime: row.end_time,
+      };
+    }
+  }
+
+  if (hint.city) {
+    const result = await client.query(
+      `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
+       FROM time_slots ts
+       JOIN venues v ON v.id = ts.venue_id
+       WHERE v.city ILIKE $1
+         AND ${baseWhere}
+       ORDER BY ts.start_time ASC
+       LIMIT 1`,
+      [hint.city]
+    );
+    const row = result.rows[0];
+    if (row) {
+      return {
+        slotId: row.slot_id,
+        venueId: row.venue_id,
+        startTime: row.start_time,
+        endTime: row.end_time,
+      };
+    }
+  }
+
+  return null;
 }
 
 async function pairInQueue(
@@ -58,16 +117,14 @@ async function pairInQueue(
     const meta = await redis.hgetall(queuePlayerKey(userId));
     entries.push({
       userId,
-      skillTier: parseInt(meta.skillTier || '3', 10),
       joinedAt: parseInt(meta.joinedAt || '0', 10),
     });
   }
 
   entries.sort((a, b) => a.joinedAt - b.joinedAt);
   const candidate = entries[0];
-  const waitSeconds = Math.floor((Date.now() - candidate.joinedAt) / 1000);
   const others = entries.slice(1);
-  const partner = findPartner(candidate, others, waitSeconds);
+  const partner = findPartner(candidate, others);
   if (!partner) return;
 
   const client = await pool.connect();
@@ -85,12 +142,22 @@ async function pairInQueue(
     let scheduledAt: Date | null = null;
 
     if (needsVenue) {
+      const matchPoint = resolveMatchPoint(
+        parseCoord(p1Meta.latitude),
+        parseCoord(p1Meta.longitude),
+        parseCoord(p2Meta.latitude),
+        parseCoord(p2Meta.longitude)
+      );
       const city = p1Meta.city || p2Meta.city;
-      if (!city) {
+      if (!matchPoint && !city) {
         await client.query('ROLLBACK');
         return;
       }
-      const slot = await findAvailableSlot(client, city);
+      const slot = await findAvailableSlot(client, {
+        lat: matchPoint?.lat,
+        lng: matchPoint?.lng,
+        city: city || undefined,
+      });
       if (!slot) {
         await client.query('ROLLBACK');
         return;

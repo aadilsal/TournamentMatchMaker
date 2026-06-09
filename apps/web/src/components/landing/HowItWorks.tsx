@@ -6,7 +6,7 @@ const steps = [
   {
     icon: UserPlus,
     title: 'Create your fighter profile',
-    body: 'Set your skill tier, VR headset status, and city. One account for venues, bookings, and tournaments.',
+    body: 'Set your Meta Quest status, city, and location. One account for venues, bookings, and tournaments.',
   },
   {
     icon: Search,
@@ -16,7 +16,7 @@ const steps = [
   {
     icon: Swords,
     title: 'Queue & compete',
-    body: 'Join matchmaking when Phase 3 ships. Get paired, notified, and bracketed — headset or arena.',
+    body: 'Enter the queue and get randomly paired with your next opponent. Live notifications and tournament brackets — Meta Quest or arena.',
   },
 ];
 

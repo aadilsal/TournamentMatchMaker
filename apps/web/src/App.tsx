@@ -13,6 +13,7 @@ import { TournamentsPage } from '@/pages/TournamentsPage';
 import { TournamentDetailPage } from '@/pages/TournamentDetailPage';
 import { MatchmakingPage } from '@/pages/MatchmakingPage';
 import { MatchesPage } from '@/pages/MatchesPage';
+import { WelcomePage } from '@/pages/WelcomePage';
 
 function AppShell({ children }: { children: React.ReactNode }) {
   return <AppLayout>{children}</AppLayout>;
@@ -30,6 +31,7 @@ export function App() {
 
         <Route path="/login" element={<AppShell><LoginPage /></AppShell>} />
         <Route path="/register" element={<AppShell><RegisterPage /></AppShell>} />
+        <Route path="/welcome" element={<AppShell><WelcomePage /></AppShell>} />
         <Route path="/profile" element={<AppShell><ProfilePage /></AppShell>} />
         <Route path="/venues" element={<AppShell><VenuesPage /></AppShell>} />
         <Route path="/venues/:id" element={<AppShell><VenueDetailPage /></AppShell>} />
