@@ -1,0 +1,99 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: vrtournament
+      POSTGRES_PASSWORD: vrtournament
+      POSTGRES_DB: vrtournament
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vrtournament"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://vrtournament:vrtournament@postgres:5432/vrtournament
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-access-secret-change-in-production-32chars
+      JWT_REFRESH_SECRET: dev-refresh-secret-change-in-production-32chars
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      NODE_ENV: development
+      PORT: 3000
+      CORS_ORIGIN: http://localhost:5173
+    volumes:
+      - ./apps/api:/app/apps/api
+      - ./packages:/app/packages
+      - /app/node_modules
+      - /app/apps/api/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+      target: development
+    environment:
+      DATABASE_URL: postgresql://vrtournament:vrtournament@postgres:5432/vrtournament
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+      APP_URL: http://localhost:5173
+      NOTIFICATION_EMAIL_ENABLED: "true"
+    volumes:
+      - ./apps/worker:/app/apps/worker
+      - ./packages:/app/packages
+      - /app/node_modules
+      - /app/apps/worker/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: development
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:3000
+    volumes:
+      - ./apps/web:/app/apps/web
+      - ./packages:/app/packages
+      - /app/node_modules
+      - /app/apps/web/node_modules
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:

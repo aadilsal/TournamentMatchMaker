@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: vrtournament
+          POSTGRES_PASSWORD: vrtournament
+          POSTGRES_DB: vrtournament
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd "pg_isready -U vrtournament"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://vrtournament:vrtournament@localhost:15432/vrtournament
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm --filter @vr-tournament/shared build
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm --filter @vr-tournament/api test -- --testPathPattern=auth.service
+
+      - name: Run migrations
+        run: pnpm migrate:up
+
+      - name: Seed database
+        run: pnpm seed
+
+      - name: Integration tests
+        run: pnpm --filter @vr-tournament/api test:integration
+        timeout-minutes: 10
+
+      - name: Worker unit tests
+        run: pnpm --filter @vr-tournament/worker test
+
+      - name: Build API
+        run: pnpm --filter @vr-tournament/api build
+
+      - name: Build Web
+        run: pnpm --filter @vr-tournament/web build
+
+      - name: Build Worker
+        run: pnpm --filter @vr-tournament/worker build
+
+      - name: Verify Docker builds
+        run: |
+          docker build -f apps/api/Dockerfile --target build .
+          docker build -f apps/web/Dockerfile --target build .

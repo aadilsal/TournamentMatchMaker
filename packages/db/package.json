@@ -1,0 +1,27 @@
+{
+  "name": "@vr-tournament/db",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "migrate:up": "node --env-file=../../.env scripts/migrate-up.mjs",
+    "migrate:down": "node --env-file=../../.env ./node_modules/node-pg-migrate/bin/node-pg-migrate down --migrations-dir migrations --migration-file-language sql",
+    "migrate:baseline": "node --env-file=../../.env scripts/migrate-baseline.mjs",
+    "db:reset": "node --env-file=../../.env scripts/db-reset.mjs",
+    "seed": "tsx seeds/dev.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "dotenv": "^16.4.7",
+    "pg": "^8.14.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/pg": "^8.11.11",
+    "node-pg-migrate": "^7.9.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

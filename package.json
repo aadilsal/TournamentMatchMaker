@@ -1,0 +1,23 @@
+{
+  "name": "vr-tournament",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,web,worker -c blue,green,magenta \"pnpm --filter @vr-tournament/api dev\" \"pnpm --filter @vr-tournament/web dev\" \"pnpm --filter @vr-tournament/worker dev\"",
+    "dev:docker": "docker compose up -d postgres redis",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "migrate:up": "pnpm --filter @vr-tournament/db migrate:up",
+    "migrate:down": "pnpm --filter @vr-tournament/db migrate:down",
+    "migrate:baseline": "pnpm --filter @vr-tournament/db migrate:baseline",
+    "db:reset": "pnpm --filter @vr-tournament/db db:reset",
+    "seed": "pnpm --filter @vr-tournament/db seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

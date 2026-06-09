@@ -1,0 +1,121 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@theme {
+  --color-background: #0a0a0f;
+  --color-foreground: #f4f4f5;
+  --color-card: #14141f;
+  --color-card-foreground: #f4f4f5;
+  --color-primary: #7c3aed;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #1e1e2e;
+  --color-secondary-foreground: #a1a1aa;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-accent: #2e1065;
+  --color-accent-foreground: #e9d5ff;
+  --color-destructive: #ef4444;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-ring: #7c3aed;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: 'Inter Variable', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+html {
+  scroll-behavior: auto;
+}
+
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+[id] {
+  scroll-margin-top: 5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.landing-gradient-text {
+  background: linear-gradient(135deg, #e9d5ff 0%, #a78bfa 40%, #7c3aed 70%, #c4b5fd 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.landing-grid {
+  background-image:
+    linear-gradient(rgba(124, 58, 237, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, 0.06) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 50%, black 20%, transparent 70%);
+}
+
+.landing-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+.landing-orb-1 {
+  width: 600px;
+  height: 600px;
+  background: rgba(124, 58, 237, 0.25);
+  top: -200px;
+  left: -100px;
+}
+
+.landing-orb-2 {
+  width: 500px;
+  height: 500px;
+  background: rgba(99, 102, 241, 0.15);
+  bottom: -100px;
+  right: -100px;
+}
+
+.landing-orb-3 {
+  width: 400px;
+  height: 400px;
+  background: rgba(124, 58, 237, 0.2);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.landing-bento-card {
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(145deg, rgba(20, 20, 31, 0.9) 0%, rgba(10, 10, 15, 0.95) 100%);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.landing-bento-card:hover {
+  border-color: rgba(124, 58, 237, 0.35);
+  box-shadow: 0 0 40px rgba(124, 58, 237, 0.08);
+}
