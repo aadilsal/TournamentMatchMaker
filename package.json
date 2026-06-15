@@ -5,6 +5,7 @@
     "onlyBuiltDependencies": ["esbuild", "msgpackr-extract"]
   },
   "scripts": {
+    "predev": "pnpm --filter @vr-tournament/shared build",
     "dev": "concurrently -n api,web,worker -c blue,green,magenta \"pnpm --filter @vr-tournament/api dev\" \"pnpm --filter @vr-tournament/web dev\" \"pnpm --filter @vr-tournament/worker dev\"",
     "dev:docker": "docker compose up -d postgres redis",
     "build": "pnpm -r build",

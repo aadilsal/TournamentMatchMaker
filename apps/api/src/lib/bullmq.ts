@@ -1,11 +1,12 @@
 import { Queue } from 'bullmq';
+import { BULLMQ_NOTIFICATIONS_QUEUE } from '@vr-tournament/shared';
 import type { Env } from '../config/env.js';
 
 let notificationQueue: Queue | null = null;
 
 export function getNotificationQueue(env: Env): Queue {
   if (!notificationQueue) {
-    notificationQueue = new Queue('notifications:dispatch', {
+    notificationQueue = new Queue(BULLMQ_NOTIFICATIONS_QUEUE, {
       connection: { url: env.REDIS_URL },
       defaultJobOptions: {
         attempts: 3,

@@ -11,13 +11,14 @@ import { loadEnv } from './config/env.js';
 import { processPairPlayersJob } from './jobs/pair-players.job.js';
 import { processExpireMatchesJob } from './jobs/expire-matches.job.js';
 import { processDispatchNotificationJob } from './jobs/dispatch-notification.job.js';
+import { BULLMQ_MATCHMAKING_QUEUE, BULLMQ_NOTIFICATIONS_QUEUE } from '@vr-tournament/shared';
 
 const env = loadEnv();
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
 const redis = new Redis(env.REDIS_URL);
 const connection = { url: env.REDIS_URL };
 
-const notificationQueue = new Queue('notifications:dispatch', {
+const notificationQueue = new Queue(BULLMQ_NOTIFICATIONS_QUEUE, {
   connection,
   defaultJobOptions: {
     attempts: 3,
@@ -25,13 +26,13 @@ const notificationQueue = new Queue('notifications:dispatch', {
   },
 });
 
-const matchmakingQueue = new Queue('matchmaking:jobs', { connection });
+const matchmakingQueue = new Queue(BULLMQ_MATCHMAKING_QUEUE, { connection });
 
 await matchmakingQueue.add('pair-repeat', {}, { repeat: { every: 5000 }, jobId: 'matchmaking-pair-repeat' });
 await matchmakingQueue.add('expire-repeat', {}, { repeat: { every: 30000 }, jobId: 'matchmaking-expire-repeat' });
 
 const matchmakingWorker = new Worker(
-  'matchmaking:jobs',
+  BULLMQ_MATCHMAKING_QUEUE,
   async (job) => {
     if (job.name === 'pair-repeat') {
       await processPairPlayersJob(job, pool, redis, env, notificationQueue);
@@ -43,7 +44,7 @@ const matchmakingWorker = new Worker(
 );
 
 const notificationWorker = new Worker(
-  'notifications:dispatch',
+  BULLMQ_NOTIFICATIONS_QUEUE,
   async (job) => {
     if (job.name === 'dispatch') {
       await processDispatchNotificationJob(job, pool, redis, env);

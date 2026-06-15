@@ -8,4 +8,5 @@ export * from './schemas/matchmaking.js';
 export * from './schemas/match.js';
 export * from './schemas/notification.js';
 export * from './socket-events.js';
+export * from './queue-names.js';
 export * from './types.js';

@@ -17,11 +17,13 @@ import { createTournamentsRouter } from './modules/tournaments/tournaments.route
 import { createMatchmakingRouter } from './modules/matchmaking/matchmaking.routes.js';
 import { createMatchesRouter } from './modules/matches/matches.routes.js';
 import { createNotificationsRouter } from './modules/notifications/notifications.routes.js';
+import { createGeoRouter } from './modules/geo/geo.routes.js';
 import { sendSuccess } from './lib/response.js';
 
 export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   const app = express();
 
+  app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
   app.use(express.json());
@@ -35,6 +37,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   const v1 = express.Router();
   v1.use(publicRateLimit(env));
 
+  v1.use('/geo', createGeoRouter());
   v1.use('/auth', createAuthRouter(pool, redis, env));
   v1.use('/players', authRateLimit(env), createPlayersRouter(pool, env));
   v1.use('/venues', createVenuesRouter(pool, redis, env));

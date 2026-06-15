@@ -23,6 +23,7 @@ import {
 import { Check, Trophy, MapPin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
+import { CountryCityFields } from '@/components/location/CountryCityFields';
 
 /* ─────────────────────────────────────────────
    Animated cricket delivery banner
@@ -209,8 +210,8 @@ const initialForm = {
   password: '',
   confirmPassword: '',
   username: '',
-  country: 'Canada',
-  city: 'Toronto',
+  country: '',
+  city: '',
   hasVrHeadset: false,
   vrDeviceType: 'Meta Quest 3',
   latitude: undefined as number | undefined,
@@ -494,26 +495,17 @@ export function RegisterPage() {
               <legend className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
                 Location
               </legend>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="country">Country</Label>
-                  <Input
-                    id="country"
-                    autoComplete="country-name"
-                    value={form.country}
-                    onChange={(e) => update('country', e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="city">City</Label>
-                  <Input
-                    id="city"
-                    autoComplete="address-level2"
-                    value={form.city}
-                    onChange={(e) => update('city', e.target.value)}
-                  />
-                </div>
-              </div>
+              <CountryCityFields
+                country={form.country}
+                city={form.city}
+                onLocationDetected={(country, city) => {
+                  setForm((f) => ({ ...f, country, city }));
+                }}
+                onCountryChange={(country) => {
+                  setForm((f) => ({ ...f, country, city: '' }));
+                }}
+                onCityChange={(city) => update('city', city)}
+              />
             </fieldset>
 
             {/* Meta Quest / Oculus */}

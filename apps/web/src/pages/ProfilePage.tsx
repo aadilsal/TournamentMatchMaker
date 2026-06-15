@@ -6,6 +6,7 @@ import { apiGet, apiPatch, getAccessToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { PageLoader } from '@/components/ui/cricket-loader';
 import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2 } from 'lucide-react';
@@ -116,26 +117,16 @@ export function ProfilePage() {
             <MapPin className="h-3.5 w-3.5" />
             Location
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="country">Country</Label>
-              <Input
-                id="country"
-                autoComplete="country-name"
-                value={form.country}
-                onChange={(e) => setForm({ ...form, country: e.target.value })}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="city">City</Label>
-              <Input
-                id="city"
-                autoComplete="address-level2"
-                value={form.city}
-                onChange={(e) => setForm({ ...form, city: e.target.value })}
-              />
-            </div>
-          </div>
+          <CountryCityFields
+            country={form.country}
+            city={form.city}
+            autoDetectFromIp={!isLoading && !profile?.country && !profile?.city}
+            onLocationDetected={(country, city) => {
+              setForm((f) => ({ ...f, country, city }));
+            }}
+            onCountryChange={(country) => setForm((f) => ({ ...f, country, city: '' }))}
+            onCityChange={(city) => setForm((f) => ({ ...f, city }))}
+          />
         </section>
 
         {/* VR Setup */}
