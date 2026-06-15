@@ -33,12 +33,32 @@ api.interceptors.request.use((config) => {
 let isRefreshing = false;
 let refreshQueue: Array<(token: string | null) => void> = [];
 
+const AUTH_NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh'];
+
+function shouldAttemptTokenRefresh(url: string | undefined): boolean {
+  if (!url) return true;
+  return !AUTH_NO_REFRESH_PATHS.some((path) => url.includes(path));
+}
+
+function toApiError(err: unknown): Error {
+  if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
+    const payload = err.response.data as ApiResponse<unknown>;
+    if (payload.error?.message) return new Error(payload.error.message);
+  }
+  if (err instanceof Error) return err;
+  return new Error('Request failed');
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
 
-    if (error.response?.status === 401 && !original._retry) {
+    if (
+      error.response?.status === 401 &&
+      !original._retry &&
+      shouldAttemptTokenRefresh(original.url)
+    ) {
       if (isRefreshing) {
         return new Promise((resolve) => {
           refreshQueue.push((token) => {
@@ -84,25 +104,41 @@ api.interceptors.response.use(
 );
 
 export async function apiGet<T>(url: string) {
-  const { data } = await api.get<ApiResponse<T>>(url);
-  if (!data.success) throw new Error(data.error?.message || 'Request failed');
-  return data.data!;
+  try {
+    const { data } = await api.get<ApiResponse<T>>(url);
+    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    return data.data!;
+  } catch (err) {
+    throw toApiError(err);
+  }
 }
 
 export async function apiPost<T>(url: string, body?: unknown) {
-  const { data } = await api.post<ApiResponse<T>>(url, body);
-  if (!data.success) throw new Error(data.error?.message || 'Request failed');
-  return data.data!;
+  try {
+    const { data } = await api.post<ApiResponse<T>>(url, body);
+    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    return data.data!;
+  } catch (err) {
+    throw toApiError(err);
+  }
 }
 
 export async function apiPatch<T>(url: string, body?: unknown) {
-  const { data } = await api.patch<ApiResponse<T>>(url, body);
-  if (!data.success) throw new Error(data.error?.message || 'Request failed');
-  return data.data!;
+  try {
+    const { data } = await api.patch<ApiResponse<T>>(url, body);
+    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    return data.data!;
+  } catch (err) {
+    throw toApiError(err);
+  }
 }
 
 export async function apiDelete<T>(url: string) {
-  const { data } = await api.delete<ApiResponse<T>>(url);
-  if (!data.success) throw new Error(data.error?.message || 'Request failed');
-  return data.data!;
+  try {
+    const { data } = await api.delete<ApiResponse<T>>(url);
+    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    return data.data!;
+  } catch (err) {
+    throw toApiError(err);
+  }
 }

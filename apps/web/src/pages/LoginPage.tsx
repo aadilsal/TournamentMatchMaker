@@ -23,13 +23,22 @@ export function LoginPage() {
       setAccessToken(data.accessToken);
       navigate('/venues');
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => {
+      const message = err.message.toLowerCase().includes('invalid email or password')
+        ? 'Incorrect email or password. Please try again.'
+        : err.message || 'Unable to sign in. Please try again.';
+      setError(message);
+    },
   });
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     login.mutate({ email, password });
+  };
+
+  const clearError = () => {
+    if (error) setError('');
   };
 
   return (
@@ -152,7 +161,7 @@ export function LoginPage() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div className="space-y-1.5">
               <Label htmlFor="login-email">Email address</Label>
               <Input
@@ -162,7 +171,11 @@ export function LoginPage() {
                 autoComplete="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  clearError();
+                }}
+                aria-invalid={!!error}
                 required
               />
             </div>
@@ -173,7 +186,11 @@ export function LoginPage() {
                 autoComplete="current-password"
                 placeholder="Enter your password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  clearError();
+                }}
+                aria-invalid={!!error}
                 required
               />
             </div>
@@ -181,6 +198,7 @@ export function LoginPage() {
               <p
                 className="rounded-md border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/10 px-3 py-2 text-sm text-[var(--color-destructive)]"
                 role="alert"
+                aria-live="polite"
               >
                 {error}
               </p>
