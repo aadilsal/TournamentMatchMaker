@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { DeclineMatchInput } from '@vr-tournament/shared';
+import type { DeclineMatchInput, SubmitScoreInput } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
 import { mapMatch } from '../../lib/mappers.js';
@@ -195,6 +195,91 @@ export class MatchesService {
       }
 
       return mapMatch({ ...match, status: 'cancelled' });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async submitScore(matchId: string, userId: string, input: SubmitScoreInput) {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const matchResult = await client.query(
+        `SELECT * FROM matches WHERE id = $1 FOR UPDATE`,
+        [matchId]
+      );
+      const match = matchResult.rows[0];
+      if (!match) throw new AppError('NOT_FOUND', 'Match not found', 404);
+      if (match.player1_id !== userId && match.player2_id !== userId) {
+        throw new AppError('FORBIDDEN', 'Not a participant', 403);
+      }
+      if (!['confirmed', 'in_progress'].includes(match.status)) {
+        throw new AppError('CONFLICT', 'Match is not currently playable', 409);
+      }
+
+      const isPlayer1 = match.player1_id === userId;
+      const current = (match.result ?? { player1Score: null, player2Score: null, winnerId: null }) as {
+        player1Score: number | null;
+        player2Score: number | null;
+        winnerId: string | null;
+      };
+
+      if (isPlayer1 && current.player1Score !== null) {
+        throw new AppError('CONFLICT', 'You have already submitted your score', 409);
+      }
+      if (!isPlayer1 && current.player2Score !== null) {
+        throw new AppError('CONFLICT', 'You have already submitted your score', 409);
+      }
+
+      const updated = {
+        player1Score: isPlayer1 ? input.score : current.player1Score,
+        player2Score: isPlayer1 ? current.player2Score : input.score,
+        winnerId: null as string | null,
+      };
+
+      let newStatus = 'in_progress';
+
+      if (updated.player1Score !== null && updated.player2Score !== null) {
+        newStatus = 'completed';
+        if (updated.player1Score > updated.player2Score) {
+          updated.winnerId = match.player1_id;
+        } else if (updated.player2Score > updated.player1Score) {
+          updated.winnerId = match.player2_id;
+        }
+        // Tie: winnerId stays null
+      }
+
+      await client.query(
+        `UPDATE matches SET result = $1, status = $2, updated_at = NOW() WHERE id = $3`,
+        [JSON.stringify(updated), newStatus, matchId]
+      );
+
+      await client.query('COMMIT');
+
+      if (newStatus === 'completed' && this.env && updated.winnerId) {
+        const winnerId = updated.winnerId;
+        const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+        enqueueNotification(this.env, {
+          userId: winnerId,
+          type: 'match_won',
+          channels: ['in_app'],
+          payload: { matchId },
+          idempotencyKey: `match-won:${matchId}:${winnerId}`,
+        }).catch((err: unknown) => console.error('Failed to enqueue match_won notification:', err));
+        enqueueNotification(this.env, {
+          userId: loserId,
+          type: 'match_lost',
+          channels: ['in_app'],
+          payload: { matchId },
+          idempotencyKey: `match-lost:${matchId}:${loserId}`,
+        }).catch((err: unknown) => console.error('Failed to enqueue match_lost notification:', err));
+      }
+
+      return this.getById(matchId, userId);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

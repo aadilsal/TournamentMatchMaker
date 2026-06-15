@@ -20,6 +20,11 @@ export function errorHandler(
     );
   }
 
+  // Postgres unique constraint violation → user is already registered
+  if ((err as { code?: string }).code === '23505') {
+    return sendError(res, { code: 'CONFLICT', message: 'You are already registered for this tournament' }, 409);
+  }
+
   console.error('Unhandled error:', err);
   return sendError(res, { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }, 500);
 }

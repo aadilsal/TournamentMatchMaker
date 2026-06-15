@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowRight, Headset, MapPin, Swords } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Headset, MapPin, Target } from 'lucide-react';
+import { motion } from 'motion/react';
 
 interface WelcomeState {
   hasVrHeadset?: boolean;
@@ -52,41 +52,60 @@ export function WelcomePage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <Card className="border-[var(--color-primary)]/30">
-        <CardHeader>
-          <CardTitle className="text-2xl">You&apos;re in!</CardTitle>
-          <CardDescription>
-            Your profile is ready. Here&apos;s how to get to your first match.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <ol className="space-y-4">
-            <li className="flex gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-sm font-semibold text-emerald-400">
-                ✓
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-card)] overflow-hidden"
+      >
+        {/* Top accent */}
+        <div className="h-1.5 bg-gradient-to-r from-[var(--color-primary)] via-emerald-500 to-[var(--color-primary)]" />
+
+        <div className="p-6 sm:p-8">
+          {/* Hero row */}
+          <div className="flex items-start justify-between gap-6 mb-8">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">You&apos;re in!</h1>
+              <p className="text-[var(--color-muted-foreground)] mt-1">
+                Your profile is ready. Here&apos;s how to get to your first match.
+              </p>
+            </div>
+            <img
+              src="/images/cricket-player-3d.png"
+              alt="VR cricket player"
+              className="h-24 w-24 object-contain shrink-0 opacity-90"
+            />
+          </div>
+
+          <ol className="space-y-5">
+            {/* Step 1 */}
+            <li className="flex gap-4">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20">
+                <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400" />
               </span>
-              <div>
+              <div className="pt-0.5">
                 <p className="font-medium">Account created</p>
-                <p className="text-sm text-[var(--color-muted-foreground)]">
+                <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
                   You can update your profile anytime from settings.
                 </p>
               </div>
             </li>
 
-            {!hasVrHeadset && (
-              <li className="flex gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20 text-[var(--color-primary)]">
-                  <MapPin className="h-4 w-4" />
+            {/* Step 2 — venue or headset */}
+            {!hasVrHeadset ? (
+              <li className="flex gap-4">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20">
+                  <MapPin className="h-4 w-4 text-[var(--color-primary)]" />
                 </span>
-                <div className="flex-1 space-y-3">
+                <div className="flex-1 space-y-3 pt-0.5">
                   <div>
                     <p className="font-medium">Book a nearby arena</p>
-                    <p className="text-sm text-[var(--color-muted-foreground)]">
+                    <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
                       Without a Meta Quest headset, we match you at the closest shared VR venue.
                     </p>
                   </div>
                   {nearbyVenues.length > 0 && (
-                    <ul className="space-y-2 rounded-lg border border-[var(--color-border)] p-3">
+                    <ul className="space-y-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-muted)]/20 p-3">
                       {nearbyVenues.map((venue) => (
                         <li key={venue.id} className="text-sm">
                           <Link
@@ -96,8 +115,7 @@ export function WelcomePage() {
                             {venue.name}
                           </Link>
                           <span className="text-[var(--color-muted-foreground)]">
-                            {' '}
-                            — {venue.city}
+                            {' '}— {venue.city}
                             {venue.distanceM != null && ` (${(venue.distanceM / 1000).toFixed(1)} km)`}
                           </span>
                         </li>
@@ -106,46 +124,43 @@ export function WelcomePage() {
                   )}
                   <Link to={venueLink}>
                     <Button variant="outline" size="sm" className="gap-2">
-                      Browse venues
-                      <ArrowRight className="h-3.5 w-3.5" />
+                      Browse venues <ArrowRight className="h-3.5 w-3.5" />
                     </Button>
                   </Link>
                 </div>
               </li>
-            )}
-
-            {hasVrHeadset && (
-              <li className="flex gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20 text-[var(--color-primary)]">
-                  <Headset className="h-4 w-4" />
+            ) : (
+              <li className="flex gap-4">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20">
+                  <Headset className="h-4 w-4 text-[var(--color-primary)]" />
                 </span>
-                <div>
+                <div className="pt-0.5">
                   <p className="font-medium">Meta Quest ready</p>
-                  <p className="text-sm text-[var(--color-muted-foreground)]">
+                  <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
                     You can queue for remote matches — no venue booking required.
                   </p>
                 </div>
               </li>
             )}
 
-            <li className="flex gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20 text-[var(--color-primary)]">
-                <Swords className="h-4 w-4" />
+            {/* Step 3 */}
+            <li className="flex gap-4">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20">
+                <Target className="h-4 w-4 text-[var(--color-primary)]" />
               </span>
-              <div>
+              <div className="pt-0.5">
                 <p className="font-medium">Enter the queue</p>
-                <p className="text-sm text-[var(--color-muted-foreground)]">
-                  Tekken-style random matchmaking pairs you with the next available opponent.
+                <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
+                  Skill-tier matchmaking pairs you with the right opponent. Your first Super Over is one queue-join away.
                 </p>
               </div>
             </li>
           </ol>
 
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row gap-3 pt-6 mt-6 border-t border-[var(--color-border)]">
             <Link to="/matchmaking" className="flex-1">
               <Button className="w-full gap-2" size="lg">
-                Join matchmaking
-                <ArrowRight className="h-4 w-4" />
+                Join matchmaking <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link to="/tournaments" className="flex-1">
@@ -154,8 +169,8 @@ export function WelcomePage() {
               </Button>
             </Link>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </motion.div>
     </div>
   );
 }

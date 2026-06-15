@@ -1,11 +1,14 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Booking } from '@vr-tournament/shared';
 import { apiGet, apiDelete, getAccessToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge, bookingStatusBadge } from '@/components/ui/badge';
+import { ListSkeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
 import { Calendar, MapPin, Clock } from 'lucide-react';
+import { motion } from 'motion/react';
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString([], {
@@ -49,60 +52,95 @@ export function BookingsPage() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['bookings'] }),
   });
 
-  if (isLoading) return <p>Loading bookings...</p>;
-
   return (
-    <div className="max-w-2xl mx-auto">
-      <h1 className="text-3xl font-bold mb-2">My Bookings</h1>
-      <p className="text-[var(--color-muted-foreground)] mb-8">
-        Manage your venue reservations
-      </p>
+    <div className="max-w-xl mx-auto space-y-6">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+      >
+        <div className="flex items-center gap-2 mb-1">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/25">
+            <Calendar className="h-4.5 w-4.5 text-[var(--color-primary)]" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight">My Bookings</h1>
+        </div>
+        <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
+          Manage your VR arena reservations
+        </p>
+      </motion.div>
 
-      {bookings.length === 0 ? (
-        <Card>
-          <CardContent className="py-8 text-center text-[var(--color-muted-foreground)]">
-            No bookings yet. <a href="/venues" className="text-[var(--color-primary)] hover:underline">Browse venues</a>
-          </CardContent>
-        </Card>
+      {isLoading ? (
+        <ListSkeleton count={3} />
+      ) : bookings.length === 0 ? (
+        <EmptyState
+          image="/images/cricket-player-3d.png"
+          title="No bookings yet"
+          description="Reserve your slot at a VR cricket arena to step into the game."
+          action={{ label: 'Browse venues', href: '/venues' }}
+        />
       ) : (
         <div className="space-y-4">
-          {bookings.map((booking) => (
-            <Card key={booking.id}>
-              <CardHeader>
-                <CardTitle className="text-lg">{booking.venue?.name}</CardTitle>
-                <CardDescription className="flex items-center gap-1">
-                  <MapPin className="h-4 w-4" />
-                  {booking.venue?.city}, {booking.venue?.country}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="flex items-center justify-between">
-                <div className="space-y-1 text-sm">
-                  {booking.slot && (
-                    <p className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      {formatDateTime(booking.slot.startTime)} – {formatDateTime(booking.slot.endTime)}
+          {bookings.map((booking, i) => {
+            const { label, variant } = bookingStatusBadge(booking.status);
+            return (
+              <motion.div
+                key={booking.id}
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, delay: i * 0.06 }}
+                className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden"
+              >
+                <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">{booking.venue?.name}</h3>
+                    <p className="text-sm text-[var(--color-muted-foreground)] flex items-center gap-1 mt-0.5">
+                      <MapPin className="h-3.5 w-3.5" />
+                      {booking.venue?.city}, {booking.venue?.country}
                     </p>
-                  )}
-                  <p className="flex items-center gap-2 text-[var(--color-muted-foreground)]">
-                    <Calendar className="h-4 w-4" />
-                    Booked {formatDateTime(booking.createdAt)}
-                  </p>
-                  <span className="inline-block px-2 py-0.5 rounded text-xs bg-[var(--color-accent)] text-[var(--color-accent-foreground)]">
-                    {booking.status}
-                  </span>
+                  </div>
+                  <Badge variant={variant}>{label}</Badge>
                 </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={cancelBooking.isPending}
-                  onClick={() => cancelBooking.mutate(booking.id)}
-                >
-                  Cancel
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+
+                <div className="px-5 py-4 flex items-end justify-between gap-4">
+                  <div className="space-y-1.5 text-sm">
+                    {booking.slot && (
+                      <p className="flex items-center gap-2 text-[var(--color-foreground)]">
+                        <Clock className="h-3.5 w-3.5 text-[var(--color-muted-foreground)] shrink-0" />
+                        {formatDateTime(booking.slot.startTime)} – {formatDateTime(booking.slot.endTime)}
+                      </p>
+                    )}
+                    <p className="flex items-center gap-2 text-[var(--color-muted-foreground)]">
+                      <Calendar className="h-3.5 w-3.5 shrink-0" />
+                      Booked {formatDateTime(booking.createdAt)}
+                    </p>
+                  </div>
+                  {booking.status !== 'cancelled' && (
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={cancelBooking.isPending}
+                      onClick={() => cancelBooking.mutate(booking.id)}
+                    >
+                      Cancel
+                    </Button>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
+      )}
+
+      {bookings.length === 0 && !isLoading && (
+        <p className="text-center text-sm text-[var(--color-muted-foreground)]">
+          Or{' '}
+          <Link to="/matchmaking" className="text-[var(--color-primary)] hover:underline font-medium">
+            join the matchmaking queue
+          </Link>{' '}
+          to get a venue assigned automatically.
+        </p>
       )}
     </div>
   );

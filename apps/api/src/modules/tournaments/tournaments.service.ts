@@ -106,7 +106,7 @@ export class TournamentsService {
     );
 
     if (this.env) {
-      await enqueueNotification(this.env, {
+      enqueueNotification(this.env, {
         userId,
         type: 'tournament_registered',
         channels: ['in_app', 'email'],
@@ -116,23 +116,108 @@ export class TournamentsService {
           startDate: tournament.startDate,
         },
         idempotencyKey: `tournament-reg:${tournamentId}:${userId}`,
+      }).catch((err: unknown) => {
+        console.error('Failed to enqueue tournament registration notification:', err);
       });
     }
 
     return mapRegistration(result.rows[0]);
   }
 
-  async withdraw(tournamentId: string, userId: string) {
+  async getRegistration(tournamentId: string, userId: string) {
     const result = await this.pool.query(
-      `DELETE FROM tournament_registrations
-       WHERE tournament_id = $1 AND user_id = $2
-       RETURNING *`,
+      `SELECT * FROM tournament_registrations WHERE tournament_id = $1 AND user_id = $2`,
       [tournamentId, userId]
     );
-    if (!result.rows[0]) {
-      throw new AppError('NOT_FOUND', 'Registration not found', 404);
+    return result.rows[0] ? mapRegistration(result.rows[0]) : null;
+  }
+
+  async withdraw(tournamentId: string, userId: string) {
+    const client = await this.pool.connect();
+
+    interface MatchNotification {
+      userId: string;
+      type: string;
+      payload: Record<string, unknown>;
+      idempotencyKey: string;
     }
-    return mapRegistration(result.rows[0]);
+    const toNotify: MatchNotification[] = [];
+
+    try {
+      await client.query('BEGIN');
+
+      const regResult = await client.query(
+        `DELETE FROM tournament_registrations
+         WHERE tournament_id = $1 AND user_id = $2
+         RETURNING *`,
+        [tournamentId, userId]
+      );
+      if (!regResult.rows[0]) {
+        throw new AppError('NOT_FOUND', 'Registration not found', 404);
+      }
+
+      const activeMatches = await client.query(
+        `SELECT * FROM matches
+         WHERE tournament_id = $1
+           AND (player1_id = $2 OR player2_id = $2)
+           AND status IN ('pending_confirmation', 'confirmed', 'in_progress')`,
+        [tournamentId, userId]
+      );
+
+      for (const m of activeMatches.rows) {
+        const isP1: boolean = m.player1_id === userId;
+        const otherId: string = isP1 ? m.player2_id : m.player1_id;
+        const res = m.result as {
+          player1Score: number | null;
+          player2Score: number | null;
+        } | null;
+        const otherScore = isP1 ? res?.player2Score : res?.player1Score;
+        // Other player already batted when match is in_progress and their score is set
+        const otherBatted = m.status === 'in_progress' && otherScore != null;
+
+        if (otherBatted) {
+          // Award win to the player who already played their innings
+          await client.query(
+            `UPDATE matches SET status = 'completed', result = $1, updated_at = now() WHERE id = $2`,
+            [JSON.stringify({ ...res, winnerId: otherId }), m.id]
+          );
+          toNotify.push({
+            userId: otherId,
+            type: 'match_won',
+            payload: { matchId: m.id, reason: 'opponent_withdrew' },
+            idempotencyKey: `match-won:${m.id}:${otherId}`,
+          });
+        } else {
+          // Match not yet played — cancel and let the other player re-register
+          await client.query(
+            `UPDATE matches SET status = 'cancelled', updated_at = now() WHERE id = $1`,
+            [m.id]
+          );
+          toNotify.push({
+            userId: otherId,
+            type: 'match_cancelled_withdrawal',
+            payload: { matchId: m.id, tournamentId },
+            idempotencyKey: `match-cancelled-withdrawal:${m.id}:${otherId}`,
+          });
+        }
+      }
+
+      await client.query('COMMIT');
+
+      if (this.env) {
+        for (const n of toNotify) {
+          enqueueNotification(this.env, { ...n, channels: ['in_app', 'email'] })
+            .catch((err: unknown) => console.error('Failed to enqueue withdrawal notification:', err));
+        }
+      }
+
+      return mapRegistration(regResult.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async getBracket(tournamentId: string) {

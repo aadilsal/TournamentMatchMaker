@@ -2,9 +2,9 @@ import { motion, useInView } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 
 const stats = [
-  { value: 50, suffix: 'km', label: 'Venue search radius' },
-  { value: 10000, suffix: '+', label: 'Concurrent users target', format: (n: number) => `${Math.round(n / 1000)}k` },
-  { value: 500, suffix: '/s', label: 'Peak registrations' },
+  { value: 64, suffix: '', label: 'Season 1 bracket size' },
+  { value: 6, suffix: '', label: 'Balls per Super Over' },
+  { value: 50, suffix: 'km', label: 'VR venue search radius' },
   { value: 99, suffix: '%', label: 'Booking integrity' },
 ];
 

@@ -20,8 +20,176 @@ import {
   passwordStrengthLabel,
   passwordStrengthScore,
 } from '@/lib/password-strength';
-import { Check, Gamepad2, MapPin, X } from 'lucide-react';
+import { Check, Trophy, MapPin, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { motion } from 'motion/react';
+
+/* ─────────────────────────────────────────────
+   Animated cricket delivery banner
+   Side-view: ball arcs from bowler (left) → stumps (right)
+───────────────────────────────────────────── */
+const BANNER_STARS: [number, number, number][] = [
+  [30,18,0.6],[80,10,0.5],[130,22,0.7],[190,8,0.5],[240,20,0.6],
+  [290,12,0.5],[340,25,0.6],[395,14,0.7],[440,20,0.5],[490,10,0.6],
+  [55,40,0.4],[140,35,0.5],[225,42,0.4],[310,38,0.5],[390,42,0.4],
+];
+
+function CricketDeliveryBanner() {
+  return (
+    <div className="relative h-36 overflow-hidden bg-[#040c18]">
+      {/* Static SVG: sky, ground, pitch, stumps */}
+      <svg
+        className="absolute inset-0 w-full h-full"
+        viewBox="0 0 500 144"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden
+      >
+        <defs>
+          <linearGradient id="bsky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"  stopColor="#020810" />
+            <stop offset="70%" stopColor="#071228" />
+            <stop offset="100%" stopColor="#081a10" />
+          </linearGradient>
+          <linearGradient id="bground" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%"   stopColor="#0b220b" />
+            <stop offset="100%" stopColor="#071407" />
+          </linearGradient>
+          <linearGradient id="bpitch" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%"   stopColor="#7a6a44" />
+            <stop offset="100%" stopColor="#8c7c52" />
+          </linearGradient>
+          <radialGradient id="bfl1" cx="5%" cy="10%" r="45%">
+            <stop offset="0%"   stopColor="rgba(180,210,255,0.22)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          </radialGradient>
+          <radialGradient id="bfl2" cx="95%" cy="10%" r="45%">
+            <stop offset="0%"   stopColor="rgba(180,210,255,0.18)" />
+            <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+          </radialGradient>
+          <radialGradient id="bsg" cx="50%" cy="50%" r="50%">
+            <stop offset="0%"   stopColor="rgba(255,210,70,0.55)" />
+            <stop offset="100%" stopColor="rgba(255,170,30,0)" />
+          </radialGradient>
+        </defs>
+
+        {/* Background */}
+        <rect width="500" height="144" fill="url(#bsky)" />
+        <rect width="500" height="144" fill="url(#bfl1)" />
+        <rect width="500" height="144" fill="url(#bfl2)" />
+
+        {/* Stars */}
+        {BANNER_STARS.map(([x, y, o], i) => (
+          <circle key={i} cx={x} cy={y} r="0.9" fill="white" opacity={o} />
+        ))}
+
+        {/* Ground */}
+        <rect x="0" y="110" width="500" height="34" fill="url(#bground)" />
+
+        {/* Pitch strip (lighter surface from center-left to stumps) */}
+        <rect x="90" y="104" width="340" height="14" rx="1" fill="url(#bpitch)" opacity="0.88" />
+
+        {/* Crease line at stumps */}
+        <line x1="400" y1="104" x2="400" y2="118" stroke="rgba(255,255,255,0.55)" strokeWidth="1.5" />
+
+        {/* Stump glow (at right end) */}
+        <ellipse cx="418" cy="110" rx="28" ry="14" fill="url(#bsg)" />
+
+        {/* 3 stumps */}
+        <rect x="406" y="72"  width="4" height="42" rx="0.8" fill="#f0dea8" />
+        <rect x="416" y="72"  width="4" height="42" rx="0.8" fill="#f0dea8" />
+        <rect x="426" y="72"  width="4" height="42" rx="0.8" fill="#f0dea8" />
+        {/* Bails */}
+        <rect x="404" y="70"  width="9"  height="2.5" rx="1.2" fill="#f0dea8" />
+        <rect x="414" y="70"  width="9"  height="2.5" rx="1.2" fill="#f0dea8" />
+
+        {/* Bowler run-up marker (left) */}
+        <circle cx="28" cy="90" r="4" fill="rgba(120,100,60,0.5)" />
+        <circle cx="28" cy="90" r="2" fill="rgba(180,160,100,0.5)" />
+
+        {/* Floodlight poles */}
+        <rect x="6"   y="0" width="3" height="55" fill="rgba(140,160,200,0.15)" />
+        <rect x="490" y="0" width="3" height="55" fill="rgba(140,160,200,0.15)" />
+        <rect x="2"   y="0" width="14" height="5" rx="1" fill="rgba(200,220,255,0.22)" />
+        <rect x="487" y="0" width="14" height="5" rx="1" fill="rgba(200,220,255,0.22)" />
+      </svg>
+
+      {/* ── Animated cricket ball (side-view delivery arc) ── */}
+      {/* Arc: starts high-left (bowler hand), dips to pitch, rises to stumps */}
+      <motion.div
+        aria-hidden
+        className="absolute rounded-full pointer-events-none z-10"
+        style={{
+          width: 13,
+          height: 13,
+          background: 'radial-gradient(circle at 35% 28%, #ff5050 0%, #cc1111 45%, #6b0000 100%)',
+          boxShadow: '0 0 10px 3px rgba(255,50,50,0.7)',
+        }}
+        animate={{
+          left: ['5%',   '30%',  '54%',  '55%',  '82%'],
+          top:  ['55%',  '70%',  '80%',  '80%',  '46%'],
+          scale: [0.7,    0.9,    1.0,    1.0,    1.0],
+          opacity: [0,    1,      1,      1,      0],
+        }}
+        transition={{
+          duration: 1.9,
+          repeat: Infinity,
+          repeatDelay: 2.2,
+          ease: 'easeInOut',
+          times: [0, 0.35, 0.55, 0.62, 1],
+        }}
+      />
+
+      {/* ── Ball motion trail (faint streak) ── */}
+      <motion.div
+        aria-hidden
+        className="absolute rounded-full pointer-events-none z-10"
+        style={{
+          width: 24,
+          height: 5,
+          background: 'linear-gradient(to right, rgba(255,50,50,0), rgba(255,50,50,0.35))',
+          borderRadius: 99,
+        }}
+        animate={{
+          left: ['3%',   '28%',  '52%',  '80%'],
+          top:  ['58%',  '72%',  '81%',  '49%'],
+          rotate: [-10,  15,     -25,    -35],
+          opacity: [0,    0.6,    0.6,    0],
+        }}
+        transition={{
+          duration: 1.9,
+          repeat: Infinity,
+          repeatDelay: 2.2,
+          ease: 'easeInOut',
+          times: [0, 0.35, 0.6, 1],
+          delay: 0.04,
+        }}
+      />
+
+      {/* ── Stump glow pulse ── */}
+      <motion.div
+        aria-hidden
+        className="absolute pointer-events-none z-10 rounded-full"
+        style={{
+          width: 60,
+          height: 30,
+          right: '14%',
+          top: '68%',
+          background: 'radial-gradient(ellipse, rgba(255,200,60,0.5) 0%, rgba(255,160,20,0) 100%)',
+          filter: 'blur(3px)',
+        }}
+        animate={{ opacity: [0.4, 0.9, 0.4] }}
+        transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+      />
+
+      {/* Season label */}
+      <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none z-20">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
+          VR Cricket League · Season 1 · Canada
+        </span>
+      </div>
+    </div>
+  );
+}
 
 type FieldErrors = Partial<Record<keyof RegisterFormInput | 'form', string>>;
 
@@ -41,8 +209,8 @@ const initialForm = {
   password: '',
   confirmPassword: '',
   username: '',
-  country: 'Pakistan',
-  city: 'Lahore',
+  country: 'Canada',
+  city: 'Toronto',
   hasVrHeadset: false,
   vrDeviceType: 'Meta Quest 3',
   latitude: undefined as number | undefined,
@@ -169,11 +337,12 @@ export function RegisterPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Card className="border-[var(--color-border)] shadow-lg shadow-purple-950/20">
+      <Card className="border-[var(--color-border)] shadow-lg shadow-purple-950/20 overflow-hidden">
+        <CricketDeliveryBanner />
         <CardHeader className="space-y-1">
           <div className="flex items-center gap-2 text-[var(--color-primary)]">
-            <Gamepad2 className="h-5 w-5" />
-            <span className="text-xs font-semibold uppercase tracking-wider">Join the arena</span>
+            <Trophy className="h-5 w-5" />
+            <span className="text-xs font-semibold uppercase tracking-wider">Step up to the crease</span>
           </div>
           <CardTitle className="text-2xl">Create your account</CardTitle>
           <CardDescription>

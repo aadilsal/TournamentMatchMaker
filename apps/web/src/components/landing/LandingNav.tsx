@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Gamepad2 } from 'lucide-react';
+import { Trophy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const links = [
-  { href: '#story', label: 'Story' },
+  { href: '#story', label: 'The Game' },
   { href: '#features', label: 'Features' },
-  { href: '#how-it-works', label: 'How it works' },
+  { href: '#how-it-works', label: 'How to play' },
 ];
 
 function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
@@ -42,9 +42,9 @@ export function LandingNav() {
       <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 font-semibold text-lg tracking-tight">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/30">
-            <Gamepad2 className="h-5 w-5 text-[var(--color-primary)]" />
+            <Trophy className="h-5 w-5 text-[var(--color-primary)]" />
           </span>
-          <span>VR Tournament</span>
+          <span>VR Cricket League</span>
         </Link>
 
         <nav className="hidden md:flex items-center gap-8">

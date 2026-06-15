@@ -1,6 +1,7 @@
 import type {
   Booking,
   Match,
+  MatchResult,
   MatchStatus,
   Notification,
   NotificationChannel,
@@ -152,7 +153,7 @@ interface MatchRow {
   venue_id: string | null;
   time_slot_id: string | null;
   status: string;
-  result: Record<string, unknown> | null;
+  result: MatchResult | null;
   scheduled_at: Date | null;
   created_at: Date;
   updated_at: Date;

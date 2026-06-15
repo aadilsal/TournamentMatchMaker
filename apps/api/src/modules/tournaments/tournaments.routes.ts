@@ -33,6 +33,15 @@ export function createTournamentsRouter(pool: Pool, env: Env): Router {
     }
   });
 
+  router.get('/:id/registration', authenticate(env), async (req, res, next) => {
+    try {
+      const registration = await service.getRegistration(req.params.id as string, req.user!.sub);
+      sendSuccess(res, registration);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/:id/bracket', async (req, res, next) => {
     try {
       const bracket = await service.getBracket(req.params.id as string);

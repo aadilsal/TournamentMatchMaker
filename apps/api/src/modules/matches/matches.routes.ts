@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { declineMatchSchema } from '@vr-tournament/shared';
+import { declineMatchSchema, submitScoreSchema } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
 import type { RedisClient } from '../../lib/redis.js';
@@ -46,6 +46,20 @@ export function createMatchesRouter(pool: Pool, redis: RedisClient, env: Env): R
     async (req, res, next) => {
       try {
         const match = await service.decline(req.params.id as string, req.user!.sub, req.body);
+        sendSuccess(res, match);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
+    '/:id/score',
+    authenticate(env),
+    validate(submitScoreSchema),
+    async (req, res, next) => {
+      try {
+        const match = await service.submitScore(req.params.id as string, req.user!.sub, req.body);
         sendSuccess(res, match);
       } catch (err) {
         next(err);

@@ -117,6 +117,12 @@ export interface TournamentRegistration {
   registeredAt: string;
 }
 
+export interface MatchResult {
+  player1Score: number | null;
+  player2Score: number | null;
+  winnerId: string | null;
+}
+
 export interface Match {
   id: string;
   tournamentId: string | null;
@@ -125,7 +131,7 @@ export interface Match {
   venueId: string | null;
   timeSlotId: string | null;
   status: MatchStatus;
-  result: Record<string, unknown> | null;
+  result: MatchResult | null;
   scheduledAt: string | null;
   createdAt: string;
   updatedAt: string;

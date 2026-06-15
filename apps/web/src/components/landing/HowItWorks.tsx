@@ -1,22 +1,22 @@
 import { useRef } from 'react';
 import { motion, useScroll, useTransform } from 'motion/react';
-import { UserPlus, Search, Swords } from 'lucide-react';
+import { UserPlus, MapPin, Trophy } from 'lucide-react';
 
 const steps = [
   {
     icon: UserPlus,
-    title: 'Create your fighter profile',
-    body: 'Set your Meta Quest status, city, and location. One account for venues, bookings, and tournaments.',
+    title: 'Build your player profile',
+    body: 'Set your batting style, city, skill tier and VR headset status. One account covers venues, bookings and all tournament formats.',
   },
   {
-    icon: Search,
-    title: 'Find & book a venue',
-    body: 'Search by proximity or city. Pick an open slot and confirm — your seat is locked in under a second.',
+    icon: MapPin,
+    title: 'Book a VR cricket venue',
+    body: 'No headset? Find a certified VR arena near you. Pick an open slot and confirm — your crease is locked in under a second.',
   },
   {
-    icon: Swords,
-    title: 'Queue & compete',
-    body: 'Enter the queue and get randomly paired with your next opponent. Live notifications and tournament brackets — Meta Quest or arena.',
+    icon: Trophy,
+    title: 'Step up to the crease',
+    body: 'Enter the tournament queue and get paired by skill tier. First over starts the moment your match is confirmed — live updates all the way.',
   },
 ];
 
@@ -30,7 +30,7 @@ export function HowItWorks() {
       <div className="max-w-7xl mx-auto px-6">
         <div className="text-center mb-20">
           <p className="text-sm font-medium text-[var(--color-primary)] uppercase tracking-widest">How it works</p>
-          <h2 className="mt-4 text-4xl sm:text-5xl font-bold tracking-tight">Three steps to your first match</h2>
+          <h2 className="mt-4 text-4xl sm:text-5xl font-bold tracking-tight">Three steps to your first over</h2>
         </div>
 
         <div className="relative max-w-3xl mx-auto">

@@ -18,16 +18,16 @@ export function CTASection() {
           <div className="landing-grid absolute inset-0 opacity-30" aria-hidden />
           <div className="relative z-10">
             <h2 className="text-4xl sm:text-5xl font-bold tracking-tight max-w-2xl mx-auto">
-              Ready to enter the queue?
+              Canada's first VR cricket tournament — Season 1 is open.
             </h2>
             <p className="mt-6 text-lg text-[var(--color-muted-foreground)] max-w-xl mx-auto">
-              Join players across Lahore, Karachi, and beyond. Create your profile,
-              book your first slot, and enter the matchmaking queue.
+              Register before spots fill. Whether you play at home on Meta Quest or at a
+              VR arena near you across Canada — a place in the Season 1 bracket is waiting.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link to="/register">
                 <Button size="lg" className="h-12 px-10 text-base gap-2">
-                  Start free
+                  Register for Season 1
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
