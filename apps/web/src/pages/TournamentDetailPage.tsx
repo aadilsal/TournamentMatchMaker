@@ -1,14 +1,24 @@
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useParams } from 'react-router-dom';
-import type { Tournament, TournamentBracket, TournamentRegistration } from '@vr-tournament/shared';
+import { Link, useParams } from 'react-router-dom';
+import type {
+  Tournament,
+  TournamentBracket,
+  TournamentParticipant,
+  TournamentRegistration,
+} from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPost } from '@/lib/api';
 import { Button } from '@/components/ui/button';
-import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs } from '@/components/ui/tabs';
+import { NormalMatchList } from '@/components/tournament/NormalMatchList';
+import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
+import { BuybackButton } from '@/components/tournament/BuybackButton';
 
 export function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<string>('normal');
 
   const { data: tournament, isLoading } = useQuery({
     queryKey: ['tournament', id],
@@ -26,6 +36,12 @@ export function TournamentDetailPage() {
     queryKey: ['tournament-registration', id],
     queryFn: () => apiGet<TournamentRegistration | null>(`/tournaments/${id}/registration`).catch(() => null),
     enabled: !!id,
+  });
+
+  const { data: myParticipant } = useQuery({
+    queryKey: ['tournament-participant', id],
+    queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`).catch(() => null),
+    enabled: !!id && !!myRegistration,
   });
 
   const registerMutation = useMutation({
@@ -48,59 +64,86 @@ export function TournamentDetailPage() {
 
   if (isLoading || !tournament) return <p>Loading...</p>;
 
+  const normalRounds = bracket?.rounds.filter((r) => r.phase !== 'knockout' && (r.round ?? 0) < 100) ?? [];
+  const koRounds = bracket?.rounds.filter((r) => r.phase === 'knockout' || (r.round ?? 0) >= 100) ?? [];
+
+  const tabs = [
+    ...normalRounds.map((r) => ({
+      id: `normal-${r.round}`,
+      label: r.label ?? `Round ${r.round}`,
+    })),
+    ...(koRounds.length > 0 ? [{ id: 'knockout', label: 'Knockout' }] : []),
+  ];
+
+  const defaultTab = tabs[0]?.id ?? 'normal';
+  const currentTab = tabs.some((t) => t.id === activeTab) ? activeTab : defaultTab;
+
+  const activeNormalRound = normalRounds.find((r) => `normal-${r.round}` === currentTab);
+  const showKnockout = currentTab === 'knockout';
+
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6">
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          {tournament.game} · {tournament.format.replace(/_/g, ' ')}
+          {tournament.game} · Tier {tournament.skillTier} · {tournament.phase} phase
         </p>
         <p className="text-sm mt-2">
           {new Date(tournament.startDate).toLocaleString()} — {new Date(tournament.endDate).toLocaleString()}
         </p>
         <p className="text-sm">
           {tournament.registrationCount ?? 0}
-          {tournament.maxPlayers ? ` / ${tournament.maxPlayers}` : ''} players registered
+          {tournament.maxPlayers ? ` / ${tournament.maxPlayers}` : ''} players · Round{' '}
+          {tournament.currentRoundNumber}
         </p>
       </div>
 
-      {tournament.status === 'open' && (
-        <div className="flex gap-2">
-          {myRegistration ? (
-            <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
-              {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
-            </Button>
-          ) : (
-            <Button onClick={() => registerMutation.mutate()} disabled={registerMutation.isPending}>
-              {registerMutation.isPending ? 'Registering…' : 'Register'}
-            </Button>
-          )}
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {tournament.status === 'open' && (
+          <>
+            {myRegistration ? (
+              <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
+                {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
+              </Button>
+            ) : (
+              <Button onClick={() => registerMutation.mutate()} disabled={registerMutation.isPending}>
+                {registerMutation.isPending ? 'Registering…' : 'Register'}
+              </Button>
+            )}
+          </>
+        )}
+        {myRegistration && (
+          <Link to="/play">
+            <Button variant="secondary">Go to queue</Button>
+          </Link>
+        )}
+        {myParticipant?.status === 'eliminated' && tournament.phase === 'normal' && (
+          <BuybackButton tournamentId={tournament.id} tournament={tournament} />
+        )}
+      </div>
 
-      {bracket && (
+      {bracket && tabs.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Bracket (Round 1)</CardTitle>
+            <CardTitle>Matches</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {bracket.rounds[0]?.matches.map((m, i) => {
-              const badge = m.status ? matchStatusBadge(m.status) : null;
-              return (
-                <div key={i} className="flex items-center gap-3 text-sm border-b border-[var(--color-border)] pb-2">
-                  <span className="flex-1 truncate">{m.player1?.username ?? 'TBD'}</span>
-                  <div className="shrink-0">
-                    {badge
-                      ? <Badge variant={badge.variant}>{badge.label}</Badge>
-                      : <span className="text-[var(--color-muted-foreground)]">vs</span>
-                    }
-                  </div>
-                  <span className="flex-1 truncate text-right">{m.player2?.username ?? 'BYE'}</span>
-                </div>
-              );
-            })}
+          <CardContent className="space-y-4">
+            <Tabs tabs={tabs} active={currentTab} onChange={setActiveTab} />
+            {showKnockout ? (
+              <KnockoutBracket rounds={koRounds} />
+            ) : activeNormalRound ? (
+              <NormalMatchList matches={activeNormalRound.matches} />
+            ) : (
+              <NormalMatchList matches={[]} />
+            )}
           </CardContent>
         </Card>
+      )}
+
+      {tournament.phase === 'knockout' && (
+        <p className="text-xs text-[var(--color-muted-foreground)]">
+          Knockout phase — losses are final, no buybacks.
+        </p>
       )}
     </div>
   );

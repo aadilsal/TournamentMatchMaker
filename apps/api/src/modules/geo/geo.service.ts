@@ -1,13 +1,11 @@
+import {
+  getCitiesForCountry,
+  SUPPORTED_COUNTRIES,
+  ALL_VENUE_CITIES,
+  normalizeCity,
+} from '@vr-tournament/shared';
 import { AppError } from '../../lib/response.js';
 import { isPrivateOrLoopback } from '../../lib/client-ip.js';
-
-const COUNTRIES_NOW_BASE = 'https://countriesnow.space/api/v0.1';
-
-interface CountriesNowResponse<T> {
-  error: boolean;
-  msg: string;
-  data: T;
-}
 
 export interface GeoLocation {
   country: string;
@@ -19,6 +17,10 @@ export interface CountryOption {
   iso2: string;
 }
 
+const COUNTRY_ISO: Record<string, string> = {
+  Pakistan: 'PK',
+};
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) throw new Error(`Request failed (${res.status}): ${url}`);
@@ -27,6 +29,20 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 function lookupIp(ip: string | undefined): string | undefined {
   return ip && !isPrivateOrLoopback(ip) ? ip : undefined;
+}
+
+function snapToSupported(location: GeoLocation): GeoLocation {
+  const country = SUPPORTED_COUNTRIES.find(
+    (c) => c.toLowerCase() === location.country.toLowerCase()
+  );
+  if (!country) return location;
+
+  const cities = getCitiesForCountry(country);
+  const cityMatch = cities.find((c) => normalizeCity(c) === normalizeCity(location.city));
+  return {
+    country,
+    city: cityMatch ?? location.city,
+  };
 }
 
 async function tryIpWho(ip: string | undefined): Promise<GeoLocation | null> {
@@ -59,7 +75,7 @@ export class GeoService {
     for (const provider of providers) {
       try {
         const location = await provider(clientIp);
-        if (location) return location;
+        if (location) return snapToSupported(location);
       } catch {
         // Try the next provider.
       }
@@ -68,29 +84,21 @@ export class GeoService {
   }
 
   async listCountries(): Promise<CountryOption[]> {
-    const json = await fetchJson<CountriesNowResponse<{ name: string; Iso2: string }[]>>(
-      `${COUNTRIES_NOW_BASE}/countries/iso`
-    );
-    if (json.error) {
-      throw new AppError('GEO_COUNTRIES_FAILED', json.msg || 'Failed to load countries', 503);
-    }
-    return json.data
-      .map((country) => ({ name: country.name, iso2: country.Iso2 }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    return SUPPORTED_COUNTRIES.map((name) => ({
+      name,
+      iso2: COUNTRY_ISO[name] ?? name.slice(0, 2).toUpperCase(),
+    }));
   }
 
   async listCitiesByCountry(country: string): Promise<string[]> {
-    const json = await fetchJson<CountriesNowResponse<string[]>>(
-      `${COUNTRIES_NOW_BASE}/countries/cities`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ country }),
-      }
-    );
-    if (json.error) {
-      throw new AppError('GEO_CITIES_FAILED', json.msg || 'Failed to load cities', 503);
+    const cities = getCitiesForCountry(country);
+    if (cities.length === 0) {
+      throw new AppError('GEO_CITIES_FAILED', 'Country not supported for venues', 404);
     }
-    return json.data.sort((a, b) => a.localeCompare(b));
+    return cities;
+  }
+
+  listVenueCities(): string[] {
+    return ALL_VENUE_CITIES;
   }
 }

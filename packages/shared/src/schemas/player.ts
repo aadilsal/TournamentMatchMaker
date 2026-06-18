@@ -9,4 +9,10 @@ export const updatePlayerSchema = z.object({
   skillTier: z.number().int().min(1).max(5).optional(),
 });
 
+export const uploadAvatarSchema = z.object({
+  data: z.string().min(1).max(3_000_000),
+  mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+});
+
 export type UpdatePlayerInput = z.infer<typeof updatePlayerSchema>;
+export type UploadAvatarInput = z.infer<typeof uploadAvatarSchema>;

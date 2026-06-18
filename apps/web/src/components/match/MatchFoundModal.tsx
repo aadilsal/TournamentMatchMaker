@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { MatchFoundEvent } from '@vr-tournament/shared';
 import { apiPost } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Link } from 'react-router-dom';
 import { MapPin, X } from 'lucide-react';
 
 interface MatchFoundModalProps {
@@ -39,7 +40,11 @@ export function MatchFoundModal({ match, onClose }: MatchFoundModalProps) {
         </div>
 
         <p className="mb-2">
-          Opponent: <strong>{match.opponent.username}</strong> (Tier {match.opponent.skillTier})
+          Opponent:{' '}
+          <Link to={`/players/${match.opponent.username}`} className="font-semibold hover:underline">
+            {match.opponent.username}
+          </Link>{' '}
+          (Tier {match.opponent.skillTier})
         </p>
 
         {match.venue ? (

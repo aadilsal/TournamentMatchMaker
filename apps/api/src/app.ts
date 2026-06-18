@@ -43,7 +43,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   v1.use('/venues', createVenuesRouter(pool, redis, env));
   v1.use('/venues/:id/slots', createSlotsRouter(pool, env));
   v1.use('/bookings', authRateLimit(env), createBookingsRouter(pool, redis, env));
-  v1.use('/tournaments', createTournamentsRouter(pool, env));
+  v1.use('/tournaments', createTournamentsRouter(pool, redis, env));
   v1.use('/matchmaking', authRateLimit(env), createMatchmakingRouter(pool, redis, env));
   v1.use('/matches', authRateLimit(env), createMatchesRouter(pool, redis, env));
   v1.use('/notifications', authRateLimit(env), createNotificationsRouter(pool, env));

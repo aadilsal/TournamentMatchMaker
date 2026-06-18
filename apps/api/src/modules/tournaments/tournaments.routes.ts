@@ -1,19 +1,22 @@
 import { Router } from 'express';
 import {
+  buybackSchema,
   createTournamentSchema,
   registerTournamentSchema,
   tournamentListQuerySchema,
+  tournamentMatchesQuerySchema,
 } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
+import type { RedisClient } from '../../lib/redis.js';
 import { authenticate, requireRole } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { TournamentsService } from './tournaments.service.js';
 
-export function createTournamentsRouter(pool: Pool, env: Env): Router {
+export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
-  const service = new TournamentsService(pool, env);
+  const service = new TournamentsService(pool, redis, env);
 
   router.get('/', validate(tournamentListQuerySchema, 'query'), async (req, res, next) => {
     try {
@@ -37,6 +40,42 @@ export function createTournamentsRouter(pool: Pool, env: Env): Router {
     try {
       const registration = await service.getRegistration(req.params.id as string, req.user!.sub);
       sendSuccess(res, registration);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/participant', authenticate(env), async (req, res, next) => {
+    try {
+      const participant = await service.getParticipant(req.params.id as string, req.user!.sub);
+      sendSuccess(res, participant);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/rounds', async (req, res, next) => {
+    try {
+      const rounds = await service.getRounds(req.params.id as string);
+      sendSuccess(res, rounds);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/participants', async (req, res, next) => {
+    try {
+      const participants = await service.getParticipants(req.params.id as string);
+      sendSuccess(res, participants);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/matches', validate(tournamentMatchesQuerySchema, 'query'), async (req, res, next) => {
+    try {
+      const matches = await service.getMatches(req.params.id as string, req.query as never);
+      sendSuccess(res, matches);
     } catch (err) {
       next(err);
     }
@@ -74,6 +113,20 @@ export function createTournamentsRouter(pool: Pool, env: Env): Router {
       try {
         const registration = await service.register(req.params.id as string, req.user!.sub, req.body);
         sendSuccess(res, registration, undefined, 201);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
+    '/:id/buyback',
+    authenticate(env),
+    validate(buybackSchema),
+    async (req, res, next) => {
+      try {
+        const buyback = await service.buyback(req.params.id as string, req.user!.sub, req.body);
+        sendSuccess(res, buyback, undefined, 201);
       } catch (err) {
         next(err);
       }

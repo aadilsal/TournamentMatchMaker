@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Match, MatchResult, User } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
@@ -108,11 +109,15 @@ export function MatchesPage() {
                     {/* VS header */}
                     <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <span className="font-semibold truncate">{match.player1?.username ?? '—'}</span>
+                        <Link to={`/players/${match.player1?.username}`} className="font-semibold truncate hover:underline">
+                          {match.player1?.username ?? '—'}
+                        </Link>
                         <span className="flex items-center justify-center h-6 w-6 rounded-full bg-[var(--color-primary)]/15 shrink-0">
                           <Swords className="h-3 w-3 text-[var(--color-primary)]" />
                         </span>
-                        <span className="font-semibold truncate">{match.player2?.username ?? '—'}</span>
+                        <Link to={`/players/${match.player2?.username}`} className="font-semibold truncate hover:underline">
+                          {match.player2?.username ?? '—'}
+                        </Link>
                       </div>
                       <Badge variant={variant}>{label}</Badge>
                     </div>

@@ -162,30 +162,56 @@ async function seed() {
     );
     if (existingTournament.rows[0]) {
       tournamentId = existingTournament.rows[0].id;
+      await client.query(
+        `UPDATE tournaments SET skill_tier = 3, buyback_price_cents = 500, phase = 'normal', current_round_number = 1
+         WHERE id = $1`,
+        [tournamentId]
+      );
     } else {
       const tournamentResult = await client.query(
-        `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players, skill_tier, buyback_price_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING id`,
         [
           'Lahore VR Championship',
-          'Tekken VR',
+          'VR Cricket',
           'single_elimination',
           startDate.toISOString(),
           endDate.toISOString(),
           'open',
-          32,
+          64,
+          3,
+          500,
         ]
       );
       tournamentId = tournamentResult.rows[0]?.id;
     }
 
-    if (tournamentId && playerResult.rows[0]?.id) {
+    if (tournamentId) {
+      const roundStart = new Date();
+      const roundEnd = new Date(roundStart);
+      roundEnd.setDate(roundEnd.getDate() + 3);
+      await client.query(
+        `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
+         VALUES ($1, 1, $2, $3, 'active')
+         ON CONFLICT (tournament_id, round_number) DO NOTHING`,
+        [tournamentId, roundStart.toISOString(), roundEnd.toISOString()]
+      );
+    }
+
+    for (const pid of [playerResult.rows[0]?.id, player2Result.rows[0]?.id, player3Result.rows[0]?.id]) {
+      if (!tournamentId || !pid) continue;
       await client.query(
         `INSERT INTO tournament_registrations (tournament_id, user_id)
          VALUES ($1, $2)
          ON CONFLICT (tournament_id, user_id) DO NOTHING`,
-        [tournamentId, playerResult.rows[0].id]
+        [tournamentId, pid]
+      );
+      await client.query(
+        `INSERT INTO tournament_participants (tournament_id, user_id, status, round_number)
+         VALUES ($1, $2, 'active', 1)
+         ON CONFLICT (tournament_id, user_id) DO NOTHING`,
+        [tournamentId, pid]
       );
     }
 
@@ -199,19 +225,35 @@ async function seed() {
       ['Karachi Open VR']
     );
     if (!existingKarachi.rows[0]) {
-      await client.query(
-        `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      const t2Start = startDate2;
+      const t2End = endDate2;
+      const t2Result = await client.query(
+        `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players, skill_tier, buyback_price_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id`,
         [
           'Karachi Open VR',
-          'Tekken VR',
-          'round_robin',
-          startDate2.toISOString(),
-          endDate2.toISOString(),
+          'VR Cricket',
+          'single_elimination',
+          t2Start.toISOString(),
+          t2End.toISOString(),
           'open',
-          16,
+          64,
+          3,
+          500,
         ]
       );
+      const t2Id = t2Result.rows[0]?.id;
+      if (t2Id) {
+        const rs = new Date();
+        const re = new Date(rs);
+        re.setDate(re.getDate() + 3);
+        await client.query(
+          `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
+           VALUES ($1, 1, $2, $3, 'active')`,
+          [t2Id, rs.toISOString(), re.toISOString()]
+        );
+      }
     }
 
     await client.query('COMMIT');

@@ -9,8 +9,12 @@ import { Select } from '@/components/ui/select';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { PageLoader } from '@/components/ui/cricket-loader';
-import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2 } from 'lucide-react';
+import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode } from 'lucide-react';
 import { motion } from 'motion/react';
+import { PlayerQRCode } from '@/components/qr/PlayerQRCode';
+import { Link } from 'react-router-dom';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 const VR_DEVICES = [
   'Meta Quest 3',
@@ -66,6 +70,31 @@ export function ProfilePage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
   });
 
+  const uploadAvatar = useMutation({
+    mutationFn: (file: File) => {
+      return new Promise<User>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          try {
+            const base64 = (reader.result as string).split(',')[1];
+            const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp';
+            const result = await apiPatch<User>('/players/me/avatar', { data: base64, mimeType });
+            resolve(result);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
+  });
+
+  const avatarUrl = profile?.hasProfilePicture && profile.username
+    ? `${API_URL}/api/v1/players/${profile.username}/avatar`
+    : null;
+
   if (isLoading) return <PageLoader label="Loading profile…" />;
 
   return (
@@ -100,6 +129,27 @@ export function ProfilePage() {
             <UserIcon className="h-3.5 w-3.5" />
             Identity
           </div>
+          <div className="flex items-center gap-4">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover border-2 border-[var(--color-primary)]/30" />
+            ) : (
+              <div className="h-16 w-16 rounded-full bg-[var(--color-primary)]/15 flex items-center justify-center text-xl font-bold text-[var(--color-primary)]">
+                {form.username.charAt(0).toUpperCase() || '?'}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="avatar">Profile photo</Label>
+              <Input
+                id="avatar"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadAvatar.mutate(file);
+                }}
+              />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="username">Username</Label>
             <Input
@@ -109,6 +159,9 @@ export function ProfilePage() {
               placeholder="player_01"
             />
           </div>
+          <Link to={`/players/${form.username}`} className="text-sm text-[var(--color-primary)] hover:underline">
+            View public profile
+          </Link>
         </section>
 
         {/* Location */}
@@ -200,6 +253,20 @@ export function ProfilePage() {
           {update.isPending ? 'Saving…' : 'Save profile'}
         </Button>
       </motion.form>
+
+      {profile && (
+        <section className="space-y-3">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+            <QrCode className="h-3.5 w-3.5" />
+            Venue QR card
+          </div>
+          <PlayerQRCode
+            userId={profile.id}
+            username={profile.username}
+            avatarUrl={avatarUrl}
+          />
+        </section>
+      )}
     </div>
   );
 }

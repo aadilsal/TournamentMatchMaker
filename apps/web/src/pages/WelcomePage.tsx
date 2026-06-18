@@ -158,9 +158,9 @@ export function WelcomePage() {
           </ol>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-6 mt-6 border-t border-[var(--color-border)]">
-            <Link to="/matchmaking" className="flex-1">
+            <Link to="/play" className="flex-1">
               <Button className="w-full gap-2" size="lg">
-                Join matchmaking <ArrowRight className="h-4 w-4" />
+                Start playing <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link to="/tournaments" className="flex-1">

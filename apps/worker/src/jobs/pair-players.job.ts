@@ -19,6 +19,7 @@ interface SlotSearchHint {
   lat?: number;
   lng?: number;
   city?: string;
+  venueId?: string;
 }
 
 function parseCoord(value: string | undefined): number | null {
@@ -50,6 +51,27 @@ async function findAvailableSlot(
     AND ts.status = 'available'
     AND ts.booked_count < ts.max_capacity
     AND ts.start_time > NOW()`;
+
+  if (hint.venueId) {
+    const result = await client.query(
+      `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
+       FROM time_slots ts
+       JOIN venues v ON v.id = ts.venue_id
+       WHERE v.id = $1 AND ${baseWhere}
+       ORDER BY ts.start_time ASC
+       LIMIT 1`,
+      [hint.venueId]
+    );
+    const row = result.rows[0];
+    if (row) {
+      return {
+        slotId: row.slot_id,
+        venueId: row.venue_id,
+        startTime: row.start_time,
+        endTime: row.end_time,
+      };
+    }
+  }
 
   if (hint.lat !== undefined && hint.lng !== undefined) {
     const result = await client.query(
@@ -104,7 +126,7 @@ async function findAvailableSlot(
 async function pairInQueue(
   pool: Pool,
   redis: Redis,
-  env: WorkerEnv,
+  _env: WorkerEnv,
   queueKey: string,
   tournamentId: string | null,
   notificationQueue: { add: (name: string, data: unknown, opts?: { jobId?: string }) => Promise<unknown> }
@@ -118,6 +140,7 @@ async function pairInQueue(
     entries.push({
       userId,
       joinedAt: parseInt(meta.joinedAt || '0', 10),
+      city: meta.city || '',
     });
   }
 
@@ -141,6 +164,8 @@ async function pairInQueue(
     let slotId: string | null = null;
     let scheduledAt: Date | null = null;
 
+    const preferredVenueId = p1Meta.preferredVenueId || p2Meta.preferredVenueId || undefined;
+
     if (needsVenue) {
       const matchPoint = resolveMatchPoint(
         parseCoord(p1Meta.latitude),
@@ -149,7 +174,7 @@ async function pairInQueue(
         parseCoord(p2Meta.longitude)
       );
       const city = p1Meta.city || p2Meta.city;
-      if (!matchPoint && !city) {
+      if (!matchPoint && !city && !preferredVenueId) {
         await client.query('ROLLBACK');
         return;
       }
@@ -157,6 +182,7 @@ async function pairInQueue(
         lat: matchPoint?.lat,
         lng: matchPoint?.lng,
         city: city || undefined,
+        venueId: preferredVenueId,
       });
       if (!slot) {
         await client.query('ROLLBACK');
@@ -167,11 +193,24 @@ async function pairInQueue(
       scheduledAt = slot.startTime;
     }
 
+    let roundNumber: number | null = null;
+    let phase = 'normal';
+    if (tournamentId) {
+      const tResult = await client.query(
+        `SELECT current_round_number, phase FROM tournaments WHERE id = $1`,
+        [tournamentId]
+      );
+      if (tResult.rows[0]) {
+        roundNumber = tResult.rows[0].current_round_number;
+        phase = tResult.rows[0].phase === 'knockout' ? 'knockout' : 'normal';
+      }
+    }
+
     const matchResult = await client.query(
-      `INSERT INTO matches (tournament_id, player1_id, player2_id, venue_id, time_slot_id, status, scheduled_at)
-       VALUES ($1, $2, $3, $4, $5, 'pending_confirmation', $6)
+      `INSERT INTO matches (tournament_id, player1_id, player2_id, venue_id, time_slot_id, status, scheduled_at, round_number, phase)
+       VALUES ($1, $2, $3, $4, $5, 'pending_confirmation', $6, $7, $8)
        RETURNING id`,
-      [tournamentId, candidate.userId, partner.userId, venueId, slotId, scheduledAt]
+      [tournamentId, candidate.userId, partner.userId, venueId, slotId, scheduledAt, roundNumber, phase]
     );
     const matchId = matchResult.rows[0].id;
 

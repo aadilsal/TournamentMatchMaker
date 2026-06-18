@@ -1,15 +1,22 @@
 import type {
   Booking,
+  Buyback,
   Match,
+  MatchPhase,
   MatchResult,
   MatchStatus,
   Notification,
   NotificationChannel,
   NotificationStatus,
+  ParticipantStatus,
+  RoundStatus,
   TimeSlot,
   Tournament,
   TournamentFormat,
+  TournamentParticipant,
+  TournamentPhase,
   TournamentRegistration,
+  TournamentRound,
   TournamentStatus,
   User,
   UserRole,
@@ -28,6 +35,7 @@ interface UserRow {
   longitude: number | null;
   skill_tier: number;
   role: string;
+  profile_picture?: Buffer | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -79,6 +87,7 @@ export function mapUser(row: UserRow): User {
     longitude: row.longitude ?? null,
     skillTier: row.skill_tier,
     role: row.role as UserRole,
+    hasProfilePicture: !!row.profile_picture?.length,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -133,6 +142,10 @@ interface TournamentRow {
   end_date: Date;
   status: string;
   max_players: number | null;
+  skill_tier?: number;
+  phase?: string;
+  current_round_number?: number;
+  buyback_price_cents?: number;
   created_at: Date;
   registration_count?: number;
 }
@@ -155,6 +168,9 @@ interface MatchRow {
   status: string;
   result: MatchResult | null;
   scheduled_at: Date | null;
+  round_number?: number | null;
+  phase?: string | null;
+  bracket_slot?: number | null;
   created_at: Date;
   updated_at: Date;
   p1_username?: string;
@@ -192,7 +208,87 @@ export function mapTournament(row: TournamentRow): Tournament {
     endDate: row.end_date.toISOString(),
     status: row.status as TournamentStatus,
     maxPlayers: row.max_players,
+    skillTier: row.skill_tier ?? 3,
+    phase: (row.phase ?? 'normal') as TournamentPhase,
+    currentRoundNumber: row.current_round_number ?? 1,
+    buybackPriceCents: row.buyback_price_cents ?? 500,
     registrationCount: row.registration_count,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+interface TournamentRoundRow {
+  id: string;
+  tournament_id: string;
+  round_number: number;
+  starts_at: Date;
+  ends_at: Date;
+  status: string;
+  created_at: Date;
+}
+
+export function mapTournamentRound(row: TournamentRoundRow): TournamentRound {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    roundNumber: row.round_number,
+    startsAt: row.starts_at.toISOString(),
+    endsAt: row.ends_at.toISOString(),
+    status: row.status as RoundStatus,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+interface ParticipantRow {
+  id: string;
+  tournament_id: string;
+  user_id: string;
+  status: string;
+  wins: number;
+  losses: number;
+  buyback_count: number;
+  round_number: number;
+  created_at: Date;
+  updated_at: Date;
+  username?: string;
+}
+
+export function mapParticipant(row: ParticipantRow): TournamentParticipant {
+  return {
+    id: row.id,
+    tournamentId: row.tournament_id,
+    userId: row.user_id,
+    username: row.username,
+    status: row.status as ParticipantStatus,
+    wins: row.wins,
+    losses: row.losses,
+    buybackCount: row.buyback_count,
+    roundNumber: row.round_number,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+interface BuybackRow {
+  id: string;
+  user_id: string;
+  tournament_id: string;
+  round_number: number;
+  match_id: string | null;
+  amount_cents: number;
+  status: string;
+  created_at: Date;
+}
+
+export function mapBuyback(row: BuybackRow): Buyback {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    tournamentId: row.tournament_id,
+    roundNumber: row.round_number,
+    matchId: row.match_id,
+    amountCents: row.amount_cents,
+    status: row.status as Buyback['status'],
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -218,6 +314,9 @@ export function mapMatch(row: MatchRow): Match {
     status: row.status as MatchStatus,
     result: row.result,
     scheduledAt: row.scheduled_at?.toISOString() ?? null,
+    roundNumber: row.round_number ?? null,
+    phase: (row.phase as MatchPhase) ?? null,
+    bracketSlot: row.bracket_slot ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

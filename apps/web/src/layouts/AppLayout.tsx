@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Trophy, LogOut, User, MapPin, Calendar, Users, Menu, X, Target } from 'lucide-react';
+import { Trophy, LogOut, User, MapPin, Calendar, Menu, X, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';
@@ -8,9 +8,9 @@ import { getAccessToken, setAccessToken, apiPost } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const navItems = [
+  { href: '/play', label: 'Play', icon: Target, auth: true },
   { href: '/venues', label: 'Venues', icon: MapPin, auth: false },
   { href: '/tournaments', label: 'Tournaments', icon: Trophy, auth: true },
-  { href: '/matchmaking', label: 'Queue', icon: Users, auth: true },
   { href: '/matches', label: 'Matches', icon: Target, auth: true },
   { href: '/bookings', label: 'Bookings', icon: Calendar, auth: true },
 ];

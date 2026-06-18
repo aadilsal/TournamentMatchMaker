@@ -9,8 +9,10 @@ import {
   releaseSlotLock,
   SLOT_LOCK_TTL_SEC,
 } from '../../lib/slot-lock.js';
-import { matchConfirmKey, QUEUE_GLOBAL, QUEUE_MEMBER, queuePlayerKey, queueTournamentKey } from '../../lib/queue-keys.js';
+import { matchConfirmKey } from '../../lib/queue-keys.js';
 import { enqueueNotification } from '../../lib/bullmq.js';
+import { requeuePlayer } from '../../lib/requeue-player.js';
+import { TournamentsService } from '../tournaments/tournaments.service.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -26,11 +28,15 @@ const MATCH_SELECT = `
 `;
 
 export class MatchesService {
+  private tournamentsService: TournamentsService;
+
   constructor(
     private pool: Pool,
     private redis: RedisClient,
     private env?: Env
-  ) {}
+  ) {
+    this.tournamentsService = new TournamentsService(pool, redis, env);
+  }
 
   async getById(matchId: string, userId?: string) {
     const result = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
@@ -153,33 +159,11 @@ export class MatchesService {
         match.player1_id === userId ? match.player2_id : match.player1_id;
 
       if (input.requeue) {
-        const joinedAt = Date.now();
-        const queueKey = match.tournament_id
-          ? queueTournamentKey(match.tournament_id)
-          : QUEUE_GLOBAL;
-
-        for (const pid of [otherPlayer]) {
-          const userResult = await client.query(
-            `SELECT skill_tier, has_vr_headset, city, country FROM users WHERE id = $1`,
-            [pid]
-          );
-          const u = userResult.rows[0];
-          if (!u) continue;
-
-          const multi = this.redis.multi();
-          multi.zadd(queueKey, joinedAt, pid);
-          multi.sadd(QUEUE_MEMBER, pid);
-          multi.hset(queuePlayerKey(pid), {
-            userId: pid,
-            skillTier: String(u.skill_tier),
-            hasVr: u.has_vr_headset ? '1' : '0',
-            city: u.city ?? '',
-            country: u.country ?? '',
-            joinedAt: String(joinedAt),
-            tournamentId: match.tournament_id ?? '',
-          });
-          await multi.exec();
-        }
+        const meta = await this.redis.hgetall(`queue:player:${otherPlayer}`);
+        await requeuePlayer(this.pool, this.redis, otherPlayer, {
+          tournamentId: match.tournament_id,
+          preferredVenueId: meta.preferredVenueId || null,
+        });
       }
 
       await client.query('COMMIT');
@@ -205,6 +189,10 @@ export class MatchesService {
 
   async submitScore(matchId: string, userId: string, input: SubmitScoreInput) {
     const client = await this.pool.connect();
+    let completedWinnerId: string | null = null;
+    let tournamentId: string | null = null;
+    let matchPhase: string | null = null;
+
     try {
       await client.query('BEGIN');
 
@@ -250,7 +238,6 @@ export class MatchesService {
         } else if (updated.player2Score > updated.player1Score) {
           updated.winnerId = match.player2_id;
         }
-        // Tie: winnerId stays null
       }
 
       await client.query(
@@ -258,33 +245,69 @@ export class MatchesService {
         [JSON.stringify(updated), newStatus, matchId]
       );
 
-      await client.query('COMMIT');
-
-      if (newStatus === 'completed' && this.env && updated.winnerId) {
+      if (newStatus === 'completed' && updated.winnerId && match.tournament_id) {
         const winnerId = updated.winnerId;
         const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
-        enqueueNotification(this.env, {
-          userId: winnerId,
-          type: 'match_won',
-          channels: ['in_app'],
-          payload: { matchId },
-          idempotencyKey: `match-won:${matchId}:${winnerId}`,
-        }).catch((err: unknown) => console.error('Failed to enqueue match_won notification:', err));
-        enqueueNotification(this.env, {
-          userId: loserId,
-          type: 'match_lost',
-          channels: ['in_app'],
-          payload: { matchId },
-          idempotencyKey: `match-lost:${matchId}:${loserId}`,
-        }).catch((err: unknown) => console.error('Failed to enqueue match_lost notification:', err));
+        tournamentId = match.tournament_id;
+        matchPhase = match.phase;
+        completedWinnerId = winnerId;
+
+        if (match.phase === 'normal') {
+          await client.query(
+            `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+             WHERE tournament_id = $1 AND user_id = $2`,
+            [match.tournament_id, winnerId]
+          );
+          await client.query(
+            `UPDATE tournament_participants SET losses = losses + 1, status = 'eliminated', updated_at = NOW()
+             WHERE tournament_id = $1 AND user_id = $2`,
+            [match.tournament_id, loserId]
+          );
+        }
       }
 
-      return this.getById(matchId, userId);
+      await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
     } finally {
       client.release();
     }
+
+    if (completedWinnerId && tournamentId) {
+      if (matchPhase === 'knockout') {
+        await this.tournamentsService.advanceKnockoutWinner(matchId, completedWinnerId);
+      } else {
+        const meta = await this.redis.hgetall(`queue:player:${completedWinnerId}`);
+        await requeuePlayer(this.pool, this.redis, completedWinnerId, {
+          tournamentId,
+          preferredVenueId: meta.preferredVenueId || null,
+        });
+      }
+
+      const match = await this.pool.query(`SELECT * FROM matches WHERE id = $1`, [matchId]);
+      const m = match.rows[0];
+      const loserId =
+        completedWinnerId === m.player1_id ? m.player2_id : m.player1_id;
+
+      if (this.env) {
+        enqueueNotification(this.env, {
+          userId: completedWinnerId,
+          type: 'match_won',
+          channels: ['in_app'],
+          payload: { matchId },
+          idempotencyKey: `match-won:${matchId}:${completedWinnerId}`,
+        }).catch(console.error);
+        enqueueNotification(this.env, {
+          userId: loserId,
+          type: 'match_lost',
+          channels: ['in_app'],
+          payload: { matchId, tournamentId },
+          idempotencyKey: `match-lost:${matchId}:${loserId}`,
+        }).catch(console.error);
+      }
+    }
+
+    return this.getById(matchId, userId);
   }
 }

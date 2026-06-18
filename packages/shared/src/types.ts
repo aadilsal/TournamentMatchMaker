@@ -8,6 +8,18 @@ export type TournamentStatus = 'draft' | 'open' | 'closed' | 'in_progress' | 'co
 
 export type TournamentFormat = 'single_elimination' | 'double_elimination' | 'round_robin';
 
+export type TournamentPhase = 'normal' | 'knockout' | 'completed';
+
+export type MatchPhase = 'normal' | 'knockout';
+
+export type ParticipantStatus = 'active' | 'eliminated' | 'advanced' | 'knockout' | 'out';
+
+export type RoundStatus = 'active' | 'closed';
+
+export type BuybackStatus = 'completed' | 'pending' | 'failed';
+
+export type KnockoutRoundLabel = 'ro16' | 'qf' | 'sf' | 'final';
+
 export type MatchStatus =
   | 'pending_confirmation'
   | 'confirmed'
@@ -51,8 +63,24 @@ export interface User {
   longitude: number | null;
   skillTier: number;
   role: UserRole;
+  hasProfilePicture?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PublicPlayerProfile {
+  id: string;
+  username: string;
+  country: string | null;
+  city: string | null;
+  hasVrHeadset: boolean;
+  vrDeviceType: string | null;
+  skillTier: number;
+  hasProfilePicture: boolean;
+  totalWins: number;
+  totalLosses: number;
+  totalMatches: number;
+  createdAt: string;
 }
 
 export interface Venue {
@@ -105,7 +133,46 @@ export interface Tournament {
   endDate: string;
   status: TournamentStatus;
   maxPlayers: number | null;
+  skillTier: number;
+  phase: TournamentPhase;
+  currentRoundNumber: number;
+  buybackPriceCents: number;
   registrationCount?: number;
+  createdAt: string;
+}
+
+export interface TournamentRound {
+  id: string;
+  tournamentId: string;
+  roundNumber: number;
+  startsAt: string;
+  endsAt: string;
+  status: RoundStatus;
+  createdAt: string;
+}
+
+export interface TournamentParticipant {
+  id: string;
+  tournamentId: string;
+  userId: string;
+  username?: string;
+  status: ParticipantStatus;
+  wins: number;
+  losses: number;
+  buybackCount: number;
+  roundNumber: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Buyback {
+  id: string;
+  userId: string;
+  tournamentId: string;
+  roundNumber: number;
+  matchId: string | null;
+  amountCents: number;
+  status: BuybackStatus;
   createdAt: string;
 }
 
@@ -133,6 +200,9 @@ export interface Match {
   status: MatchStatus;
   result: MatchResult | null;
   scheduledAt: string | null;
+  roundNumber: number | null;
+  phase: MatchPhase | null;
+  bracketSlot: number | null;
   createdAt: string;
   updatedAt: string;
   player1?: Pick<User, 'id' | 'username' | 'skillTier' | 'hasVrHeadset'>;
@@ -163,16 +233,21 @@ export interface Notification {
 
 export interface BracketRound {
   round: number;
+  label?: string;
+  phase?: MatchPhase | 'knockout';
   matches: Array<{
     matchId?: string;
+    bracketSlot?: number;
     player1: { id: string; username: string; skillTier: number } | null;
     player2: { id: string; username: string; skillTier: number } | null;
     status?: MatchStatus;
+    winnerId?: string | null;
   }>;
 }
 
 export interface TournamentBracket {
   tournamentId: string;
   format: TournamentFormat;
+  phase: TournamentPhase;
   rounds: BracketRound[];
 }
