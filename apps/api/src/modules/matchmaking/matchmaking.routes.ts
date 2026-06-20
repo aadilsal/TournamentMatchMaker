@@ -10,7 +10,7 @@ import { MatchmakingService } from './matchmaking.service.js';
 
 export function createMatchmakingRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
-  const service = new MatchmakingService(pool, redis);
+  const service = new MatchmakingService(pool, redis, env);
 
   router.post('/queue', authenticate(env), validate(joinQueueSchema), async (req, res, next) => {
     try {

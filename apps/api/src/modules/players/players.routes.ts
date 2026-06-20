@@ -20,6 +20,15 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
     }
   });
 
+  router.get('/me/buyback-options', authenticate(_env), async (req, res, next) => {
+    try {
+      const options = await service.getBuybackOptions(req.user!.sub);
+      sendSuccess(res, options);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.patch('/me', authenticate(_env), validate(updatePlayerSchema), async (req, res, next) => {
     try {
       const profile = await service.updateProfile(req.user!.sub, req.body);

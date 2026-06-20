@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Trophy, LogOut, User, MapPin, Calendar, Menu, X, Target } from 'lucide-react';
+import { Trophy, LogOut, User, MapPin, Calendar, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';
@@ -8,10 +8,9 @@ import { getAccessToken, setAccessToken, apiPost } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { href: '/play', label: 'Play', icon: Target, auth: true },
+  { href: '/tournaments', label: 'Tournaments', icon: Trophy, auth: false },
   { href: '/venues', label: 'Venues', icon: MapPin, auth: false },
-  { href: '/tournaments', label: 'Tournaments', icon: Trophy, auth: true },
-  { href: '/matches', label: 'Matches', icon: Target, auth: true },
+  { href: '/matches', label: 'Matches', icon: Trophy, auth: true },
   { href: '/bookings', label: 'Bookings', icon: Calendar, auth: true },
 ];
 
@@ -38,7 +37,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-card)]/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-2.5 font-bold text-base shrink-0">
+          <Link to={isLoggedIn ? '/tournaments' : '/'} className="flex items-center gap-2.5 font-bold text-base shrink-0">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/30">
               <Trophy className="h-4 w-4 text-[var(--color-primary)]" />
             </span>

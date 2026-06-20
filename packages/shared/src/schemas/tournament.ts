@@ -42,7 +42,13 @@ export const registerTournamentSchema = z.object({
   bookingId: z.string().uuid().optional(),
 });
 
+export const enterTournamentSchema = z.object({
+  venueId: z.string().uuid().optional(),
+  timeSlotId: z.string().uuid().optional(),
+});
+
 export type CreateTournamentInput = z.infer<typeof createTournamentSchema>;
 export type TournamentListQuery = z.infer<typeof tournamentListQuerySchema>;
 export type TournamentMatchesQuery = z.infer<typeof tournamentMatchesQuerySchema>;
 export type RegisterTournamentInput = z.infer<typeof registerTournamentSchema>;
+export type EnterTournamentInput = z.infer<typeof enterTournamentSchema>;

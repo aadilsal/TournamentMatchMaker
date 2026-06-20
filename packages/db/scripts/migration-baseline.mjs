@@ -13,7 +13,10 @@ const MIGRATION_MARKERS = {
   '1738000000004_tournaments-and-matches': { table: 'tournaments' },
   '1738000000005_notifications': { table: 'notifications' },
   '1738000000006_user-location': { column: { table: 'users', name: 'latitude' } },
-  '1738000000007_tournament-rounds-and-profiles': { table: 'tournament_participants' },
+  '1738000000007_tournament-rounds-and-profiles': {
+    column: { table: 'users', name: 'profile_picture' },
+  },
+  '1738000000008_user-rating': { column: { table: 'users', name: 'rating_points' } },
 };
 
 async function tableExists(client, table) {

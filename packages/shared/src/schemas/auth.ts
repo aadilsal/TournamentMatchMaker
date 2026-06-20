@@ -1,9 +1,16 @@
 import { z } from 'zod';
 
 export const registerSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8).max(128),
-  username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_]+$/),
+  email: z.string().email('Enter a valid email address'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password is too long'),
+  username: z
+    .string()
+    .min(3, 'Username must be at least 3 characters')
+    .max(50, 'Username must be 50 characters or fewer')
+    .regex(/^[a-zA-Z0-9_]+$/, 'Use only letters, numbers, and underscores'),
   country: z.string().max(100).optional(),
   city: z.string().max(100).optional(),
   hasVrHeadset: z.boolean().optional().default(false),
@@ -19,9 +26,9 @@ export const loginSchema = z.object({
 
 export const registerFormSchema = registerSchema
   .extend({
-    confirmPassword: z.string().min(1, 'Please confirm your password'),
+    confirmPassword: z.string().min(1, 'Please re-enter your password'),
     acceptTerms: z.literal(true, {
-      errorMap: () => ({ message: 'You must accept the terms to continue' }),
+      errorMap: () => ({ message: 'Please accept the terms to create your account' }),
     }),
   })
   .refine((data) => data.password === data.confirmPassword, {

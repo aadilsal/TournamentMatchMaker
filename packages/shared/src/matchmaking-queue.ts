@@ -2,6 +2,7 @@
 
 export const QUEUE_GLOBAL = 'queue:global';
 export const QUEUE_MEMBER = 'queue:member';
+export const QUEUE_TOURNAMENT_INDEX = 'queue:tournament:ids';
 
 export function queueTournamentKey(tournamentId: string): string {
   return `queue:tournament:${tournamentId}`;
@@ -22,6 +23,8 @@ export interface QueuePlayerHash {
   joinedAt: string;
   tournamentId: string;
   preferredVenueId: string;
+  roundNumber: string;
+  bookingId: string;
 }
 
 export interface QueuePlayerMeta {
@@ -35,6 +38,8 @@ export interface QueuePlayerMeta {
   joinedAt: number;
   tournamentId: string | null;
   preferredVenueId: string | null;
+  roundNumber: number;
+  bookingId: string | null;
 }
 
 export interface BuildQueuePlayerHashInput {
@@ -48,6 +53,8 @@ export interface BuildQueuePlayerHashInput {
   joinedAt: number;
   tournamentId?: string | null;
   preferredVenueId?: string | null;
+  roundNumber?: number;
+  bookingId?: string | null;
 }
 
 export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePlayerHash {
@@ -64,6 +71,8 @@ export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePla
     joinedAt: String(input.joinedAt),
     tournamentId: input.tournamentId ?? '',
     preferredVenueId: input.preferredVenueId ?? '',
+    roundNumber: String(input.roundNumber ?? 1),
+    bookingId: input.bookingId ?? '',
   };
 }
 
@@ -80,5 +89,7 @@ export function parseQueuePlayerMeta(hash: Record<string, string>): QueuePlayerM
     joinedAt: parseInt(hash.joinedAt, 10) || 0,
     tournamentId: hash.tournamentId || null,
     preferredVenueId: hash.preferredVenueId || null,
+    roundNumber: parseInt(hash.roundNumber, 10) || 1,
+    bookingId: hash.bookingId || null,
   };
 }

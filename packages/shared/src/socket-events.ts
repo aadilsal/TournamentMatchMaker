@@ -10,6 +10,12 @@ export interface QueuePositionEvent {
   waitSeconds: number;
 }
 
+export interface QueuePairFailedEvent {
+  reason: 'no_slots' | 'slot_lock_failed' | 'venue_required' | 'pairing_error';
+  message: string;
+  retryable: boolean;
+}
+
 export interface MatchFoundEvent {
   matchId: string;
   opponent: { id: string; username: string; skillTier: number };
@@ -39,6 +45,7 @@ export interface SlotUpdatedEvent {
 export interface ServerToClientEvents {
   'queue:joined': (data: QueueJoinedEvent) => void;
   'queue:position': (data: QueuePositionEvent) => void;
+  'queue:pair_failed': (data: QueuePairFailedEvent) => void;
   'match:found': (data: MatchFoundEvent) => void;
   'notification:new': (data: NotificationNewEvent) => void;
   'slot:updated': (data: SlotUpdatedEvent) => void;

@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Tournament,
   TournamentBracket,
   TournamentParticipant,
   TournamentRegistration,
 } from '@vr-tournament/shared';
-import { apiDelete, apiGet, apiPost } from '@/lib/api';
+import { apiDelete, apiGet, getAccessToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
@@ -17,7 +17,9 @@ import { BuybackButton } from '@/components/tournament/BuybackButton';
 
 export function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const isLoggedIn = !!getAccessToken();
   const [activeTab, setActiveTab] = useState<string>('normal');
 
   const { data: tournament, isLoading } = useQuery({
@@ -35,22 +37,13 @@ export function TournamentDetailPage() {
   const { data: myRegistration } = useQuery({
     queryKey: ['tournament-registration', id],
     queryFn: () => apiGet<TournamentRegistration | null>(`/tournaments/${id}/registration`).catch(() => null),
-    enabled: !!id,
+    enabled: !!id && isLoggedIn,
   });
 
   const { data: myParticipant } = useQuery({
     queryKey: ['tournament-participant', id],
     queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`).catch(() => null),
-    enabled: !!id && !!myRegistration,
-  });
-
-  const registerMutation = useMutation({
-    mutationFn: () => apiPost<TournamentRegistration>(`/tournaments/${id}/register`, {}),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tournament', id] });
-      queryClient.invalidateQueries({ queryKey: ['tournament-bracket', id] });
-      queryClient.invalidateQueries({ queryKey: ['tournament-registration', id] });
-    },
+    enabled: !!id && isLoggedIn && !!myRegistration,
   });
 
   const withdrawMutation = useMutation({
@@ -61,6 +54,14 @@ export function TournamentDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['tournament-registration', id] });
     },
   });
+
+  const handleJoin = () => {
+    if (!isLoggedIn) {
+      navigate(`/register?returnTo=${encodeURIComponent(`/play?tournament=${id}`)}`);
+      return;
+    }
+    navigate(`/play?tournament=${id}`);
+  };
 
   if (isLoading || !tournament) return <p>Loading...</p>;
 
@@ -86,7 +87,7 @@ export function TournamentDetailPage() {
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          {tournament.game} · Tier {tournament.skillTier} · {tournament.phase} phase
+          {tournament.game} · {tournament.phase} phase
         </p>
         <p className="text-sm mt-2">
           {new Date(tournament.startDate).toLocaleString()} — {new Date(tournament.endDate).toLocaleString()}
@@ -99,23 +100,20 @@ export function TournamentDetailPage() {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {tournament.status === 'open' && (
-          <>
-            {myRegistration ? (
-              <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
-                {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
-              </Button>
-            ) : (
-              <Button onClick={() => registerMutation.mutate()} disabled={registerMutation.isPending}>
-                {registerMutation.isPending ? 'Registering…' : 'Register'}
-              </Button>
-            )}
-          </>
+        {tournament.status === 'open' && !myRegistration && (
+          <Button onClick={handleJoin}>
+            {isLoggedIn ? 'Join tournament' : 'Register to join'}
+          </Button>
         )}
         {myRegistration && (
-          <Link to="/play">
-            <Button variant="secondary">Go to queue</Button>
-          </Link>
+          <>
+            <Button variant="secondary" onClick={handleJoin}>
+              Find next match
+            </Button>
+            <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
+              {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
+            </Button>
+          </>
         )}
         {myParticipant?.status === 'eliminated' && tournament.phase === 'normal' && (
           <BuybackButton tournamentId={tournament.id} tournament={tournament} />

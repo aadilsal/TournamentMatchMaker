@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { User } from '@vr-tournament/shared';
 import { apiGet, apiPatch, getAccessToken } from '@/lib/api';
+import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { PageLoader } from '@/components/ui/cricket-loader';
@@ -36,7 +36,6 @@ export function ProfilePage() {
     city: '',
     hasVrHeadset: false,
     vrDeviceType: '',
-    skillTier: 3,
   });
 
   useEffect(() => {
@@ -56,7 +55,6 @@ export function ProfilePage() {
         city: profile.city || '',
         hasVrHeadset: profile.hasVrHeadset,
         vrDeviceType: profile.vrDeviceType || '',
-        skillTier: profile.skillTier,
       });
     }
   }, [profile]);
@@ -219,23 +217,23 @@ export function ProfilePage() {
           )}
         </section>
 
-        {/* Skill tier */}
+        {/* Rating — assigned by the game */}
         <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-5 space-y-4">
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
             <BarChart3 className="h-3.5 w-3.5" />
-            Skill Tier
+            Rating
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="skillTier">Current tier (1 = beginner, 5 = elite)</Label>
-            <Select
-              id="skillTier"
-              value={form.skillTier}
-              onChange={(e) => setForm({ ...form, skillTier: Number(e.target.value) })}
-            >
-              {[1, 2, 3, 4, 5].map((t) => (
-                <option key={t} value={t}>Tier {t}</option>
-              ))}
-            </Select>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="rounded-lg border border-[var(--color-border)] p-3">
+              <p className="text-xs text-[var(--color-muted-foreground)]">Skill tier</p>
+              <p className="text-2xl font-bold mt-1">Tier {profile?.skillTier ?? '—'}</p>
+              <p className="text-xs text-[var(--color-muted-foreground)] mt-0.5">Assigned by match results</p>
+            </div>
+            <div className="rounded-lg border border-[var(--color-border)] p-3">
+              <p className="text-xs text-[var(--color-muted-foreground)]">Rating points</p>
+              <p className="text-2xl font-bold mt-1">{profile?.ratingPoints ?? '—'}</p>
+              <p className="text-xs text-[var(--color-muted-foreground)] mt-0.5">+30 win · −18 loss</p>
+            </div>
           </div>
         </section>
 
@@ -246,7 +244,7 @@ export function ProfilePage() {
           </p>
         )}
         {update.isError && (
-          <p className="text-sm text-[var(--color-destructive)]">{(update.error as Error).message}</p>
+          <p className="text-sm text-[var(--color-destructive)]">{getUserErrorMessage(update.error)}</p>
         )}
 
         <Button type="submit" size="lg" className="w-full" disabled={update.isPending}>

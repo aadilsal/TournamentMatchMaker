@@ -15,8 +15,10 @@
     "migrate:up": "pnpm --filter @vr-tournament/db migrate:up",
     "migrate:down": "pnpm --filter @vr-tournament/db migrate:down",
     "migrate:baseline": "pnpm --filter @vr-tournament/db migrate:baseline",
+    "db:repair": "pnpm --filter @vr-tournament/db db:repair",
     "db:reset": "pnpm --filter @vr-tournament/db db:reset",
-    "seed": "pnpm --filter @vr-tournament/db seed"
+    "seed": "pnpm --filter @vr-tournament/db seed",
+    "qa:brutal": "node scripts/qa-brutal.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

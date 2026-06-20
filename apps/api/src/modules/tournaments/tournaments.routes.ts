@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   buybackSchema,
   createTournamentSchema,
+  enterTournamentSchema,
   registerTournamentSchema,
   tournamentListQuerySchema,
   tournamentMatchesQuerySchema,
@@ -113,6 +114,20 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
       try {
         const registration = await service.register(req.params.id as string, req.user!.sub, req.body);
         sendSuccess(res, registration, undefined, 201);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
+    '/:id/enter',
+    authenticate(env),
+    validate(enterTournamentSchema),
+    async (req, res, next) => {
+      try {
+        const result = await service.enter(req.params.id as string, req.user!.sub, req.body);
+        sendSuccess(res, result, undefined, 201);
       } catch (err) {
         next(err);
       }

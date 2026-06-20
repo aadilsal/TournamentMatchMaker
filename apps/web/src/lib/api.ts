@@ -1,8 +1,11 @@
 import axios from 'axios';
 import type { ApiResponse } from '@vr-tournament/shared';
+import { ApiClientError } from './user-messages';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+export { ApiClientError } from './user-messages';
+export { getUserErrorMessage, getRegisterConflict } from './user-messages';
 export const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
   withCredentials: true,
@@ -40,15 +43,24 @@ function shouldAttemptTokenRefresh(url: string | undefined): boolean {
   return !AUTH_NO_REFRESH_PATHS.some((path) => url.includes(path));
 }
 
-function toApiError(err: unknown): Error {
+function toApiError(err: unknown): ApiClientError {
   if (axios.isAxiosError(err) && err.response?.data && typeof err.response.data === 'object') {
     const payload = err.response.data as ApiResponse<unknown>;
-    if (payload.error?.message) return new Error(payload.error.message);
+    if (payload.error?.message) {
+      return new ApiClientError(
+        payload.error.message,
+        payload.error.code,
+        payload.error.details,
+        err.response.status
+      );
+    }
   }
-  if (err instanceof Error) return err;
-  return new Error('Request failed');
+  if (err instanceof ApiClientError) return err;
+  if (err instanceof Error) {
+    return new ApiClientError(err.message);
+  }
+  return new ApiClientError('Request failed');
 }
-
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -106,7 +118,13 @@ api.interceptors.response.use(
 export async function apiGet<T>(url: string) {
   try {
     const { data } = await api.get<ApiResponse<T>>(url);
-    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
     return data.data!;
   } catch (err) {
     throw toApiError(err);
@@ -116,7 +134,13 @@ export async function apiGet<T>(url: string) {
 export async function apiPost<T>(url: string, body?: unknown) {
   try {
     const { data } = await api.post<ApiResponse<T>>(url, body);
-    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
     return data.data!;
   } catch (err) {
     throw toApiError(err);
@@ -126,7 +150,13 @@ export async function apiPost<T>(url: string, body?: unknown) {
 export async function apiPatch<T>(url: string, body?: unknown) {
   try {
     const { data } = await api.patch<ApiResponse<T>>(url, body);
-    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
     return data.data!;
   } catch (err) {
     throw toApiError(err);
@@ -136,7 +166,13 @@ export async function apiPatch<T>(url: string, body?: unknown) {
 export async function apiDelete<T>(url: string) {
   try {
     const { data } = await api.delete<ApiResponse<T>>(url);
-    if (!data.success) throw new Error(data.error?.message || 'Request failed');
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
     return data.data!;
   } catch (err) {
     throw toApiError(err);

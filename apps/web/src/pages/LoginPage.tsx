@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import type { AuthTokens } from '@vr-tournament/shared';
 import { apiPost, setAccessToken } from '@/lib/api';
+import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -23,12 +24,7 @@ export function LoginPage() {
       setAccessToken(data.accessToken);
       navigate('/venues');
     },
-    onError: (err: Error) => {
-      const message = err.message.toLowerCase().includes('invalid email or password')
-        ? 'Incorrect email or password. Please try again.'
-        : err.message || 'Unable to sign in. Please try again.';
-      setError(message);
-    },
+    onError: (err: Error) => setError(getUserErrorMessage(err)),
   });
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {

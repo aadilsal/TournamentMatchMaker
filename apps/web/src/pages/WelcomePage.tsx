@@ -1,4 +1,4 @@
-import { Link, useLocation, Navigate } from 'react-router-dom';
+import { Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
@@ -11,10 +11,12 @@ interface WelcomeState {
   city?: string;
   latitude?: number;
   longitude?: number;
+  returnTo?: string;
 }
 
 export function WelcomePage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const state = (location.state as WelcomeState | null) ?? null;
 
   if (!state) {
@@ -149,23 +151,25 @@ export function WelcomePage() {
                 <Target className="h-4 w-4 text-[var(--color-primary)]" />
               </span>
               <div className="pt-0.5">
-                <p className="font-medium">Enter the queue</p>
+                <p className="font-medium">Enter a tournament</p>
                 <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
-                  Skill-tier matchmaking pairs you with the right opponent. Your first Super Over is one queue-join away.
+                  Pick a tournament and we&apos;ll automatically find your opponent — no manual queue needed.
                 </p>
               </div>
             </li>
           </ol>
 
           <div className="flex flex-col sm:flex-row gap-3 pt-6 mt-6 border-t border-[var(--color-border)]">
-            <Link to="/play" className="flex-1">
-              <Button className="w-full gap-2" size="lg">
-                Start playing <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Link to="/tournaments" className="flex-1">
+            <Button
+              className="w-full gap-2 flex-1"
+              size="lg"
+              onClick={() => navigate(state?.returnTo ?? '/tournaments')}
+            >
+              Choose a tournament <ArrowRight className="h-4 w-4" />
+            </Button>
+            <Link to="/profile" className="flex-1">
               <Button variant="outline" className="w-full" size="lg">
-                Browse tournaments
+                View profile
               </Button>
             </Link>
           </div>

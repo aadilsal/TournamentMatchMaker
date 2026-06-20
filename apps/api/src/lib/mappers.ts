@@ -34,6 +34,7 @@ interface UserRow {
   latitude: number | null;
   longitude: number | null;
   skill_tier: number;
+  rating_points?: number;
   role: string;
   profile_picture?: Buffer | null;
   created_at: Date;
@@ -86,6 +87,7 @@ export function mapUser(row: UserRow): User {
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
     skillTier: row.skill_tier,
+    ratingPoints: row.rating_points ?? 650,
     role: row.role as UserRole,
     hasProfilePicture: !!row.profile_picture?.length,
     createdAt: row.created_at.toISOString(),

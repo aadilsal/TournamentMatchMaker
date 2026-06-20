@@ -62,6 +62,7 @@ export interface User {
   latitude: number | null;
   longitude: number | null;
   skillTier: number;
+  ratingPoints?: number;
   role: UserRole;
   hasProfilePicture?: boolean;
   createdAt: string;
@@ -176,6 +177,13 @@ export interface Buyback {
   createdAt: string;
 }
 
+export interface BuybackOption {
+  tournamentId: string;
+  tournamentName: string;
+  buybackPriceCents: number;
+  roundNumber: number;
+}
+
 export interface TournamentRegistration {
   id: string;
   tournamentId: string;
@@ -188,6 +196,11 @@ export interface MatchResult {
   player1Score: number | null;
   player2Score: number | null;
   winnerId: string | null;
+}
+
+export interface MatchConfirmations {
+  player1Confirmed: boolean;
+  player2Confirmed: boolean;
 }
 
 export interface Match {
@@ -209,6 +222,7 @@ export interface Match {
   player2?: Pick<User, 'id' | 'username' | 'skillTier' | 'hasVrHeadset'>;
   venue?: Pick<Venue, 'id' | 'name' | 'city' | 'address'>;
   slot?: Pick<TimeSlot, 'id' | 'startTime' | 'endTime'>;
+  confirmations?: MatchConfirmations | null;
 }
 
 export interface QueueStatus {
@@ -217,6 +231,7 @@ export interface QueueStatus {
   waitSeconds: number;
   queueSize: number;
   tournamentId: string | null;
+  roundNumber: number | null;
 }
 
 export interface Notification {

@@ -1,23 +1,58 @@
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
-import type { Tournament } from '@vr-tournament/shared';
-import { apiGet } from '@/lib/api';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from 'react-router-dom';
+import type { QueuePairFailedEvent, QueueStatus, Tournament } from '@vr-tournament/shared';
+import { apiGet, getAccessToken } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge, tournamentStatusBadge } from '@/components/ui/badge';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
+import { CricketBallLoader } from '@/components/ui/cricket-loader';
+import { MatchFoundModal } from '@/components/match/MatchFoundModal';
+import { useSocketEvent } from '@/hooks/useSocket';
 import { Trophy, Calendar, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function TournamentsPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const isLoggedIn = !!getAccessToken();
+  const [matchModal, setMatchModal] = useState<Parameters<typeof MatchFoundModal>[0]['match'] | null>(null);
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
+
   const { data: tournaments = [], isLoading } = useQuery({
     queryKey: ['tournaments'],
-    queryFn: () => apiGet<Tournament[]>('/tournaments'),
+    queryFn: () => apiGet<Tournament[]>('/tournaments?status=open'),
   });
+
+  const { data: queueStatus } = useQuery({
+    queryKey: ['matchmaking-status'],
+    queryFn: () => apiGet<QueueStatus>('/matchmaking/status'),
+    enabled: isLoggedIn,
+    refetchInterval: (q) => (q.state.data?.inQueue ? 2000 : false),
+  });
+
+  useSocketEvent('match:found', (data) => {
+    setQueueNotice(null);
+    setMatchModal(data);
+    queryClient.invalidateQueries({ queryKey: ['matchmaking-status'] });
+    queryClient.invalidateQueries({ queryKey: ['matches'] });
+  });
+
+  useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
+    setQueueNotice(data.message);
+  });
+
+  const handleJoin = (tournamentId: string) => {
+    if (!isLoggedIn) {
+      navigate(`/register?returnTo=${encodeURIComponent(`/play?tournament=${tournamentId}`)}`);
+      return;
+    }
+    navigate(`/play?tournament=${tournamentId}`);
+  };
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -30,18 +65,38 @@ export function TournamentsPage() {
           <h1 className="text-2xl font-bold tracking-tight">Tournaments</h1>
         </div>
         <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
-          Register for VR cricket tournaments across Canada
+          {isLoggedIn
+            ? 'Pick a tournament — we match you automatically once you enter.'
+            : 'Browse open tournaments. Register to join.'}
         </p>
       </motion.div>
 
-      {/* List */}
+      {isLoggedIn && queueStatus?.inQueue && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-5 flex items-center gap-4"
+        >
+          <CricketBallLoader size="md" />
+          <div>
+            <p className="font-semibold">Finding opponent…</p>
+            <p className="text-sm text-[var(--color-muted-foreground)]">
+              {queueNotice ??
+                (queueStatus.queueSize && queueStatus.queueSize > 1
+                  ? `${queueStatus.queueSize} players in queue — matching now…`
+                  : "Waiting for another player to join…")}
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       {isLoading ? (
         <GridSkeleton cols={2} count={4} />
       ) : tournaments.length === 0 ? (
         <EmptyState
           icon={<Trophy className="h-12 w-12" />}
-          title="No tournaments yet"
-          description="Season 1 is coming. Check back soon to register."
+          title="No open tournaments"
+          description="Check back soon for new seasons."
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -59,7 +114,7 @@ export function TournamentsPage() {
                     <div>
                       <h3 className="font-semibold text-base">{t.name}</h3>
                       <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
-                        {t.game} · Tier {t.skillTier} · {t.format.replace(/_/g, ' ')}
+                        {t.game} · {t.format.replace(/_/g, ' ')}
                       </p>
                     </div>
                     <Badge variant={variant}>{label}</Badge>
@@ -76,14 +131,25 @@ export function TournamentsPage() {
                     </span>
                   </div>
 
-                  <Link to={`/tournaments/${t.id}`}>
-                    <Button size="sm" variant="outline">View details</Button>
-                  </Link>
+                  <div className="flex gap-2">
+                    <Link to={`/tournaments/${t.id}`} className="flex-1">
+                      <Button size="sm" variant="outline" className="w-full">Details</Button>
+                    </Link>
+                    {t.status === 'open' && (
+                      <Button size="sm" className="flex-1" onClick={() => handleJoin(t.id)}>
+                        {isLoggedIn ? 'Join' : 'Register to join'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </motion.div>
             );
           })}
         </div>
+      )}
+
+      {matchModal && (
+        <MatchFoundModal match={matchModal} onClose={() => setMatchModal(null)} />
       )}
     </div>
   );

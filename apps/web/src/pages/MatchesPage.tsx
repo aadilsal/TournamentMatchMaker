@@ -1,13 +1,16 @@
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Match, MatchResult, User } from '@vr-tournament/shared';
+import type { Match, MatchResult, User, BuybackOption } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
+import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { ListSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useSocketEvent } from '@/hooks/useSocket';
 import { MatchFoundModal } from '@/components/match/MatchFoundModal';
+import { MatchBuybackPrompt } from '@/components/tournament/MatchBuybackPrompt';
+import { BuybackBanner } from '@/components/tournament/BuybackBanner';
 import { useState } from 'react';
 import { MapPin, Trophy, Swords } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -16,15 +19,21 @@ export function MatchesPage() {
   const queryClient = useQueryClient();
   const [matchModal, setMatchModal] = useState<Parameters<typeof MatchFoundModal>[0]['match'] | null>(null);
   const [scoreInputs, setScoreInputs] = useState<Record<string, string>>({});
+  const [actionError, setActionError] = useState<Record<string, string>>({});
 
   const { data: me } = useQuery({
-    queryKey: ['me'],
-    queryFn: () => apiGet<User>('/auth/me'),
+    queryKey: ['profile'],
+    queryFn: () => apiGet<User>('/players/me'),
   });
 
   const { data: matches = [], isLoading } = useQuery({
     queryKey: ['matches'],
     queryFn: () => apiGet<Match[]>('/matches/me'),
+  });
+
+  const { data: buybackOptions = [] } = useQuery({
+    queryKey: ['buyback-options'],
+    queryFn: () => apiGet<BuybackOption[]>('/players/me/buyback-options'),
   });
 
   useSocketEvent('match:found', (data) => {
@@ -34,18 +43,33 @@ export function MatchesPage() {
 
   const confirmMutation = useMutation({
     mutationFn: (matchId: string) => apiPost<Match>(`/matches/${matchId}/confirm`),
+    onMutate: (matchId) => {
+      setActionError((prev) => ({ ...prev, [matchId]: '' }));
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['matches'] }),
+    onError: (err, matchId) => {
+      setActionError((prev) => ({ ...prev, [matchId]: getUserErrorMessage(err) }));
+    },
   });
 
   const declineMutation = useMutation({
     mutationFn: (matchId: string) => apiPost<Match>(`/matches/${matchId}/decline`, { requeue: true }),
+    onMutate: (matchId) => {
+      setActionError((prev) => ({ ...prev, [matchId]: '' }));
+    },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['matches'] }),
+    onError: (err, matchId) => {
+      setActionError((prev) => ({ ...prev, [matchId]: getUserErrorMessage(err) }));
+    },
   });
 
   const scoreMutation = useMutation({
     mutationFn: ({ matchId, score }: { matchId: string; score: number }) =>
       apiPost<Match>(`/matches/${matchId}/score`, { score }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['matches'] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
+      queryClient.invalidateQueries({ queryKey: ['buyback-options'] });
+    },
   });
 
   const active = matches.filter((m) =>
@@ -74,14 +98,22 @@ export function MatchesPage() {
         </p>
       </motion.div>
 
+      {buybackOptions.length > 0 && (
+        <div className="space-y-3">
+          {buybackOptions.map((option) => (
+            <BuybackBanner key={option.tournamentId} option={option} />
+          ))}
+        </div>
+      )}
+
       {isLoading ? (
         <ListSkeleton count={3} />
       ) : active.length === 0 && history.length === 0 ? (
         <EmptyState
           icon={<Swords className="h-12 w-12" />}
           title="No active matches"
-          description="Join the matchmaking queue to get paired with an opponent."
-          action={{ label: 'Go to queue', href: '/matchmaking' }}
+          description="Enter a tournament and we'll find your opponent automatically."
+          action={{ label: 'Browse tournaments', href: '/tournaments' }}
         />
       ) : (
         <>
@@ -97,6 +129,26 @@ export function MatchesPage() {
                   me &&
                   (match.status === 'confirmed' || match.status === 'in_progress') &&
                   myScore == null;
+                const youConfirmed =
+                  !!me &&
+                  !!match.confirmations &&
+                  (me.id === match.player1Id
+                    ? match.confirmations.player1Confirmed
+                    : me.id === match.player2Id
+                      ? match.confirmations.player2Confirmed
+                      : false);
+                const opponentConfirmed =
+                  !!me &&
+                  !!match.confirmations &&
+                  (me.id === match.player1Id
+                    ? match.confirmations.player2Confirmed
+                    : me.id === match.player2Id
+                      ? match.confirmations.player1Confirmed
+                      : false);
+                const isConfirming =
+                  confirmMutation.isPending && confirmMutation.variables === match.id;
+                const isDeclining =
+                  declineMutation.isPending && declineMutation.variables === match.id;
 
                 return (
                   <motion.div
@@ -136,22 +188,41 @@ export function MatchesPage() {
                       )}
 
                       {match.status === 'pending_confirmation' && (
-                        <div className="flex gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            onClick={() => confirmMutation.mutate(match.id)}
-                            disabled={confirmMutation.isPending}
-                          >
-                            Confirm match
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => declineMutation.mutate(match.id)}
-                            disabled={declineMutation.isPending}
-                          >
-                            Decline
-                          </Button>
+                        <div className="space-y-2 pt-1">
+                          {youConfirmed && !opponentConfirmed && (
+                            <p className="text-sm text-amber-400">
+                              You confirmed — waiting for your opponent to confirm.
+                            </p>
+                          )}
+                          {!youConfirmed && opponentConfirmed && (
+                            <p className="text-sm text-[var(--color-muted-foreground)]">
+                              Your opponent confirmed. Please confirm to lock in the match.
+                            </p>
+                          )}
+                          {actionError[match.id] && (
+                            <p className="text-sm text-[var(--color-destructive)]">
+                              {actionError[match.id]}
+                            </p>
+                          )}
+                          <div className="flex gap-2">
+                            {!youConfirmed && (
+                              <Button
+                                size="sm"
+                                onClick={() => confirmMutation.mutate(match.id)}
+                                disabled={isConfirming || isDeclining}
+                              >
+                                {isConfirming ? 'Confirming…' : 'Confirm match'}
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => declineMutation.mutate(match.id)}
+                              disabled={isConfirming || isDeclining}
+                            >
+                              {isDeclining ? 'Declining…' : 'Decline'}
+                            </Button>
+                          </div>
                         </div>
                       )}
 
@@ -247,6 +318,7 @@ export function MatchesPage() {
                         )}
                       </p>
                     )}
+                    {me && <MatchBuybackPrompt match={match} userId={me.id} buybackOptions={buybackOptions} />}
                   </motion.div>
                 );
               })}

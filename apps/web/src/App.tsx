@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useBlockSaveShortcut } from '@/hooks/useBlockSaveShortcut';
 import { MarketingLayout } from '@/layouts/MarketingLayout';
 import { AppLayout } from '@/layouts/AppLayout';
@@ -11,7 +11,6 @@ import { VenueDetailPage } from '@/pages/VenueDetailPage';
 import { BookingsPage } from '@/pages/BookingsPage';
 import { TournamentsPage } from '@/pages/TournamentsPage';
 import { TournamentDetailPage } from '@/pages/TournamentDetailPage';
-import { MatchmakingPage } from '@/pages/MatchmakingPage';
 import { MatchesPage } from '@/pages/MatchesPage';
 import { PlayFlowPage } from '@/pages/PlayFlowPage';
 import { PublicProfilePage } from '@/pages/PublicProfilePage';
@@ -42,7 +41,7 @@ export function App() {
         <Route path="/bookings" element={<AppShell><BookingsPage /></AppShell>} />
         <Route path="/tournaments" element={<AppShell><TournamentsPage /></AppShell>} />
         <Route path="/tournaments/:id" element={<AppShell><TournamentDetailPage /></AppShell>} />
-        <Route path="/matchmaking" element={<AppShell><MatchmakingPage /></AppShell>} />
+        <Route path="/matchmaking" element={<Navigate to="/tournaments" replace />} />
         <Route path="/matches" element={<AppShell><MatchesPage /></AppShell>} />
       </Routes>
     </BrowserRouter>

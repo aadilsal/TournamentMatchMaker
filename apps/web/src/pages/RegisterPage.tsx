@@ -1,15 +1,17 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import {
   registerFormSchema,
+  registerSchema,
   type AuthTokens,
   type RegisterFormInput,
   type RegisterInput,
 } from '@vr-tournament/shared';
 import { apiPost, setAccessToken } from '@/lib/api';
+import { getRegisterConflict, getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -195,6 +197,56 @@ function CricketDeliveryBanner() {
 
 type FieldErrors = Partial<Record<keyof RegisterFormInput | 'form', string>>;
 
+function parseFieldErrors(form: typeof initialForm): FieldErrors {
+  const result = registerFormSchema.safeParse(form);
+  if (result.success) return {};
+
+  const errors: FieldErrors = {};
+  for (const issue of result.error.issues) {
+    const key = issue.path[0];
+    if (typeof key === 'string' && !errors[key as keyof RegisterFormInput]) {
+      errors[key as keyof RegisterFormInput] = issue.message;
+    }
+  }
+  return errors;
+}
+
+function fieldHasInput(field: keyof RegisterFormInput, form: typeof initialForm): boolean {
+  if (field === 'acceptTerms' || field === 'hasVrHeadset') return false;
+  const value = form[field];
+  if (typeof value === 'string') return value.length > 0;
+  return value !== undefined && value !== null;
+}
+
+function shouldShowFieldError(
+  field: keyof FieldErrors,
+  form: typeof initialForm,
+  touched: Partial<Record<string, boolean>>,
+  schemaErrors: FieldErrors,
+  availabilityErrors: FieldErrors
+): string | undefined {
+  const error = availabilityErrors[field] ?? schemaErrors[field];
+  if (!error) return undefined;
+
+  if (field === 'form') {
+    return error;
+  }
+
+  if (field === 'acceptTerms') {
+    return touched.acceptTerms ? error : undefined;
+  }
+
+  if (field === 'confirmPassword' && form.confirmPassword.length > 0) {
+    return error;
+  }
+
+  if (touched[field] || fieldHasInput(field, form)) {
+    return error;
+  }
+
+  return undefined;
+}
+
 const VR_DEVICES = [
   'Meta Quest 3',
   'Meta Quest 3S',
@@ -222,14 +274,22 @@ const initialForm = {
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get('returnTo');
   const [form, setForm] = useState(initialForm);
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [availabilityErrors, setAvailabilityErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState('');
   const [touched, setTouched] = useState<Partial<Record<string, boolean>>>({});
 
-  const passwordReqs = getPasswordRequirements(form.password);
-  const strengthScore = passwordStrengthScore(form.password);
-  const strengthText = passwordStrengthLabel(strengthScore);
+  const schemaErrors = useMemo(() => parseFieldErrors(form), [form]);
+  const canSubmit =
+    registerFormSchema.safeParse(form).success &&
+    !availabilityErrors.email &&
+    !availabilityErrors.username;
+
+  const checkEmailFormat = (email: string) => registerSchema.shape.email.safeParse(email).success;
+  const checkUsernameFormat = (username: string) =>
+    registerSchema.shape.username.safeParse(username).success;
 
   const register = useMutation({
     mutationFn: (payload: RegisterInput) =>
@@ -247,11 +307,74 @@ export function RegisterPage() {
           city: variables.city,
           latitude: variables.latitude,
           longitude: variables.longitude,
+          returnTo: returnTo ?? undefined,
         },
       });
     },
-    onError: (err: Error) => setServerError(err.message),
+    onError: (err: Error) => {
+      const conflict = getRegisterConflict(err);
+      if (conflict) {
+        setAvailabilityErrors((current) => ({ ...current, [conflict.field]: conflict.message }));
+        setTouched((current) => ({ ...current, [conflict.field]: true }));
+        setServerError('');
+        return;
+      }
+      setServerError(getUserErrorMessage(err));
+    },
   });
+
+  const passwordReqs = getPasswordRequirements(form.password);
+  const strengthScore = passwordStrengthScore(form.password);
+  const strengthText = passwordStrengthLabel(strengthScore);
+
+  const checkAvailability = async (params: { email?: string; username?: string }) => {
+    try {
+      const result = await apiGet<{ emailTaken?: boolean; usernameTaken?: boolean }>(
+        `/auth/check-availability?${new URLSearchParams(
+          Object.fromEntries(
+            Object.entries(params).filter((entry): entry is [string, string] => !!entry[1])
+          )
+        ).toString()}`
+      );
+
+      setAvailabilityErrors((current) => {
+        const next = { ...current };
+        if (params.email !== undefined) {
+          if (result.emailTaken) {
+            next.email = 'This email is already registered. Try signing in instead.';
+          } else {
+            delete next.email;
+          }
+        }
+        if (params.username !== undefined) {
+          if (result.usernameTaken) {
+            next.username = 'This username is already taken. Please choose another.';
+          } else {
+            delete next.username;
+          }
+        }
+        return next;
+      });
+    } catch {
+      // Ignore availability check failures — registration will still validate on submit.
+    }
+  };
+
+  useEffect(() => {
+    if (!checkEmailFormat(form.email)) return;
+    const timer = window.setTimeout(() => {
+      void checkAvailability({ email: form.email });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [form.email]);
+
+  useEffect(() => {
+    if (!checkUsernameFormat(form.username)) return;
+    const timer = window.setTimeout(() => {
+      void checkAvailability({ username: form.username });
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [form.username]);
 
   const { data: nearbyVenues = [] } = useQuery({
     queryKey: ['register-venues', form.latitude, form.longitude, form.city],
@@ -270,7 +393,7 @@ export function RegisterPage() {
 
   const requestLocation = () => {
     if (!navigator.geolocation) {
-      setServerError('Geolocation is not supported in this browser.');
+      setServerError('Location sharing is not supported in this browser. Enter your city instead.');
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -279,30 +402,19 @@ export function RegisterPage() {
         update('longitude', pos.coords.longitude);
         setServerError('');
       },
-      () => setServerError('Could not detect your location. Enter your city or try again.')
+      () => setServerError('We could not detect your location. Enter your city or try again.')
     );
   };
 
-  const validate = (): RegisterFormInput | null => {
-    const result = registerFormSchema.safeParse(form);
-    if (!result.success) {
-      const errors: FieldErrors = {};
-      for (const issue of result.error.issues) {
-        const key = issue.path[0];
-        if (typeof key === 'string' && !errors[key as keyof RegisterFormInput]) {
-          errors[key as keyof RegisterFormInput] = issue.message;
-        }
-      }
-      setFieldErrors(errors);
-      return null;
-    }
-    setFieldErrors({});
-    return result.data;
-  };
+  const handleBlur = (field: keyof typeof initialForm) => {
+    setTouched((current) => ({ ...current, [field]: true }));
 
-  const handleBlur = (field: string) => {
-    setTouched((t) => ({ ...t, [field]: true }));
-    validate();
+    if (field === 'email' && checkEmailFormat(form.email)) {
+      void checkAvailability({ email: form.email });
+    }
+    if (field === 'username' && checkUsernameFormat(form.username)) {
+      void checkAvailability({ username: form.username });
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -316,10 +428,12 @@ export function RegisterPage() {
       acceptTerms: true,
     });
 
-    const valid = validate();
-    if (!valid) return;
+    const valid = registerFormSchema.safeParse(form);
+    if (!valid.success || availabilityErrors.email || availabilityErrors.username) {
+      return;
+    }
 
-    const { confirmPassword: _, acceptTerms: __, ...payload } = valid;
+    const { confirmPassword: _, acceptTerms: __, ...payload } = valid.data;
     if (!payload.hasVrHeadset) {
       payload.vrDeviceType = undefined;
     }
@@ -329,18 +443,20 @@ export function RegisterPage() {
   };
 
   const update = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) => {
-    setForm((f) => ({ ...f, [key]: value }));
-    if (fieldErrors[key as keyof FieldErrors]) {
-      setFieldErrors((e) => {
-        const next = { ...e };
-        delete next[key as keyof FieldErrors];
+    setForm((current) => ({ ...current, [key]: value }));
+    if (key === 'email' || key === 'username') {
+      setAvailabilityErrors((current) => {
+        if (!current[key]) return current;
+        const next = { ...current };
+        delete next[key];
         return next;
       });
     }
+    if (serverError) setServerError('');
   };
 
   const showError = (field: keyof FieldErrors) =>
-    touched[field] && fieldErrors[field] ? fieldErrors[field] : undefined;
+    shouldShowFieldError(field, form, touched, schemaErrors, availabilityErrors);
 
   return (
     <div className="max-w-lg mx-auto">
@@ -353,7 +469,7 @@ export function RegisterPage() {
           </div>
           <CardTitle className="text-2xl">Create your account</CardTitle>
           <CardDescription>
-            Register to book venues, join tournaments, and enter the matchmaking queue.
+            Register to join tournaments and book VR arena slots.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -620,7 +736,7 @@ export function RegisterPage() {
               </p>
             )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={register.isPending}>
+            <Button type="submit" className="w-full" size="lg" disabled={register.isPending || !canSubmit}>
               {register.isPending ? 'Creating account...' : 'Create account'}
             </Button>
           </form>

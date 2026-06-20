@@ -12,5 +12,7 @@ export * from './socket-events.js';
 export * from './queue-names.js';
 export * from './locations.js';
 export * from './matchmaking-queue.js';
+export * from './pairing.js';
 export * from './round-advancement.js';
+export * from './rating.js';
 export * from './types.js';

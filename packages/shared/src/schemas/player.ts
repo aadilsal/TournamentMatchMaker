@@ -6,7 +6,6 @@ export const updatePlayerSchema = z.object({
   city: z.string().max(100).optional().nullable(),
   hasVrHeadset: z.boolean().optional(),
   vrDeviceType: z.string().max(100).optional().nullable(),
-  skillTier: z.number().int().min(1).max(5).optional(),
 });
 
 export const uploadAvatarSchema = z.object({

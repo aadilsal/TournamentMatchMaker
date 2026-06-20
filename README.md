@@ -61,19 +61,21 @@ pnpm dev   # API :3000, Web :5173, Worker
 ### Tournaments (Phase 3)
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/tournaments` | List tournaments |
+| GET | `/api/v1/tournaments` | List tournaments (public) |
 | GET | `/api/v1/tournaments/:id` | Tournament detail |
 | POST | `/api/v1/tournaments/:id/register` | Register |
+| POST | `/api/v1/tournaments/:id/enter` | Book (if needed) + register + auto-enqueue |
 | DELETE | `/api/v1/tournaments/:id/register` | Withdraw |
+| POST | `/api/v1/tournaments/:id/buyback` | Buy back a life (normal rounds, while round open) |
 | GET | `/api/v1/tournaments/:id/bracket` | Bracket MVP |
 | POST | `/api/v1/tournaments` | Create (admin) |
 
-### Matchmaking (Phase 3)
+### Matchmaking (automatic — no manual queue UI)
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/matchmaking/queue` | Join queue |
+| GET | `/api/v1/matchmaking/status` | Whether user is waiting for a match |
+| POST | `/api/v1/matchmaking/queue` | Internal / legacy join |
 | DELETE | `/api/v1/matchmaking/queue` | Leave queue |
-| GET | `/api/v1/matchmaking/status` | Queue status |
 
 ### Matches (Phase 3)
 | Method | Path | Description |

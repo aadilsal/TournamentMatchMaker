@@ -12,6 +12,22 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
   const router = Router();
   const authService = new AuthService(pool, redis, env);
 
+  router.get('/check-availability', async (req, res, next) => {
+    try {
+      const email = typeof req.query.email === 'string' ? req.query.email : undefined;
+      const username = typeof req.query.username === 'string' ? req.query.username : undefined;
+
+      if (!email && !username) {
+        return sendSuccess(res, { emailTaken: false, usernameTaken: false });
+      }
+
+      const result = await authService.checkAvailability({ email, username });
+      sendSuccess(res, result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.post('/register', validate(registerSchema), async (req, res, next) => {
     try {
       const result = await authService.register(req.body);

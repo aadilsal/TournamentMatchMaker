@@ -9,12 +9,15 @@
     "migrate:up": "node --env-file=../../.env scripts/migrate-up.mjs",
     "migrate:down": "node --env-file=../../.env ./node_modules/node-pg-migrate/bin/node-pg-migrate down --migrations-dir migrations --migration-file-language sql",
     "migrate:baseline": "node --env-file=../../.env scripts/migrate-baseline.mjs",
+    "db:repair": "node --env-file=../../.env scripts/repair-schema.mjs",
     "db:reset": "node --env-file=../../.env scripts/db-reset.mjs",
-    "seed": "tsx seeds/dev.ts"
+    "seed": "node --env-file=../../.env scripts/repair-schema.mjs && tsx seeds/dev.ts"
   },
   "dependencies": {
+    "@vr-tournament/shared": "workspace:*",
     "bcryptjs": "^3.0.2",
     "dotenv": "^16.4.7",
+    "ioredis": "^5.6.0",
     "pg": "^8.14.1"
   },
   "devDependencies": {

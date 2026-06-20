@@ -133,13 +133,13 @@ export function BookingsPage() {
         </div>
       )}
 
-      {bookings.length === 0 && !isLoading && (
+      {bookings.length > 0 && (
         <p className="text-center text-sm text-[var(--color-muted-foreground)]">
-          Or{' '}
-          <Link to="/matchmaking" className="text-[var(--color-primary)] hover:underline font-medium">
-            join the matchmaking queue
+          Your match will appear on{' '}
+          <Link to="/matches" className="text-[var(--color-primary)] hover:underline font-medium">
+            My Matches
           </Link>{' '}
-          to get a venue assigned automatically.
+          once an opponent is found.
         </p>
       )}
     </div>

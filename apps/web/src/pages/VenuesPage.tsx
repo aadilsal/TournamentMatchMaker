@@ -73,7 +73,7 @@ export function VenuesPage() {
         </p>
         {showWelcome && (
           <div className="mt-4 ml-11 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 px-4 py-3 text-sm">
-            Welcome! Book a slot at a nearby arena, then head to matchmaking when you&apos;re ready.
+            Join a tournament and we&apos;ll automatically find your opponent.
           </div>
         )}
       </motion.div>

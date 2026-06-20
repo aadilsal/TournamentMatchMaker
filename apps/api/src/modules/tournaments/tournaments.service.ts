@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type {
   BuybackInput,
   CreateTournamentInput,
+  EnterTournamentInput,
   RegisterTournamentInput,
   TournamentListQuery,
   TournamentMatchesQuery,
@@ -20,6 +21,7 @@ import { enqueueNotification } from '../../lib/bullmq.js';
 import type { RedisClient } from '../../lib/redis.js';
 import { requeuePlayer, removeFromQueue } from '../../lib/requeue-player.js';
 import { releaseSlotLock } from '../../lib/slot-lock.js';
+import { BookingsService } from '../bookings/bookings.service.js';
 import {
   KNOCKOUT_ROUNDS,
   knockoutRoundLabel,
@@ -146,12 +148,11 @@ export class TournamentsService {
       throw new AppError('CONFLICT', 'Tournament is not open for registration', 409);
     }
 
-    const userResult = await this.pool.query(`SELECT skill_tier FROM users WHERE id = $1`, [userId]);
-    const user = userResult.rows[0];
-    if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
-    if (user.skill_tier !== tournament.skillTier) {
-      throw new AppError('FORBIDDEN', 'Your skill tier does not match this tournament', 403);
-    }
+    const userResult = await this.pool.query(
+      `SELECT id FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (!userResult.rows[0]) throw new AppError('NOT_FOUND', 'User not found', 404);
 
     if (tournament.maxPlayers && (tournament.registrationCount ?? 0) >= tournament.maxPlayers) {
       throw new AppError('CONFLICT', 'Tournament is full', 409);
@@ -174,6 +175,7 @@ export class TournamentsService {
       const result = await client.query(
         `INSERT INTO tournament_registrations (tournament_id, user_id, booking_id)
          VALUES ($1, $2, $3)
+         ON CONFLICT (tournament_id, user_id) DO UPDATE SET booking_id = COALESCE(EXCLUDED.booking_id, tournament_registrations.booking_id)
          RETURNING *`,
         [tournamentId, userId, input.bookingId ?? null]
       );
@@ -210,6 +212,86 @@ export class TournamentsService {
     } finally {
       client.release();
     }
+  }
+
+  async enter(tournamentId: string, userId: string, input: EnterTournamentInput) {
+    if (!this.redis) throw new AppError('INTERNAL', 'Redis not configured', 500);
+
+    const tournament = await this.getById(tournamentId);
+    if (tournament.status !== 'open' && tournament.status !== 'in_progress') {
+      throw new AppError('CONFLICT', 'Tournament is not accepting entries', 409);
+    }
+
+    const userResult = await this.pool.query(
+      `SELECT has_vr_headset FROM users WHERE id = $1`,
+      [userId]
+    );
+    const user = userResult.rows[0];
+    if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
+
+    const existingReg = await this.getRegistration(tournamentId, userId);
+    let bookingId = existingReg?.bookingId ?? null;
+    let booking = null;
+    let preferredVenueId: string | null = null;
+
+    if (!user.has_vr_headset) {
+      if (!existingReg) {
+        if (!input.timeSlotId) {
+          throw new AppError('BAD_REQUEST', 'timeSlotId is required for venue players', 400);
+        }
+
+        const slotCheck = await this.pool.query(
+          `SELECT ts.id, ts.venue_id FROM time_slots ts
+           JOIN venues v ON v.id = ts.venue_id
+           WHERE ts.id = $1 AND v.active = TRUE`,
+          [input.timeSlotId]
+        );
+        if (!slotCheck.rows[0]) {
+          throw new AppError('BAD_REQUEST', 'Invalid time slot', 400);
+        }
+
+        if (input.venueId && input.venueId !== slotCheck.rows[0].venue_id) {
+          throw new AppError('BAD_REQUEST', 'Slot does not belong to the selected venue', 400);
+        }
+
+        preferredVenueId = slotCheck.rows[0].venue_id;
+        const bookingsService = new BookingsService(this.pool, this.redis);
+        booking = await bookingsService.create(userId, input.timeSlotId);
+        bookingId = booking.id;
+      } else if (bookingId) {
+        const venueRow = await this.pool.query(
+          `SELECT ts.venue_id FROM bookings b
+           JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
+          [bookingId]
+        );
+        preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
+      }
+    }
+
+    const registration = existingReg
+      ? existingReg
+      : await this.register(tournamentId, userId, { bookingId: bookingId ?? undefined });
+
+    const participant = await this.getParticipant(tournamentId, userId);
+    if (participant && !['active', 'advanced'].includes(participant.status)) {
+      throw new AppError('FORBIDDEN', 'You are eliminated from this tournament', 403);
+    }
+
+    const roundNumber = participant?.roundNumber ?? 1;
+
+    await removeFromQueue(this.redis, userId);
+    await requeuePlayer(this.pool, this.redis, userId, {
+      tournamentId,
+      preferredVenueId,
+      roundNumber,
+      bookingId,
+    }, this.env);
+
+    return {
+      registration,
+      booking,
+      searching: true,
+    };
   }
 
   async getRegistration(tournamentId: string, userId: string) {
@@ -288,6 +370,27 @@ export class TournamentsService {
       throw new AppError('CONFLICT', 'Only eliminated players can buy back', 409);
     }
 
+    const roundOpen = await this.pool.query(
+      `SELECT id FROM tournament_rounds
+       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at > NOW()`,
+      [tournamentId, participant.roundNumber]
+    );
+    if (!roundOpen.rows[0]) {
+      throw new AppError('CONFLICT', 'Round time has ended — buybacks are no longer available', 409);
+    }
+
+    const reg = await this.getRegistration(tournamentId, userId);
+    let preferredVenueId: string | null = null;
+    if (reg?.bookingId) {
+      const venueRow = await this.pool.query(
+        `SELECT ts.venue_id FROM bookings b
+         JOIN time_slots ts ON ts.id = b.time_slot_id
+         WHERE b.id = $1`,
+        [reg.bookingId]
+      );
+      preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
+    }
+
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -299,7 +402,7 @@ export class TournamentsService {
         [
           userId,
           tournamentId,
-          tournament.currentRoundNumber,
+          participant.roundNumber,
           input.matchId ?? null,
           tournament.buybackPriceCents,
         ]
@@ -314,7 +417,12 @@ export class TournamentsService {
 
       await client.query('COMMIT');
 
-      await requeuePlayer(this.pool, this.redis, userId, { tournamentId });
+      await requeuePlayer(this.pool, this.redis, userId, {
+        tournamentId,
+        roundNumber: participant.roundNumber,
+        preferredVenueId,
+        bookingId: reg?.bookingId ?? null,
+      }, this.env);
 
       if (this.env) {
         enqueueNotification(this.env, {
@@ -420,7 +528,7 @@ export class TournamentsService {
       await removeFromQueue(this.redis, userId);
 
       for (const otherId of toRequeue) {
-        await requeuePlayer(this.pool, this.redis, otherId, { tournamentId });
+        await requeuePlayer(this.pool, this.redis, otherId, { tournamentId }, this.env);
       }
 
       if (this.env) {

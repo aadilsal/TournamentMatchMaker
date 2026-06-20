@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { UpdatePlayerInput, UploadAvatarInput } from '@vr-tournament/shared';
+import type { UpdatePlayerInput, UploadAvatarInput, BuybackOption } from '@vr-tournament/shared';
 import { mapMatch, mapUser } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 
@@ -38,7 +38,6 @@ export class PlayersService {
       city: input.city,
       has_vr_headset: input.hasVrHeadset,
       vr_device_type: input.vrDeviceType,
-      skill_tier: input.skillTier,
     };
 
     for (const [col, val] of Object.entries(mapping)) {
@@ -165,5 +164,28 @@ export class PlayersService {
       [username]
     );
     return result.rows[0]?.id ?? null;
+  }
+
+  async getBuybackOptions(userId: string): Promise<BuybackOption[]> {
+    const result = await this.pool.query(
+      `SELECT t.id AS tournament_id, t.name AS tournament_name, t.buyback_price_cents, tp.round_number
+       FROM tournament_participants tp
+       JOIN tournaments t ON t.id = tp.tournament_id
+       JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = tp.round_number
+       WHERE tp.user_id = $1
+         AND tp.status = 'eliminated'
+         AND t.phase = 'normal'
+         AND tr.status = 'active'
+         AND tr.ends_at > NOW()
+       ORDER BY t.name ASC`,
+      [userId]
+    );
+
+    return result.rows.map((row) => ({
+      tournamentId: row.tournament_id,
+      tournamentName: row.tournament_name,
+      buybackPriceCents: row.buyback_price_cents,
+      roundNumber: row.round_number,
+    }));
   }
 }

@@ -35,7 +35,8 @@ export function createRateLimiter(env: Env, maxRequests: number, keyFn: (req: Re
 }
 
 export function publicRateLimit(env: Env) {
-  return createRateLimiter(env, 20, (req) => `public:${req.ip}`);
+  const maxRequests = env.NODE_ENV === 'development' ? 500 : 20;
+  return createRateLimiter(env, maxRequests, (req) => `public:${req.ip}`);
 }
 
 export function authRateLimit(env: Env) {
