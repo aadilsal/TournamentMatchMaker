@@ -34,7 +34,7 @@ async function reset() {
 
 await reset();
 
-const child = spawn('node', ['--env-file=../../.env', 'scripts/migrate-up.mjs'], {
+const child = spawn('node', ['scripts/migrate-up.mjs'], {
   cwd: resolve(__dirname, '..'),
   stdio: 'inherit',
   shell: true,

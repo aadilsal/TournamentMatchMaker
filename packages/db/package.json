@@ -6,12 +6,12 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "migrate:up": "node --env-file=../../.env scripts/migrate-up.mjs",
-    "migrate:down": "node --env-file=../../.env ./node_modules/node-pg-migrate/bin/node-pg-migrate down --migrations-dir migrations --migration-file-language sql",
-    "migrate:baseline": "node --env-file=../../.env scripts/migrate-baseline.mjs",
-    "db:repair": "node --env-file=../../.env scripts/repair-schema.mjs",
-    "db:reset": "node --env-file=../../.env scripts/db-reset.mjs",
-    "seed": "node --env-file=../../.env scripts/repair-schema.mjs && tsx seeds/dev.ts"
+    "migrate:up": "node scripts/migrate-up.mjs",
+    "migrate:down": "node scripts/migrate-down.mjs",
+    "migrate:baseline": "node scripts/migrate-baseline.mjs",
+    "db:repair": "node scripts/repair-schema.mjs",
+    "db:reset": "node scripts/db-reset.mjs",
+    "seed": "node scripts/repair-schema.mjs && tsx seeds/dev.ts"
   },
   "dependencies": {
     "@vr-tournament/shared": "workspace:*",
