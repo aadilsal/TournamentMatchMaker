@@ -22,6 +22,14 @@ export async function fetchLocationFromIp(): Promise<IpLocation> {
   return apiGet<IpLocation>('/geo/location');
 }
 
+export async function fetchLocationFromCoords(lat: number, lng: number): Promise<IpLocation> {
+  const params = new URLSearchParams({
+    lat: String(lat),
+    lng: String(lng),
+  });
+  return apiGet<IpLocation>(`/geo/reverse?${params.toString()}`);
+}
+
 export function matchCityName(city: string, cities: string[]): string | undefined {
   if (!city) return undefined;
   const exact = cities.find((c) => c === city);

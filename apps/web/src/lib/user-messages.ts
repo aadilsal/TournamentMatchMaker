@@ -11,6 +11,8 @@ const BY_CODE: Record<string, string> = {
   VALIDATION_ERROR: 'Please check your details and try again.',
   INTERNAL_ERROR: GENERIC,
   GEO_LOOKUP_FAILED: 'We could not detect your location. Enter your city manually.',
+  GEO_OUT_OF_RANGE:
+    'We could not find a supported venue city near you. Please select Lahore or Karachi manually.',
   GEO_CITIES_FAILED: 'We could not load cities for that country.',
 };
 

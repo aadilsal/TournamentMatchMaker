@@ -22,10 +22,11 @@ import {
   passwordStrengthLabel,
   passwordStrengthScore,
 } from '@/lib/password-strength';
-import { Check, Trophy, MapPin, X } from 'lucide-react';
+import { Check, Trophy, MapPin, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
+import { fetchLocationFromCoords } from '@/lib/location-api';
 import { downloadPlayerQR } from '@/lib/player-qr';
 
 /* ─────────────────────────────────────────────
@@ -279,6 +280,7 @@ export function RegisterPage() {
   const [form, setForm] = useState(initialForm);
   const [availabilityErrors, setAvailabilityErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState('');
+  const [locationLoading, setLocationLoading] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<string, boolean>>>({});
 
   const schemaErrors = useMemo(() => parseFieldErrors(form), [form]);
@@ -396,13 +398,58 @@ export function RegisterPage() {
       setServerError('Location sharing is not supported in this browser. Enter your city instead.');
       return;
     }
+    if (locationLoading) return;
+
+    setLocationLoading(true);
+    setServerError('');
+
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        update('latitude', pos.coords.latitude);
-        update('longitude', pos.coords.longitude);
-        setServerError('');
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+
+        void fetchLocationFromCoords(lat, lng)
+          .then((resolved) => {
+            setForm((current) => ({
+              ...current,
+              latitude: lat,
+              longitude: lng,
+              country: resolved.country,
+              city: resolved.city,
+            }));
+            setServerError('');
+          })
+          .catch((err: unknown) => {
+            setForm((current) => ({
+              ...current,
+              latitude: lat,
+              longitude: lng,
+            }));
+            setServerError(getUserErrorMessage(err));
+          })
+          .finally(() => setLocationLoading(false));
       },
-      () => setServerError('We could not detect your location. Enter your city or try again.')
+      (err) => {
+        setLocationLoading(false);
+        if (err.code === err.PERMISSION_DENIED) {
+          setServerError(
+            'Location permission was blocked. Allow location in your browser settings, or enter your city manually.'
+          );
+          return;
+        }
+        if (err.code === err.POSITION_UNAVAILABLE) {
+          setServerError(
+            'Location is unavailable. Turn on Windows location services, or enter your city manually.'
+          );
+          return;
+        }
+        if (err.code === err.TIMEOUT) {
+          setServerError('Location timed out. Try again or enter your city manually.');
+          return;
+        }
+        setServerError('We could not detect your location. Enter your city or try again.');
+      },
+      { enableHighAccuracy: false, timeout: 15_000, maximumAge: 60_000 }
     );
   };
 
@@ -678,13 +725,34 @@ export function RegisterPage() {
                   <p className="text-sm text-[var(--color-muted-foreground)]">
                     No headset? Share your location so we can suggest the closest VR arenas for venue play.
                   </p>
-                  <Button type="button" variant="outline" size="sm" className="gap-2" onClick={requestLocation}>
-                    <MapPin className="h-4 w-4" />
-                    Use my location
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={requestLocation}
+                    disabled={locationLoading}
+                  >
+                    {locationLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <MapPin className="h-4 w-4" />
+                    )}
+                    {locationLoading ? 'Detecting location…' : 'Use my location'}
                   </Button>
-                  {form.latitude !== undefined && form.longitude !== undefined && (
+                  {form.latitude !== undefined &&
+                    form.longitude !== undefined &&
+                    form.country &&
+                    form.city && (
                     <p className="text-xs text-emerald-400">
-                      Location saved — we&apos;ll find venues near you when matching.
+                      Location saved — {form.city}, {form.country}. We&apos;ll find venues near you when matching.
+                    </p>
+                  )}
+                  {form.latitude !== undefined &&
+                    form.longitude !== undefined &&
+                    (!form.country || !form.city) && (
+                    <p className="text-xs text-emerald-400">
+                      Coordinates saved. Select your country and city above if they weren&apos;t filled automatically.
                     </p>
                   )}
                   {nearbyVenues.length > 0 && (

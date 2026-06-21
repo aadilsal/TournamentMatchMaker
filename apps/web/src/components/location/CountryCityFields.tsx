@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { matchCityName, matchCountryName } from '@/lib/location-api';
+import { getCitiesForCountry } from '@vr-tournament/shared';
 import { useCities, useCountries, useIpLocation } from '@/hooks/useCountriesCities';
 
 interface CountryCityFieldsProps {
@@ -52,7 +53,8 @@ export function CountryCityFields({
     if (!matchedCountry) return;
 
     ipApplied.current = true;
-    const detectedCity = ipLocation.city || '';
+    const supportedCities = getCitiesForCountry(matchedCountry);
+    const detectedCity = matchCityName(ipLocation.city || '', supportedCities) ?? '';
     if (onLocationDetectedRef.current) {
       onLocationDetectedRef.current(matchedCountry, detectedCity);
     } else {

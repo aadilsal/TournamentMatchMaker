@@ -3,6 +3,7 @@ import {
   SUPPORTED_COUNTRIES,
   ALL_VENUE_CITIES,
   normalizeCity,
+  nearestSupportedCity,
 } from '@vr-tournament/shared';
 import { AppError } from '../../lib/response.js';
 import { isPrivateOrLoopback } from '../../lib/client-ip.js';
@@ -41,7 +42,7 @@ function snapToSupported(location: GeoLocation): GeoLocation {
   const cityMatch = cities.find((c) => normalizeCity(c) === normalizeCity(location.city));
   return {
     country,
-    city: cityMatch ?? location.city,
+    city: cityMatch ?? '',
   };
 }
 
@@ -70,6 +71,18 @@ async function tryIpApiCom(ip: string | undefined): Promise<GeoLocation | null> 
 }
 
 export class GeoService {
+  getLocationFromCoords(lat: number, lng: number): GeoLocation {
+    const snapped = nearestSupportedCity(lat, lng);
+    if (!snapped) {
+      throw new AppError(
+        'GEO_OUT_OF_RANGE',
+        'No supported venues near your location. Please select your country and city manually.',
+        404
+      );
+    }
+    return { country: snapped.country, city: snapped.city };
+  }
+
   async getLocationFromIp(clientIp: string): Promise<GeoLocation> {
     const providers = [tryIpWho, tryIpApiCo, tryIpApiCom];
     for (const provider of providers) {
