@@ -11,6 +11,7 @@ import {
   type RegisterInput,
 } from '@vr-tournament/shared';
 import { apiPost, setAccessToken } from '@/lib/api';
+import { connectSocket } from '@/hooks/useSocket';
 import { getRegisterConflict, getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -298,6 +299,7 @@ export function RegisterPage() {
       apiPost<AuthTokens>('/auth/register', payload),
     onSuccess: async (data, variables) => {
       setAccessToken(data.accessToken);
+      connectSocket();
       try {
         await downloadPlayerQR(data.user.id, data.user.username);
       } catch (err) {

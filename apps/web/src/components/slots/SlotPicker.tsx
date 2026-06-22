@@ -22,8 +22,9 @@ export function formatSlotTime(iso: string) {
 function getSlotMeta(slot: TimeSlot) {
   const available = Math.max(0, slot.maxCapacity - slot.bookedCount);
   const isFull = slot.status === 'full' || available <= 0;
+  const isPast = new Date(slot.startTime).getTime() <= Date.now();
   const fillPercent = slot.maxCapacity > 0 ? (slot.bookedCount / slot.maxCapacity) * 100 : 100;
-  return { available, isFull, fillPercent };
+  return { available, isFull, isPast, fillPercent };
 }
 
 interface SlotDateStripProps {
@@ -119,7 +120,8 @@ export function TimeSlotGrid({
     <div className="grid gap-3 sm:grid-cols-2">
       {slots.map((slot) => {
         const meta = getSlotMeta(slot);
-        const { available, isFull, fillPercent } = meta;
+        const { available, isFull, isPast, fillPercent } = meta;
+        const unavailable = isFull || isPast;
         const isSelected = selectedSlotId === slot.id;
         const interactive = !!onSlotSelect && !renderSlotAction;
 
@@ -166,7 +168,7 @@ export function TimeSlotGrid({
                     : fillPercent >= 85
                       ? 'bg-amber-500'
                       : fillPercent >= 60
-                        ? 'bg-violet-400'
+                        ? 'bg-red-400'
                         : 'bg-[var(--color-primary)]'
                 )}
                 style={{ width: `${Math.min(100, fillPercent)}%` }}
@@ -181,7 +183,7 @@ export function TimeSlotGrid({
               key={slot.id}
               className={cn(
                 'rounded-2xl border bg-[var(--color-card)] p-4 transition-colors',
-                isFull ? 'border-[var(--color-border)] opacity-60' : 'border-[var(--color-border)]'
+                unavailable ? 'border-[var(--color-border)] opacity-60' : 'border-[var(--color-border)]'
               )}
             >
               {content}
@@ -193,11 +195,11 @@ export function TimeSlotGrid({
           <button
             key={slot.id}
             type="button"
-            disabled={isFull}
+            disabled={unavailable}
             onClick={() => onSlotSelect?.(slot)}
             className={cn(
               'rounded-2xl border p-4 text-left transition-all duration-200',
-              isFull
+              unavailable
                 ? 'cursor-not-allowed border-[var(--color-border)] bg-[var(--color-card)]/40 opacity-50'
                 : isSelected
                   ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 shadow-md shadow-[var(--color-primary)]/10'

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import type { TimeSlot, Tournament, User, Venue } from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
+import { LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { PageLoader } from '@/components/ui/cricket-loader';
@@ -51,6 +52,8 @@ export function PlayFlowPage() {
     queryKey: ['slots', selectedVenue?.id, selectedDate],
     queryFn: () => apiGet<TimeSlot[]>(`/venues/${selectedVenue!.id}/slots?date=${selectedDate}`),
     enabled: !!selectedVenue?.id && step === 'slot',
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: step === 'slot' ? SAFETY_POLL_MS : false,
   });
 
   const enterMutation = useMutation({

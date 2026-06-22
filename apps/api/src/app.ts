@@ -18,6 +18,8 @@ import { createMatchmakingRouter } from './modules/matchmaking/matchmaking.route
 import { createMatchesRouter } from './modules/matches/matches.routes.js';
 import { createNotificationsRouter } from './modules/notifications/notifications.routes.js';
 import { createGeoRouter } from './modules/geo/geo.routes.js';
+import { createMetaIntegrationRouter } from './modules/integrations/meta.routes.js';
+import { createStripeWebhookRouter } from './modules/integrations/stripe.webhook.js';
 import { sendSuccess } from './lib/response.js';
 
 export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
@@ -26,6 +28,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   app.set('trust proxy', 1);
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
+  app.use('/webhooks/stripe', createStripeWebhookRouter(pool, redis, env));
   app.use(express.json());
   app.use(cookieParser());
   app.use(pinoHttp({ level: env.NODE_ENV === 'production' ? 'info' : 'debug' }));
@@ -47,6 +50,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   v1.use('/matchmaking', authRateLimit(env), createMatchmakingRouter(pool, redis, env));
   v1.use('/matches', authRateLimit(env), createMatchesRouter(pool, redis, env));
   v1.use('/notifications', authRateLimit(env), createNotificationsRouter(pool, env));
+  v1.use('/integrations/meta', createMetaIntegrationRouter(pool, redis, env));
 
   app.use('/api/v1', v1);
   app.use(errorHandler);

@@ -162,8 +162,29 @@ export interface TournamentParticipant {
   losses: number;
   buybackCount: number;
   roundNumber: number;
+  soloTarget: number | null;
+  soloPlayedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface MetaCurrentMatchResponse {
+  inQueue: boolean;
+  queueSize: number | null;
+  canSubmitSoloTarget: boolean;
+  soloTarget: number | null;
+  match: {
+    id: string;
+    status: MatchStatus;
+    opponent: { id: string; username: string; skillTier: number };
+    venue: { id: string; name: string; city: string } | null;
+    slot: { id: string; startTime: string; endTime: string } | null;
+    chaseTarget: number | null;
+    amChasing: boolean;
+    myScore: number | null;
+    opponentScore: number | null;
+    scheduledAt: string | null;
+  } | null;
 }
 
 export interface Buyback {
@@ -174,7 +195,14 @@ export interface Buyback {
   matchId: string | null;
   amountCents: number;
   status: BuybackStatus;
+  stripePaymentIntentId: string | null;
   createdAt: string;
+}
+
+export interface BuybackCheckoutSession {
+  clientSecret: string;
+  buybackId: string;
+  amountCents: number;
 }
 
 export interface BuybackOption {
@@ -192,10 +220,21 @@ export interface TournamentRegistration {
   registeredAt: string;
 }
 
+export type MatchScoreSource = 'meta' | 'manual';
+
 export interface MatchResult {
   player1Score: number | null;
   player2Score: number | null;
   winnerId: string | null;
+}
+
+export interface MatchResultExtended extends MatchResult {
+  player1Target?: number | null;
+  player2Target?: number | null;
+  chaseTarget?: number | null;
+  chasePlayerId?: string | null;
+  source?: MatchScoreSource;
+  outcome?: 'win' | 'loss' | 'rematch' | 'solo_pending' | null;
 }
 
 export interface MatchConfirmations {
@@ -211,11 +250,12 @@ export interface Match {
   venueId: string | null;
   timeSlotId: string | null;
   status: MatchStatus;
-  result: MatchResult | null;
+  result: MatchResultExtended | null;
   scheduledAt: string | null;
   roundNumber: number | null;
   phase: MatchPhase | null;
   bracketSlot: number | null;
+  rematchOfMatchId: string | null;
   createdAt: string;
   updatedAt: string;
   player1?: Pick<User, 'id' | 'username' | 'skillTier' | 'hasVrHeadset'>;

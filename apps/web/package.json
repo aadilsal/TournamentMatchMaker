@@ -14,6 +14,8 @@
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/react-query": "^5.69.0",
+    "@stripe/react-stripe-js": "^3.7.0",
+    "@stripe/stripe-js": "^5.7.0",
     "@vr-tournament/shared": "workspace:*",
     "axios": "^1.8.4",
     "clsx": "^2.1.1",
@@ -28,6 +30,7 @@
     "tailwind-merge": "^3.0.2"
   },
   "devDependencies": {
+    "@tanstack/react-query-devtools": "^5.69.0",
     "@tailwindcss/vite": "^4.0.14",
     "@types/node": "^22.19.20",
     "@types/qrcode": "^1.5.6",

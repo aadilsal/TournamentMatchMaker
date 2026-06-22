@@ -18,6 +18,13 @@ const BY_CODE: Record<string, string> = {
 
 const BY_MESSAGE: Record<string, string> = {
   'invalid email or password': 'Incorrect email or password. Please try again.',
+  'invalid or expired refresh token': 'Your session has expired. Please sign in again.',
+  'invalid or expired token': 'Your session has expired. Please sign in again.',
+  'token has been revoked': 'Your session has ended. Please sign in again.',
+  'missing or invalid authorization header': 'Please sign in to continue.',
+  'authentication required': 'Please sign in to continue.',
+  'refresh token missing': 'Your session has expired. Please sign in again.',
+  'invalid request data': 'Please check your details and try again.',
   'email or username already exists': 'This email or username is already in use.',
   'this email is already registered': 'This email is already registered. Try signing in instead.',
   'this username is taken': 'This username is already taken. Please choose another.',
@@ -34,7 +41,8 @@ const BY_MESSAGE: Record<string, string> = {
   'not a participant in this match': 'You are not part of this match.',
   'match cannot be declined': 'This match can no longer be declined.',
   'match is not currently playable': 'This match is not ready to play yet.',
-  'you have already submitted your score': 'You have already submitted your score.',
+  'scores must be submitted from your meta quest headset':
+    'Scores are submitted from your Meta Quest headset.',
   'register for tournament before joining its queue': 'Register for the tournament before joining the queue.',
   'you are eliminated from this tournament': 'You have been eliminated from this tournament.',
   'buybacks are only available during normal rounds': 'Buybacks are only available during the regular rounds.',
@@ -58,10 +66,6 @@ function matchByPartialMessage(message: string): string | undefined {
 
 export function friendlyApiError(error: ApiError | null | undefined): string {
   if (!error?.message) return GENERIC;
-
-  if (error.code && BY_CODE[error.code] && error.code !== 'CONFLICT') {
-    return BY_CODE[error.code]!;
-  }
 
   const byMessage = matchByPartialMessage(error.message);
   if (byMessage) return byMessage;

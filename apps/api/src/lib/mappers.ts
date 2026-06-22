@@ -173,6 +173,7 @@ interface MatchRow {
   round_number?: number | null;
   phase?: string | null;
   bracket_slot?: number | null;
+  rematch_of_match_id?: string | null;
   created_at: Date;
   updated_at: Date;
   p1_username?: string;
@@ -250,6 +251,8 @@ interface ParticipantRow {
   losses: number;
   buyback_count: number;
   round_number: number;
+  solo_target?: number | null;
+  solo_played_at?: Date | null;
   created_at: Date;
   updated_at: Date;
   username?: string;
@@ -266,6 +269,8 @@ export function mapParticipant(row: ParticipantRow): TournamentParticipant {
     losses: row.losses,
     buybackCount: row.buyback_count,
     roundNumber: row.round_number,
+    soloTarget: row.solo_target ?? null,
+    soloPlayedAt: row.solo_played_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -279,6 +284,7 @@ interface BuybackRow {
   match_id: string | null;
   amount_cents: number;
   status: string;
+  stripe_payment_intent_id?: string | null;
   created_at: Date;
 }
 
@@ -291,6 +297,7 @@ export function mapBuyback(row: BuybackRow): Buyback {
     matchId: row.match_id,
     amountCents: row.amount_cents,
     status: row.status as Buyback['status'],
+    stripePaymentIntentId: row.stripe_payment_intent_id ?? null,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -319,6 +326,7 @@ export function mapMatch(row: MatchRow): Match {
     roundNumber: row.round_number ?? null,
     phase: (row.phase as MatchPhase) ?? null,
     bracketSlot: row.bracket_slot ?? null,
+    rematchOfMatchId: row.rematch_of_match_id ?? null,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };

@@ -40,3 +40,44 @@ export async function releaseSlotLock(
     [slotId]
   );
 }
+
+export async function finalizeMatchSlotBookings(
+  client: PoolClient,
+  redis: Redis,
+  slotId: string,
+  playerIds: string[]
+): Promise<void> {
+  const uniquePlayers = [...new Set(playerIds.filter(Boolean))];
+
+  const slotResult = await client.query(
+    `SELECT * FROM time_slots WHERE id = $1 FOR UPDATE`,
+    [slotId]
+  );
+  const slot = slotResult.rows[0];
+  if (!slot) throw new Error('Slot not found');
+
+  let bookedCount = slot.booked_count;
+
+  for (const userId of uniquePlayers) {
+    const existing = await client.query(
+      `SELECT id FROM bookings
+       WHERE user_id = $1 AND time_slot_id = $2 AND status != 'cancelled'`,
+      [userId, slotId]
+    );
+    if (!existing.rows[0]) {
+      await client.query(
+        `INSERT INTO bookings (user_id, time_slot_id, status)
+         VALUES ($1, $2, 'confirmed')`,
+        [userId, slotId]
+      );
+      bookedCount += 1;
+    }
+  }
+
+  const newStatus = bookedCount >= slot.max_capacity ? 'full' : 'available';
+  await client.query(
+    `UPDATE time_slots SET booked_count = $1, status = $2 WHERE id = $3`,
+    [bookedCount, newStatus, slotId]
+  );
+  await redis.del(slotLockKey(slotId));
+}

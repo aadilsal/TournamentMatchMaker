@@ -14,3 +14,8 @@ export function emitToUser(userId: string, event: string, data: unknown) {
   if (!ioInstance) return;
   ioInstance.to(`user:${userId}`).emit(event, data);
 }
+
+export function emitBroadcast(event: string, data: unknown) {
+  if (!ioInstance) return;
+  ioInstance.emit(event, data);
+}

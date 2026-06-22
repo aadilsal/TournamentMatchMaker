@@ -3,7 +3,8 @@ import type { Redis } from 'ioredis';
 import { SOCKET_EMIT_CHANNEL } from '../lib/queue-keys.js';
 
 interface SocketEmitMessage {
-  userId: string;
+  userId?: string;
+  broadcast?: boolean;
   event: string;
   data: unknown;
 }
@@ -14,7 +15,11 @@ export function subscribeSocketBridge(subscriber: Redis, io: Server) {
     if (channel !== SOCKET_EMIT_CHANNEL) return;
     try {
       const parsed = JSON.parse(message) as SocketEmitMessage;
-      io.to(`user:${parsed.userId}`).emit(parsed.event, parsed.data);
+      if (parsed.broadcast) {
+        io.emit(parsed.event, parsed.data);
+      } else if (parsed.userId) {
+        io.to(`user:${parsed.userId}`).emit(parsed.event, parsed.data);
+      }
     } catch (err) {
       console.error('Socket bridge parse error:', err);
     }

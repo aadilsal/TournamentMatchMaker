@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Venue, TimeSlot, Booking } from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
+import { LIVE_QUERY_KEYS, LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { SlotPicker, todayString } from '@/components/slots/SlotPicker';
@@ -26,16 +27,39 @@ export function VenueDetailPage() {
     queryKey: ['slots', id, selectedDate],
     queryFn: () => apiGet<TimeSlot[]>(`/venues/${id}/slots?date=${selectedDate}`),
     enabled: !!id,
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: SAFETY_POLL_MS,
   });
 
   const bookSlot = useMutation({
     mutationFn: (timeSlotId: string) => apiPost<Booking>('/bookings', { timeSlotId }),
+    onMutate: async (timeSlotId) => {
+      await queryClient.cancelQueries({ queryKey: ['slots', id, selectedDate] });
+      const previous = queryClient.getQueryData<TimeSlot[]>(['slots', id, selectedDate]);
+      queryClient.setQueryData<TimeSlot[]>(['slots', id, selectedDate], (old) =>
+        old?.map((slot) => {
+          if (slot.id !== timeSlotId) return slot;
+          const booked = slot.bookedCount + 1;
+          return {
+            ...slot,
+            bookedCount: booked,
+            status: booked >= slot.maxCapacity ? 'full' : slot.status,
+          };
+        })
+      );
+      return { previous };
+    },
+    onError: (err: Error, _slotId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(['slots', id, selectedDate], context.previous);
+      }
+      setBookingError(getUserErrorMessage(err));
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slots', id, selectedDate] });
-      queryClient.invalidateQueries({ queryKey: ['bookings'] });
+      queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.bookings });
       navigate('/bookings');
     },
-    onError: (err: Error) => setBookingError(getUserErrorMessage(err)),
   });
 
   const handleBook = (slotId: string) => {
@@ -79,13 +103,13 @@ export function VenueDetailPage() {
         onDateChange={setSelectedDate}
         slots={slots}
         isLoading={slotsLoading}
-        renderSlotAction={(slot, { isFull }) => (
+        renderSlotAction={(slot, { isFull, isPast }) => (
           <Button
             size="sm"
-            disabled={isFull || bookSlot.isPending}
+            disabled={isFull || isPast || bookSlot.isPending}
             onClick={() => handleBook(slot.id)}
           >
-            {isFull ? 'Full' : 'Book'}
+            {isPast ? 'Past' : isFull ? 'Full' : 'Book'}
           </Button>
         )}
       />

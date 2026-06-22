@@ -1,9 +1,15 @@
 import type { Pool } from 'pg';
+import { isSlotStartPast } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import { mapBooking, mapSlot, mapVenue } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
+import { emitBookingUpdated, emitSlotUpdated } from '../../socket/sync-events.js';
 
 const SLOT_LOCK_TTL = 300;
+
+function slotDateFromStartTime(startTime: Date | string): string {
+  return new Date(startTime).toISOString().slice(0, 10);
+}
 
 export class BookingsService {
   constructor(
@@ -40,6 +46,10 @@ export class BookingsService {
         throw new AppError('CONFLICT', 'Time slot is currently locked', 409);
       }
 
+      if (isSlotStartPast(slot.start_time)) {
+        throw new AppError('BAD_REQUEST', 'Cannot book a time slot that has already started', 400);
+      }
+
       const existingBooking = await client.query(
         `SELECT id FROM bookings
          WHERE user_id = $1 AND time_slot_id = $2 AND status != 'cancelled'`,
@@ -69,7 +79,16 @@ export class BookingsService {
 
       await this.redis.del(lockKey);
 
-      return mapBooking(bookingResult.rows[0]);
+      const booking = mapBooking(bookingResult.rows[0]);
+      emitBookingUpdated(userId, { bookingId: booking.id, action: 'created' });
+      emitSlotUpdated({
+        venueId: slot.venue_id,
+        slotId: timeSlotId,
+        status: newStatus,
+        date: slotDateFromStartTime(slot.start_time),
+      });
+
+      return booking;
     } catch (err) {
       await client.query('ROLLBACK');
       await this.redis.del(lockKey);
@@ -85,7 +104,7 @@ export class BookingsService {
       await client.query('BEGIN');
 
       const bookingResult = await client.query(
-        `SELECT b.*, ts.booked_count, ts.max_capacity
+        `SELECT b.*, ts.booked_count, ts.max_capacity, ts.venue_id, ts.start_time, ts.status AS slot_status
          FROM bookings b
          JOIN time_slots ts ON ts.id = b.time_slot_id
          WHERE b.id = $1 AND b.user_id = $2
@@ -114,7 +133,17 @@ export class BookingsService {
       );
 
       await client.query('COMMIT');
-      return mapBooking({ ...booking, status: 'cancelled' });
+
+      const cancelled = mapBooking({ ...booking, status: 'cancelled' });
+      emitBookingUpdated(userId, { bookingId, action: 'cancelled' });
+      emitSlotUpdated({
+        venueId: booking.venue_id,
+        slotId: booking.time_slot_id,
+        status: 'available',
+        date: slotDateFromStartTime(booking.start_time),
+      });
+
+      return cancelled;
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

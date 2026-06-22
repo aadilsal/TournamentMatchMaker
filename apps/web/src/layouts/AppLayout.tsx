@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Trophy, LogOut, User, MapPin, Calendar, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { SocketSyncProvider } from '@/components/sync/SocketSyncProvider';
 import { Button } from '@/components/ui/button';
 import { getAccessToken, setAccessToken, apiPost } from '@/lib/api';
+import { disconnectSocket } from '@/hooks/useSocket';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -17,12 +20,15 @@ const navItems = [
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
     try { await apiPost('/auth/logout'); } catch { /* proceed */ }
     setAccessToken(null);
+    disconnectSocket();
+    queryClient.clear();
     navigate('/login');
   };
 
@@ -32,6 +38,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const visibleItems = navItems.filter((item) => !item.auth || isLoggedIn);
 
   return (
+    <SocketSyncProvider>
     <div className="min-h-screen flex flex-col bg-[var(--color-background)]">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-card)]/90 backdrop-blur-md">
@@ -194,5 +201,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {children}
       </motion.main>
     </div>
+    </SocketSyncProvider>
   );
 }

@@ -25,6 +25,10 @@ export interface QueuePlayerHash {
   preferredVenueId: string;
   roundNumber: string;
   bookingId: string;
+  hasPlayedSolo: string;
+  soloTarget: string;
+  soloPlayedAt: string;
+  slotEndAt: string;
 }
 
 export interface QueuePlayerMeta {
@@ -40,6 +44,10 @@ export interface QueuePlayerMeta {
   preferredVenueId: string | null;
   roundNumber: number;
   bookingId: string | null;
+  hasPlayedSolo: boolean;
+  soloTarget: number | null;
+  soloPlayedAt: number | null;
+  slotEndAt: number | null;
 }
 
 export interface BuildQueuePlayerHashInput {
@@ -55,6 +63,10 @@ export interface BuildQueuePlayerHashInput {
   preferredVenueId?: string | null;
   roundNumber?: number;
   bookingId?: string | null;
+  hasPlayedSolo?: boolean;
+  soloTarget?: number | null;
+  soloPlayedAt?: number | null;
+  slotEndAt?: number | null;
 }
 
 export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePlayerHash {
@@ -73,6 +85,10 @@ export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePla
     preferredVenueId: input.preferredVenueId ?? '',
     roundNumber: String(input.roundNumber ?? 1),
     bookingId: input.bookingId ?? '',
+    hasPlayedSolo: input.hasPlayedSolo ? '1' : '0',
+    soloTarget: input.soloTarget != null ? String(input.soloTarget) : '',
+    soloPlayedAt: input.soloPlayedAt != null ? String(input.soloPlayedAt) : '',
+    slotEndAt: input.slotEndAt != null ? String(input.slotEndAt) : '',
   };
 }
 
@@ -91,5 +107,9 @@ export function parseQueuePlayerMeta(hash: Record<string, string>): QueuePlayerM
     preferredVenueId: hash.preferredVenueId || null,
     roundNumber: parseInt(hash.roundNumber, 10) || 1,
     bookingId: hash.bookingId || null,
+    hasPlayedSolo: hash.hasPlayedSolo === '1',
+    soloTarget: hash.soloTarget ? parseInt(hash.soloTarget, 10) : null,
+    soloPlayedAt: hash.soloPlayedAt ? parseInt(hash.soloPlayedAt, 10) : null,
+    slotEndAt: hash.slotEndAt ? parseInt(hash.slotEndAt, 10) : null,
   };
 }

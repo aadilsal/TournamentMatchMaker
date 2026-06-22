@@ -5,19 +5,47 @@ import { getAccessToken } from '@/lib/api';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
 let sharedSocket: AppSocket | null = null;
+let sharedToken: string | null = null;
 
-function getOrCreateSocket(): AppSocket | null {
+export function connectSocket(): AppSocket | null {
   const token = getAccessToken();
   if (!token) return null;
+
+  if (sharedSocket && sharedToken !== token) {
+    sharedSocket.disconnect();
+    sharedSocket.removeAllListeners();
+    sharedSocket = null;
+    sharedToken = null;
+  }
+
   if (!sharedSocket) {
     sharedSocket = io(API_URL, {
       auth: { token },
       transports: ['websocket', 'polling'],
+      autoConnect: true,
     });
+    sharedToken = token;
+  } else if (!sharedSocket.connected) {
+    sharedSocket.auth = { token };
+    sharedSocket.connect();
   }
+
+  return sharedSocket;
+}
+
+export function disconnectSocket() {
+  if (sharedSocket) {
+    sharedSocket.disconnect();
+    sharedSocket.removeAllListeners();
+    sharedSocket = null;
+    sharedToken = null;
+  }
+}
+
+export function getSocket(): AppSocket | null {
   return sharedSocket;
 }
 
@@ -26,8 +54,13 @@ export function useSocket(enabled = true) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    if (!enabled) return;
-    const s = getOrCreateSocket();
+    if (!enabled) {
+      setSocket(null);
+      setConnected(false);
+      return;
+    }
+
+    const s = connectSocket();
     if (!s) return;
     setSocket(s);
 

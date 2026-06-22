@@ -14,6 +14,7 @@ import {
 } from '../../lib/queue-keys.js';
 import { AppError } from '../../lib/response.js';
 import { emitToUser } from '../../socket/emitters.js';
+import { emitQueueUpdated } from '../../socket/sync-events.js';
 import { hasActiveMatch } from '../../lib/requeue-player.js';
 import { enqueuePairNow } from '../../lib/matchmaking-queue.js';
 import type { Env } from '../../config/env.js';
@@ -121,6 +122,12 @@ export class MatchmakingService {
       position: status.position ?? 1,
       queueSize: status.queueSize,
     });
+    emitQueueUpdated(userId, {
+      inQueue: true,
+      position: status.position,
+      queueSize: status.queueSize,
+      tournamentId: status.tournamentId,
+    });
     return status;
   }
 
@@ -141,7 +148,7 @@ export class MatchmakingService {
       }
     }
 
-    return {
+    const status = {
       inQueue: false,
       position: null,
       waitSeconds: 0,
@@ -149,6 +156,11 @@ export class MatchmakingService {
       tournamentId: meta.tournamentId || null,
       roundNumber: null,
     };
+    emitQueueUpdated(userId, {
+      inQueue: false,
+      tournamentId: status.tournamentId,
+    });
+    return status;
   }
 
   async getStatus(userId: string): Promise<QueueStatus> {

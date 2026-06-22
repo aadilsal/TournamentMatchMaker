@@ -1,23 +1,26 @@
 import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { QueuePairFailedEvent, QueueStatus, Tournament } from '@vr-tournament/shared';
 import { apiGet, getAccessToken } from '@/lib/api';
+import {
+  LIVE_QUERY_KEYS,
+  LIVE_STALE_TIME,
+  SAFETY_POLL_MS,
+  queueNeedsPolling,
+} from '@/lib/query-keys';
+import { useSocketEvent } from '@/hooks/useSocket';
 import { Button } from '@/components/ui/button';
 import { Badge, tournamentStatusBadge } from '@/components/ui/badge';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CricketBallLoader } from '@/components/ui/cricket-loader';
-import { MatchFoundModal } from '@/components/match/MatchFoundModal';
-import { useSocketEvent } from '@/hooks/useSocket';
 import { Trophy, Calendar, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function TournamentsPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
-  const [matchModal, setMatchModal] = useState<Parameters<typeof MatchFoundModal>[0]['match'] | null>(null);
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
 
   const { data: tournaments = [], isLoading } = useQuery({
@@ -26,17 +29,11 @@ export function TournamentsPage() {
   });
 
   const { data: queueStatus } = useQuery({
-    queryKey: ['matchmaking-status'],
+    queryKey: LIVE_QUERY_KEYS.matchmakingStatus,
     queryFn: () => apiGet<QueueStatus>('/matchmaking/status'),
     enabled: isLoggedIn,
-    refetchInterval: (q) => (q.state.data?.inQueue ? 2000 : false),
-  });
-
-  useSocketEvent('match:found', (data) => {
-    setQueueNotice(null);
-    setMatchModal(data);
-    queryClient.invalidateQueries({ queryKey: ['matchmaking-status'] });
-    queryClient.invalidateQueries({ queryKey: ['matches'] });
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: (q) => (queueNeedsPolling(q.state.data) ? SAFETY_POLL_MS : false),
   });
 
   useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
@@ -146,10 +143,6 @@ export function TournamentsPage() {
             );
           })}
         </div>
-      )}
-
-      {matchModal && (
-        <MatchFoundModal match={matchModal} onClose={() => setMatchModal(null)} />
       )}
     </div>
   );

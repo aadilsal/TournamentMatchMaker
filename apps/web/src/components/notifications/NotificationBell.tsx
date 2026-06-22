@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Notification } from '@vr-tournament/shared';
 import { apiGet, apiPatch } from '@/lib/api';
-import { useSocketEvent } from '@/hooks/useSocket';
+import { LIVE_QUERY_KEYS, LIVE_STALE_TIME } from '@/lib/query-keys';
 import { Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -11,31 +11,24 @@ export function NotificationBell() {
   const queryClient = useQueryClient();
 
   const { data } = useQuery({
-    queryKey: ['notifications'],
+    queryKey: LIVE_QUERY_KEYS.notifications,
     queryFn: async () => {
       const items = await apiGet<Notification[]>('/notifications?limit=10');
       return items;
     },
+    staleTime: LIVE_STALE_TIME,
   });
 
   const unreadCount = data?.filter((n) => !n.read).length ?? 0;
 
-  useSocketEvent('notification:new', () => {
-    queryClient.invalidateQueries({ queryKey: ['notifications'] });
-  });
-
-  useSocketEvent('match:found', () => {
-    queryClient.invalidateQueries({ queryKey: ['notifications'] });
-  });
-
   const markReadMutation = useMutation({
     mutationFn: (id: string) => apiPatch(`/notifications/${id}/read`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.notifications }),
   });
 
   const markAllMutation = useMutation({
     mutationFn: () => apiPatch('/notifications/read-all'),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.notifications }),
   });
 
   return (

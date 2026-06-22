@@ -9,6 +9,7 @@ import {
   queueTournamentKey,
 } from '@vr-tournament/shared';
 import { emitToUser } from '../socket/emitters.js';
+import { emitQueueUpdated } from '../socket/sync-events.js';
 import { enqueuePairNow } from './matchmaking-queue.js';
 import type { Env } from '../config/env.js';
 
@@ -18,6 +19,12 @@ export interface RequeueOptions {
   preferredCity?: string | null;
   roundNumber?: number;
   bookingId?: string | null;
+  hasPlayedSolo?: boolean;
+  soloTarget?: number | null;
+  soloPlayedAt?: number | null;
+  slotEndAt?: number | null;
+  /** Update queue metadata even when already in queue */
+  refreshIfQueued?: boolean;
 }
 
 export async function hasActiveMatch(pool: Pool, userId: string): Promise<boolean> {
@@ -73,7 +80,7 @@ export async function requeuePlayer(
   env?: Env
 ): Promise<boolean> {
   const inQueue = await redis.sismember(QUEUE_MEMBER, userId);
-  if (inQueue) return false;
+  if (inQueue && !options.refreshIfQueued) return false;
 
   if (await hasActiveMatch(pool, userId)) return false;
 
@@ -97,6 +104,38 @@ export async function requeuePlayer(
     bookingId = reg.rows[0]?.booking_id ?? null;
   }
 
+  let slotEndAt = options.slotEndAt ?? null;
+  let hasPlayedSolo = options.hasPlayedSolo ?? false;
+  let soloTarget = options.soloTarget ?? null;
+  let soloPlayedAt = options.soloPlayedAt ?? null;
+
+  if (tournamentId) {
+    const pRow = await pool.query(
+      `SELECT solo_target, solo_played_at FROM tournament_participants
+       WHERE tournament_id = $1 AND user_id = $2`,
+      [tournamentId, userId]
+    );
+    if (pRow.rows[0]?.solo_target != null) {
+      hasPlayedSolo = true;
+      soloTarget = pRow.rows[0].solo_target;
+      soloPlayedAt = pRow.rows[0].solo_played_at
+        ? new Date(pRow.rows[0].solo_played_at).getTime()
+        : soloPlayedAt;
+    }
+  }
+
+  if (bookingId && slotEndAt == null) {
+    const slotRow = await pool.query(
+      `SELECT ts.end_time FROM bookings b
+       JOIN time_slots ts ON ts.id = b.time_slot_id
+       WHERE b.id = $1 AND b.status = 'confirmed'`,
+      [bookingId]
+    );
+    if (slotRow.rows[0]?.end_time) {
+      slotEndAt = new Date(slotRow.rows[0].end_time).getTime();
+    }
+  }
+
   const joinedAt = Date.now();
   const queueKey = tournamentId ? queueTournamentKey(tournamentId) : QUEUE_GLOBAL;
 
@@ -113,15 +152,22 @@ export async function requeuePlayer(
     preferredVenueId: options.preferredVenueId ?? null,
     roundNumber,
     bookingId,
+    hasPlayedSolo,
+    soloTarget,
+    soloPlayedAt,
+    slotEndAt,
   });
 
+  const playerKey = queuePlayerKey(userId);
   const multi = redis.multi();
-  multi.zadd(queueKey, joinedAt, userId);
-  multi.sadd(QUEUE_MEMBER, userId);
-  multi.hset(queuePlayerKey(userId), hash);
-  if (tournamentId) {
-    multi.sadd(QUEUE_TOURNAMENT_INDEX, tournamentId);
+  if (!inQueue) {
+    multi.zadd(queueKey, joinedAt, userId);
+    multi.sadd(QUEUE_MEMBER, userId);
+    if (tournamentId) {
+      multi.sadd(QUEUE_TOURNAMENT_INDEX, tournamentId);
+    }
   }
+  multi.hset(playerKey, hash);
   await multi.exec();
 
   const queueSize = await redis.zcard(queueKey);
@@ -129,6 +175,11 @@ export async function requeuePlayer(
     position: null,
     queueSize,
     roundNumber,
+  });
+  emitQueueUpdated(userId, {
+    inQueue: true,
+    queueSize,
+    tournamentId: tournamentId ?? null,
   });
 
   if (env) {

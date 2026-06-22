@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
-import { Resend } from 'resend';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import type { WorkerEnv } from '../config/env.js';
 import { emitToUser } from '../lib/socket-bridge.js';
 import { matchFoundEmailHtml } from '../templates/match-found.email.js';
@@ -46,19 +46,32 @@ async function upsertNotification(
 async function sendEmail(env: WorkerEnv, to: string, subject: string, html: string) {
   if (!env.NOTIFICATION_EMAIL_ENABLED) return true;
 
-  if (!env.RESEND_API_KEY) {
+  const isSampleKey =
+    env.AWS_ACCESS_KEY_ID.startsWith('sample') || env.AWS_SECRET_ACCESS_KEY.startsWith('sample');
+
+  if (isSampleKey) {
     console.log(`[email:dev] To: ${to} | Subject: ${subject}\n${html}`);
     return true;
   }
 
-  const resend = new Resend(env.RESEND_API_KEY);
-  const { error } = await resend.emails.send({
-    from: env.RESEND_FROM_EMAIL,
-    to,
-    subject,
-    html,
+  const ses = new SESClient({
+    region: env.AWS_REGION,
+    credentials: {
+      accessKeyId: env.AWS_ACCESS_KEY_ID,
+      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
+    },
   });
-  if (error) throw new Error(error.message);
+
+  await ses.send(
+    new SendEmailCommand({
+      Source: env.AWS_SES_FROM_EMAIL,
+      Destination: { ToAddresses: [to] },
+      Message: {
+        Subject: { Data: subject, Charset: 'UTF-8' },
+        Body: { Html: { Data: html, Charset: 'UTF-8' } },
+      },
+    })
+  );
   return true;
 }
 
@@ -107,12 +120,14 @@ export async function processDispatchNotificationJob(
       const opponent = payload.opponent as { username?: string } | undefined;
       const venue = payload.venue as { name?: string } | undefined;
       const slot = payload.slot as { startTime?: string } | undefined;
-      subject = 'Match Found — Confirm Now';
+      const autoConfirmed = payload.autoConfirmed === true;
+      subject = autoConfirmed ? 'Your Match Is Ready — Pixel Paddle' : 'Match Found — Confirm Now';
       html = matchFoundEmailHtml({
         opponentUsername: opponent?.username ?? 'opponent',
         venueName: venue?.name,
         slotStart: slot?.startTime,
         confirmUrl: `${env.APP_URL}/matches`,
+        autoConfirmed,
       });
     } else if (type === 'tournament_registered') {
       subject = 'Tournament Registration Confirmed';

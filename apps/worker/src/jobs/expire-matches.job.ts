@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { matchConfirmKey } from '../lib/queue-keys.js';
 import { releaseSlotLock } from '../lib/slot-lock.js';
-import { emitToUser } from '../lib/socket-bridge.js';
+import { emitToUser, emitBroadcast } from '../lib/socket-bridge.js';
 
 export async function processExpireMatchesJob(
   _job: Job,
@@ -32,6 +32,10 @@ export async function processExpireMatchesJob(
         await client.query('COMMIT');
 
         for (const userId of [match.player1_id, match.player2_id]) {
+          await emitToUser(redis, userId, 'match:updated', {
+            matchId: match.id,
+            status: 'expired',
+          });
           await emitToUser(redis, userId, 'notification:new', {
             notification: {
               type: 'match_expired',
@@ -49,6 +53,21 @@ export async function processExpireMatchesJob(
             },
             { jobId: `match-expired:${match.id}:${userId}` }
           );
+        }
+        if (match.time_slot_id) {
+          const slotRow = await client.query(
+            `SELECT venue_id, start_time, status FROM time_slots WHERE id = $1`,
+            [match.time_slot_id]
+          );
+          const slot = slotRow.rows[0];
+          if (slot) {
+            await emitBroadcast(redis, 'slot:updated', {
+              venueId: slot.venue_id,
+              slotId: match.time_slot_id,
+              status: slot.status,
+              date: new Date(slot.start_time).toISOString().slice(0, 10),
+            });
+          }
         }
       } catch {
         await client.query('ROLLBACK');

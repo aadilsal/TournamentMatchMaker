@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Booking } from '@vr-tournament/shared';
 import { apiGet, apiDelete, getAccessToken } from '@/lib/api';
+import { LIVE_QUERY_KEYS, LIVE_STALE_TIME } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Badge, bookingStatusBadge } from '@/components/ui/badge';
 import { ListSkeleton } from '@/components/ui/skeleton';
@@ -29,27 +30,28 @@ export function BookingsPage() {
   }, [navigate]);
 
   const { data: bookings = [], isLoading } = useQuery({
-    queryKey: ['bookings'],
+    queryKey: LIVE_QUERY_KEYS.bookings,
     queryFn: () => apiGet<Booking[]>('/bookings/me'),
+    staleTime: LIVE_STALE_TIME,
   });
 
   const cancelBooking = useMutation({
     mutationFn: (id: string) => apiDelete<Booking>(`/bookings/${id}`),
     onMutate: async (id) => {
-      await queryClient.cancelQueries({ queryKey: ['bookings'] });
-      const previous = queryClient.getQueryData<Booking[]>(['bookings']);
+      await queryClient.cancelQueries({ queryKey: LIVE_QUERY_KEYS.bookings });
+      const previous = queryClient.getQueryData<Booking[]>(LIVE_QUERY_KEYS.bookings);
       queryClient.setQueryData<Booking[]>(
-        ['bookings'],
+        LIVE_QUERY_KEYS.bookings,
         (old) => old?.filter((b) => b.id !== id) ?? []
       );
       return { previous };
     },
     onError: (_err, _id, context) => {
       if (context?.previous) {
-        queryClient.setQueryData(['bookings'], context.previous);
+        queryClient.setQueryData(LIVE_QUERY_KEYS.bookings, context.previous);
       }
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: ['bookings'] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.bookings }),
   });
 
   return (

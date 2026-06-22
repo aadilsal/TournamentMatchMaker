@@ -20,6 +20,9 @@ export function setAccessToken(token: string | null) {
   } else {
     localStorage.removeItem('accessToken');
   }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('auth-changed'));
+  }
 }
 
 export function getAccessToken() {
@@ -111,7 +114,7 @@ api.interceptors.response.use(
       }
     }
 
-    return Promise.reject(error);
+    return Promise.reject(toApiError(error));
   }
 );
 

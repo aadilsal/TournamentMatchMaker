@@ -1,9 +1,9 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import type { MatchFoundEvent } from '@vr-tournament/shared';
-import { apiPost } from '@/lib/api';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
-import { MapPin, X } from 'lucide-react';
+import { MapPin, Target, X } from 'lucide-react';
 
 interface MatchFoundModalProps {
   match: MatchFoundEvent;
@@ -12,29 +12,19 @@ interface MatchFoundModalProps {
 
 export function MatchFoundModal({ match, onClose }: MatchFoundModalProps) {
   const queryClient = useQueryClient();
+  const autoConfirmed = match.autoConfirmed ?? false;
 
-  const confirmMutation = useMutation({
-    mutationFn: () => apiPost(`/matches/${match.matchId}/confirm`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['matches'] });
-      onClose();
-    },
-  });
-
-  const declineMutation = useMutation({
-    mutationFn: () => apiPost(`/matches/${match.matchId}/decline`, { requeue: true }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['matches'] });
-      onClose();
-    },
-  });
+  const handleClose = () => {
+    queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches });
+    onClose();
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
       <div className="bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl max-w-md w-full p-6 shadow-xl">
         <div className="flex justify-between items-start mb-4">
-          <h2 className="text-xl font-bold">Match Found!</h2>
-          <button onClick={onClose} className="text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]">
+          <h2 className="text-xl font-bold">{autoConfirmed ? 'Your Match Is Ready' : 'Match Found!'}</h2>
+          <button onClick={handleClose} className="text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -62,18 +52,28 @@ export function MatchFoundModal({ match, onClose }: MatchFoundModalProps) {
           </p>
         )}
 
-        <p className="text-xs text-[var(--color-muted-foreground)] mb-4">
-          Confirm by {new Date(match.confirmDeadline).toLocaleTimeString()}
-        </p>
+        {match.chaseTarget != null && (
+          <p className="flex items-center gap-2 text-sm mb-4 text-[var(--color-primary)]">
+            <Target className="h-4 w-4" />
+            {match.amChasing
+              ? `Score to beat: ${match.chaseTarget}`
+              : `Your target on the line: ${match.chaseTarget}`}
+          </p>
+        )}
 
-        <div className="flex gap-2">
-          <Button className="flex-1" onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}>
-            Confirm
-          </Button>
-          <Button className="flex-1" variant="outline" onClick={() => declineMutation.mutate()} disabled={declineMutation.isPending}>
-            Decline
-          </Button>
-        </div>
+        {autoConfirmed ? (
+          <p className="text-sm text-[var(--color-muted-foreground)] mb-4">
+            Head to your venue or VR headset — no confirmation needed.
+          </p>
+        ) : (
+          <p className="text-xs text-[var(--color-muted-foreground)] mb-4">
+            Confirm by {new Date(match.confirmDeadline).toLocaleTimeString()} on the Matches page.
+          </p>
+        )}
+
+        <Button className="w-full" onClick={handleClose}>
+          {autoConfirmed ? 'Got it' : 'View match'}
+        </Button>
       </div>
     </div>
   );

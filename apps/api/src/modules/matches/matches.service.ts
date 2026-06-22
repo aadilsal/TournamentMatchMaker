@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { DeclineMatchInput, SubmitScoreInput, Match } from '@vr-tournament/shared';
+import type { DeclineMatchInput, SubmitScoreInput, Match, MatchUpdatedEvent } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
 import { mapMatch } from '../../lib/mappers.js';
@@ -11,9 +11,9 @@ import {
 } from '../../lib/slot-lock.js';
 import { matchConfirmKey } from '../../lib/queue-keys.js';
 import { enqueueNotification } from '../../lib/bullmq.js';
-import { requeuePlayer, removeFromQueue } from '../../lib/requeue-player.js';
-import { updateUserRating } from '../../lib/rating.js';
+import { requeuePlayer } from '../../lib/requeue-player.js';
 import { TournamentsService } from '../tournaments/tournaments.service.js';
+import { emitMatchUpdated, emitSlotUpdated } from '../../socket/sync-events.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -139,7 +139,27 @@ export class MatchesService {
       }
 
       await client.query('COMMIT');
-      return this.getById(matchId, userId);
+      const result = await this.getById(matchId, userId);
+      emitMatchUpdated([match.player1_id, match.player2_id], {
+        matchId,
+        status: result.status as MatchUpdatedEvent['status'],
+      });
+      if (match.time_slot_id && result.status === 'confirmed') {
+        const slotRow = await this.pool.query(
+          `SELECT venue_id, start_time, status FROM time_slots WHERE id = $1`,
+          [match.time_slot_id]
+        );
+        const slot = slotRow.rows[0];
+        if (slot) {
+          emitSlotUpdated({
+            venueId: slot.venue_id,
+            slotId: match.time_slot_id,
+            status: slot.status,
+            date: new Date(slot.start_time).toISOString().slice(0, 10),
+          });
+        }
+      }
+      return result;
     } catch (err) {
       await client.query('ROLLBACK');
       if (recordedConfirm) {
@@ -200,6 +220,27 @@ export class MatchesService {
         });
       }
 
+      emitMatchUpdated([match.player1_id, match.player2_id], {
+        matchId,
+        status: 'cancelled',
+      });
+
+      if (match.time_slot_id) {
+        const slotRow = await this.pool.query(
+          `SELECT venue_id, start_time, status FROM time_slots WHERE id = $1`,
+          [match.time_slot_id]
+        );
+        const slot = slotRow.rows[0];
+        if (slot) {
+          emitSlotUpdated({
+            venueId: slot.venue_id,
+            slotId: match.time_slot_id,
+            status: slot.status,
+            date: new Date(slot.start_time).toISOString().slice(0, 10),
+          });
+        }
+      }
+
       return mapMatch({ ...match, status: 'cancelled' });
     } catch (err) {
       await client.query('ROLLBACK');
@@ -209,168 +250,11 @@ export class MatchesService {
     }
   }
 
-  async submitScore(matchId: string, userId: string, input: SubmitScoreInput) {
-    const client = await this.pool.connect();
-    let completedWinnerId: string | null = null;
-    let completedLoserId: string | null = null;
-    let tournamentId: string | null = null;
-    let matchPhase: string | null = null;
-    let winnerNextRound: number | null = null;
-    let requeueMeta: {
-      preferredVenueId: string | null;
-      bookingId: string | null;
-    } = { preferredVenueId: null, bookingId: null };
-
-    try {
-      await client.query('BEGIN');
-
-      const matchResult = await client.query(
-        `SELECT * FROM matches WHERE id = $1 FOR UPDATE`,
-        [matchId]
-      );
-      const match = matchResult.rows[0];
-      if (!match) throw new AppError('NOT_FOUND', 'Match not found', 404);
-      if (match.player1_id !== userId && match.player2_id !== userId) {
-        throw new AppError('FORBIDDEN', 'Not a participant', 403);
-      }
-      if (!['confirmed', 'in_progress'].includes(match.status)) {
-        throw new AppError('CONFLICT', 'Match is not currently playable', 409);
-      }
-
-      const isPlayer1 = match.player1_id === userId;
-      const current = (match.result ?? { player1Score: null, player2Score: null, winnerId: null }) as {
-        player1Score: number | null;
-        player2Score: number | null;
-        winnerId: string | null;
-      };
-
-      if (isPlayer1 && current.player1Score !== null) {
-        throw new AppError('CONFLICT', 'You have already submitted your score', 409);
-      }
-      if (!isPlayer1 && current.player2Score !== null) {
-        throw new AppError('CONFLICT', 'You have already submitted your score', 409);
-      }
-
-      const updated = {
-        player1Score: isPlayer1 ? input.score : current.player1Score,
-        player2Score: isPlayer1 ? current.player2Score : input.score,
-        winnerId: null as string | null,
-      };
-
-      let newStatus = 'in_progress';
-
-      if (updated.player1Score !== null && updated.player2Score !== null) {
-        newStatus = 'completed';
-        if (updated.player1Score > updated.player2Score) {
-          updated.winnerId = match.player1_id;
-        } else if (updated.player2Score > updated.player1Score) {
-          updated.winnerId = match.player2_id;
-        }
-      }
-
-      await client.query(
-        `UPDATE matches SET result = $1, status = $2, updated_at = NOW() WHERE id = $3`,
-        [JSON.stringify(updated), newStatus, matchId]
-      );
-
-      if (newStatus === 'completed' && updated.winnerId) {
-        const winnerId = updated.winnerId;
-        const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
-        completedWinnerId = winnerId;
-        completedLoserId = loserId;
-        tournamentId = match.tournament_id;
-        matchPhase = match.phase;
-
-        await updateUserRating(client, winnerId, true);
-        await updateUserRating(client, loserId, false);
-
-        if (match.tournament_id && match.phase === 'normal') {
-          const winnerParticipant = await client.query(
-            `SELECT round_number FROM tournament_participants
-             WHERE tournament_id = $1 AND user_id = $2 FOR UPDATE`,
-            [match.tournament_id, winnerId]
-          );
-          const currentRound = winnerParticipant.rows[0]?.round_number ?? 1;
-          winnerNextRound = currentRound + 1;
-
-          await client.query(
-            `UPDATE tournament_participants
-             SET wins = wins + 1, round_number = $1, status = 'active', updated_at = NOW()
-             WHERE tournament_id = $2 AND user_id = $3`,
-            [winnerNextRound, match.tournament_id, winnerId]
-          );
-          await client.query(
-            `UPDATE tournament_participants
-             SET losses = losses + 1, status = 'eliminated', updated_at = NOW()
-             WHERE tournament_id = $1 AND user_id = $2`,
-            [match.tournament_id, loserId]
-          );
-
-          const reg = await client.query(
-            `SELECT booking_id FROM tournament_registrations
-             WHERE tournament_id = $1 AND user_id = $2`,
-            [match.tournament_id, winnerId]
-          );
-          const bookingId = reg.rows[0]?.booking_id ?? null;
-          let preferredVenueId: string | null = null;
-          if (bookingId) {
-            const venueRow = await client.query(
-              `SELECT ts.venue_id FROM bookings b
-               JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
-              [bookingId]
-            );
-            preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
-          }
-          requeueMeta = { preferredVenueId, bookingId };
-        } else if (match.tournament_id && match.phase === 'knockout') {
-          // Knockout participant stats handled via bracket advancement
-        }
-      }
-
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-
-    if (completedWinnerId && tournamentId) {
-      if (matchPhase === 'knockout') {
-        await this.tournamentsService.advanceKnockoutWinner(matchId, completedWinnerId);
-      } else if (winnerNextRound !== null) {
-        await requeuePlayer(this.pool, this.redis, completedWinnerId, {
-          tournamentId,
-          roundNumber: winnerNextRound,
-          preferredVenueId: requeueMeta.preferredVenueId,
-          bookingId: requeueMeta.bookingId,
-        }, this.env);
-      }
-
-      if (this.env) {
-        enqueueNotification(this.env, {
-          userId: completedWinnerId,
-          type: 'match_won',
-          channels: ['in_app'],
-          payload: { matchId },
-          idempotencyKey: `match-won:${matchId}:${completedWinnerId}`,
-        }).catch(console.error);
-        if (completedLoserId) {
-          enqueueNotification(this.env, {
-            userId: completedLoserId,
-            type: 'match_lost',
-            channels: ['in_app'],
-            payload: { matchId, tournamentId },
-            idempotencyKey: `match-lost:${matchId}:${completedLoserId}`,
-          }).catch(console.error);
-        }
-      }
-    }
-
-    if (completedLoserId && tournamentId && matchPhase === 'normal') {
-      await removeFromQueue(this.redis, completedLoserId);
-    }
-
-    return this.getById(matchId, userId);
+  async submitScore(matchId: string, userId: string, _input: SubmitScoreInput) {
+    throw new AppError(
+      'CONFLICT',
+      'Scores must be submitted from your Meta Quest headset',
+      409
+    );
   }
 }

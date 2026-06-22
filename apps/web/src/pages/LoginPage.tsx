@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import type { AuthTokens } from '@vr-tournament/shared';
 import { apiPost, setAccessToken } from '@/lib/api';
+import { connectSocket } from '@/hooks/useSocket';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +23,7 @@ export function LoginPage() {
       apiPost<AuthTokens>('/auth/login', data),
     onSuccess: (data) => {
       setAccessToken(data.accessToken);
+      connectSocket();
       navigate('/venues');
     },
     onError: (err: Error) => setError(getUserErrorMessage(err)),
@@ -30,7 +32,18 @@ export function LoginPage() {
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
-    login.mutate({ email, password });
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError('Please enter your email address.');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your password.');
+      return;
+    }
+
+    login.mutate({ email: trimmedEmail, password });
   };
 
   const clearError = () => {

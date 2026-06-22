@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type { BuybackOption } from '@vr-tournament/shared';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 import { BuybackButton } from './BuybackButton';
 import { Heart } from 'lucide-react';
 
@@ -33,8 +34,8 @@ export function BuybackBanner({ option }: BuybackBannerProps) {
         tournamentId={option.tournamentId}
         tournament={tournament}
         onSuccess={() => {
-          queryClient.invalidateQueries({ queryKey: ['buyback-options'] });
-          queryClient.invalidateQueries({ queryKey: ['matches'] });
+          queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.buybackOptions });
+          queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches });
         }}
       />
     </div>

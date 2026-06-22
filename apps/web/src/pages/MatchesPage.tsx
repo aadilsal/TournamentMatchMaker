@@ -3,12 +3,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Match, MatchResult, User, BuybackOption } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
+import {
+  LIVE_QUERY_KEYS,
+  LIVE_STALE_TIME,
+  SAFETY_POLL_MS,
+  matchesNeedPolling,
+} from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { ListSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
-import { useSocketEvent } from '@/hooks/useSocket';
-import { MatchFoundModal } from '@/components/match/MatchFoundModal';
 import { MatchBuybackPrompt } from '@/components/tournament/MatchBuybackPrompt';
 import { BuybackBanner } from '@/components/tournament/BuybackBanner';
 import { useState } from 'react';
@@ -17,8 +21,6 @@ import { motion } from 'motion/react';
 
 export function MatchesPage() {
   const queryClient = useQueryClient();
-  const [matchModal, setMatchModal] = useState<Parameters<typeof MatchFoundModal>[0]['match'] | null>(null);
-  const [scoreInputs, setScoreInputs] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<Record<string, string>>({});
 
   const { data: me } = useQuery({
@@ -27,28 +29,50 @@ export function MatchesPage() {
   });
 
   const { data: matches = [], isLoading } = useQuery({
-    queryKey: ['matches'],
+    queryKey: LIVE_QUERY_KEYS.matches,
     queryFn: () => apiGet<Match[]>('/matches/me'),
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: (q) =>
+      matchesNeedPolling(q.state.data) ? SAFETY_POLL_MS : false,
   });
 
   const { data: buybackOptions = [] } = useQuery({
-    queryKey: ['buyback-options'],
+    queryKey: LIVE_QUERY_KEYS.buybackOptions,
     queryFn: () => apiGet<BuybackOption[]>('/players/me/buyback-options'),
-  });
-
-  useSocketEvent('match:found', (data) => {
-    setMatchModal(data);
-    queryClient.invalidateQueries({ queryKey: ['matches'] });
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: matchesNeedPolling(matches) ? SAFETY_POLL_MS : false,
   });
 
   const confirmMutation = useMutation({
     mutationFn: (matchId: string) => apiPost<Match>(`/matches/${matchId}/confirm`),
-    onMutate: (matchId) => {
+    onMutate: async (matchId) => {
       setActionError((prev) => ({ ...prev, [matchId]: '' }));
+      if (!me) return {};
+      await queryClient.cancelQueries({ queryKey: LIVE_QUERY_KEYS.matches });
+      const previous = queryClient.getQueryData<Match[]>(LIVE_QUERY_KEYS.matches);
+      queryClient.setQueryData<Match[]>(LIVE_QUERY_KEYS.matches, (old) =>
+        old?.map((m) => {
+          if (m.id !== matchId) return m;
+          const isP1 = me.id === m.player1Id;
+          return {
+            ...m,
+            confirmations: {
+              player1Confirmed: isP1 ? true : (m.confirmations?.player1Confirmed ?? false),
+              player2Confirmed: !isP1 ? true : (m.confirmations?.player2Confirmed ?? false),
+            },
+          };
+        })
+      );
+      return { previous };
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['matches'] }),
-    onError: (err, matchId) => {
+    onError: (err, matchId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(LIVE_QUERY_KEYS.matches, context.previous);
+      }
       setActionError((prev) => ({ ...prev, [matchId]: getUserErrorMessage(err) }));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches });
     },
   });
 
@@ -57,18 +81,9 @@ export function MatchesPage() {
     onMutate: (matchId) => {
       setActionError((prev) => ({ ...prev, [matchId]: '' }));
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['matches'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches }),
     onError: (err, matchId) => {
       setActionError((prev) => ({ ...prev, [matchId]: getUserErrorMessage(err) }));
-    },
-  });
-
-  const scoreMutation = useMutation({
-    mutationFn: ({ matchId, score }: { matchId: string; score: number }) =>
-      apiPost<Match>(`/matches/${matchId}/score`, { score }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['matches'] });
-      queryClient.invalidateQueries({ queryKey: ['buyback-options'] });
     },
   });
 
@@ -94,7 +109,7 @@ export function MatchesPage() {
           <h1 className="text-2xl font-bold tracking-tight">My Matches</h1>
         </div>
         <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
-          Confirm pending matches or track live Super Overs
+          Track live matches — scores sync from your Meta Quest headset
         </p>
       </motion.div>
 
@@ -125,10 +140,11 @@ export function MatchesPage() {
                 const result = match.result as MatchResult | null;
                 const myScore = isP1 ? result?.player1Score : result?.player2Score;
                 const opponentScore = isP1 ? result?.player2Score : result?.player1Score;
-                const canSubmitScore =
-                  me &&
+                const awaitingScores =
                   (match.status === 'confirmed' || match.status === 'in_progress') &&
-                  myScore == null;
+                  (myScore == null || opponentScore == null);
+                const chaseTarget = match.result?.chaseTarget;
+                const amChasing = chaseTarget != null && match.result?.chasePlayerId === me?.id;
                 const youConfirmed =
                   !!me &&
                   !!match.confirmations &&
@@ -229,7 +245,18 @@ export function MatchesPage() {
                       {/* Score state for confirmed / in_progress */}
                       {(match.status === 'confirmed' || match.status === 'in_progress') && me && (
                         <div className="pt-1 space-y-2">
-                          {/* Scores already submitted */}
+                          {chaseTarget != null && (
+                            <p className="text-sm text-[var(--color-primary)]">
+                              {amChasing
+                                ? `Beat ${chaseTarget} runs to win`
+                                : `Your target on the line: ${chaseTarget} runs`}
+                            </p>
+                          )}
+                          {awaitingScores && (
+                            <p className="text-sm text-[var(--color-muted-foreground)]">
+                              Play in your Meta Quest headset — your score will appear here automatically.
+                            </p>
+                          )}
                           {myScore != null && (
                             <p className="text-sm text-[var(--color-muted-foreground)]">
                               Your score: <span className="font-semibold text-[var(--color-foreground)]">{myScore} runs</span>
@@ -237,35 +264,6 @@ export function MatchesPage() {
                                 ? <> · Opponent: <span className="font-semibold text-[var(--color-foreground)]">{opponentScore} runs</span></>
                                 : " · Awaiting opponent's score…"}
                             </p>
-                          )}
-
-                          {/* Score submission input */}
-                          {canSubmitScore && (
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="number"
-                                min={0}
-                                max={999}
-                                className="w-24 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50"
-                                placeholder="Runs"
-                                value={scoreInputs[match.id] ?? ''}
-                                onChange={(e) =>
-                                  setScoreInputs((prev) => ({ ...prev, [match.id]: e.target.value }))
-                                }
-                              />
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  const val = parseInt(scoreInputs[match.id] ?? '', 10);
-                                  if (!isNaN(val) && val >= 0) {
-                                    scoreMutation.mutate({ matchId: match.id, score: val });
-                                  }
-                                }}
-                                disabled={scoreMutation.isPending || !scoreInputs[match.id]}
-                              >
-                                Submit score
-                              </Button>
-                            </div>
                           )}
                         </div>
                       )}
@@ -325,10 +323,6 @@ export function MatchesPage() {
             </div>
           )}
         </>
-      )}
-
-      {matchModal && (
-        <MatchFoundModal match={matchModal} onClose={() => setMatchModal(null)} />
       )}
     </div>
   );

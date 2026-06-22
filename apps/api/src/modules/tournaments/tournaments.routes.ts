@@ -135,6 +135,24 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
   );
 
   router.post(
+    '/:id/buyback/checkout',
+    authenticate(env),
+    validate(buybackSchema),
+    async (req, res, next) => {
+      try {
+        const session = await service.createBuybackCheckout(
+          req.params.id as string,
+          req.user!.sub,
+          req.body
+        );
+        sendSuccess(res, session, undefined, 201);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  router.post(
     '/:id/buyback',
     authenticate(env),
     validate(buybackSchema),

@@ -6,6 +6,9 @@ export interface QueueEntry {
   city: string;
   skillTier: number;
   roundNumber: number;
+  hasPlayedSolo?: boolean;
+  soloPlayedAt?: number;
+  slotEndAt?: number | null;
 }
 
 export function tierDistance(a: number, b: number): number {
@@ -62,6 +65,19 @@ function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number)
   }
 
   score += Math.min(maxWait, 120) * 0.5;
+
+  if (a.hasPlayedSolo || b.hasPlayedSolo) {
+    score += 12;
+  }
+
+  const nowMs = now;
+  const aUrgency = a.slotEndAt ? Math.max(0, a.slotEndAt - nowMs) : Infinity;
+  const bUrgency = b.slotEndAt ? Math.max(0, b.slotEndAt - nowMs) : Infinity;
+  const minUrgencyMs = Math.min(aUrgency, bUrgency);
+  if (minUrgencyMs < Infinity) {
+    const urgencyBonus = Math.max(0, 30 - Math.floor(minUrgencyMs / 60000)) * 2;
+    score += urgencyBonus;
+  }
 
   return score;
 }
