@@ -13,12 +13,12 @@ export function HeroSection() {
 
       {/* ── Neon batsman — absolute, full right-side, no container box ── */}
       <div className="absolute right-0 top-0 bottom-0 w-[58%] pointer-events-none hidden lg:block" aria-hidden>
-        {/* Ambient purple glow behind the figure — matches site primary */}
+        {/* Ambient red glow behind the figure — matches site primary */}
         <div
           className="absolute inset-0"
           style={{
             background:
-              'radial-gradient(ellipse 70% 60% at 65% 50%, rgba(124,58,237,0.28) 0%, rgba(76,29,149,0.12) 55%, transparent 100%)',
+              'radial-gradient(ellipse 70% 60% at 65% 50%, rgba(227,24,55,0.28) 0%, rgba(139,0,20,0.12) 55%, transparent 100%)',
           }}
         />
 
@@ -32,9 +32,8 @@ export function HeroSection() {
             maskComposite: 'intersect',
             WebkitMaskImage:
               'linear-gradient(to right, transparent 0%, black 18%, black 88%, transparent 100%)',
-            /* hue-rotate shifts the neon blue (~240°) → purple (~275°) */
             filter:
-              'hue-rotate(32deg) saturate(1.15) drop-shadow(0 0 55px rgba(139,92,246,0.70)) drop-shadow(0 0 140px rgba(109,40,217,0.38))',
+              'saturate(1.1) drop-shadow(0 0 55px rgba(227,24,55,0.55)) drop-shadow(0 0 140px rgba(227,24,55,0.25))',
           }}
         />
       </div>
@@ -48,7 +47,7 @@ export function HeroSection() {
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
           >
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-1.5 text-xs font-medium text-[var(--color-accent-foreground)] mb-8">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)] animate-pulse" />
               Season 1 Open — Canada's first VR cricket tournament
             </span>
           </motion.div>
@@ -121,7 +120,7 @@ export function HeroSection() {
         <span className="rounded-lg border border-[var(--color-primary)]/35 bg-[var(--color-card)]/75 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-[var(--color-primary)]">
           🏏 Super Over
         </span>
-        <span className="rounded-lg border border-emerald-500/35 bg-[var(--color-card)]/75 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-emerald-400">
+        <span className="rounded-lg border border-white/25 bg-[var(--color-card)]/75 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-white">
           6 balls only
         </span>
       </motion.div>

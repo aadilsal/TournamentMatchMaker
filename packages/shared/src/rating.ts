@@ -27,3 +27,10 @@ export function applyMatchResult(currentPoints: number, won: boolean): number {
 export function tierLabel(tier: number): string {
   return `Tier ${tier}`;
 }
+
+export const SKILL_TIER_VALUES = [1, 2, 3, 4, 5] as const;
+
+export const SKILL_TIER_OPTIONS = SKILL_TIER_VALUES.map((tier) => ({
+  value: String(tier),
+  label: tierLabel(tier),
+}));

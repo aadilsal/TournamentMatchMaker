@@ -206,7 +206,7 @@ export function MatchesPage() {
                       {match.status === 'pending_confirmation' && (
                         <div className="space-y-2 pt-1">
                           {youConfirmed && !opponentConfirmed && (
-                            <p className="text-sm text-amber-400">
+                            <p className="text-sm text-[var(--color-primary)]">
                               You confirmed — waiting for your opponent to confirm.
                             </p>
                           )}
@@ -309,7 +309,7 @@ export function MatchesPage() {
                         {match.player2?.username}: {result.player2Score ?? '—'} runs
                         {isTie && ' · Tie'}
                         {isWinner && (
-                          <span className="ml-1 font-semibold text-emerald-400">· You won</span>
+                          <span className="ml-1 font-semibold text-[var(--color-primary)]">· You won</span>
                         )}
                         {me && !isTie && result.winnerId && result.winnerId !== me.id && (
                           <span className="ml-1 text-red-400">· You lost</span>

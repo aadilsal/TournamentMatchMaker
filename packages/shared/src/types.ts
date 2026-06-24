@@ -6,8 +6,6 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export type TournamentStatus = 'draft' | 'open' | 'closed' | 'in_progress' | 'completed';
 
-export type TournamentFormat = 'single_elimination' | 'double_elimination' | 'round_robin';
-
 export type TournamentPhase = 'normal' | 'knockout' | 'completed';
 
 export type MatchPhase = 'normal' | 'knockout';
@@ -129,7 +127,6 @@ export interface Tournament {
   id: string;
   name: string;
   game: string;
-  format: TournamentFormat;
   startDate: string;
   endDate: string;
   status: TournamentStatus;
@@ -138,6 +135,8 @@ export interface Tournament {
   phase: TournamentPhase;
   currentRoundNumber: number;
   buybackPriceCents: number;
+  roundDurationMinutes: number;
+  initialPlayerCount: number | null;
   registrationCount?: number;
   createdAt: string;
 }
@@ -302,7 +301,90 @@ export interface BracketRound {
 
 export interface TournamentBracket {
   tournamentId: string;
-  format: TournamentFormat;
   phase: TournamentPhase;
+  fieldSize: number | null;
   rounds: BracketRound[];
+}
+
+export interface AdminDashboardStats {
+  users: number;
+  players: number;
+  venues: number;
+  activeVenues: number;
+  tournaments: Record<TournamentStatus, number>;
+  matches: {
+    ongoing: number;
+    upcoming: number;
+    past: number;
+    total: number;
+  };
+  bookings: { confirmed: number; pending: number; cancelled: number };
+  buybacks: { completed: number; pending: number; failed: number };
+  queueSize: number;
+  notificationsFailed: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  actorId: string | null;
+  actorUsername?: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  beforeData: Record<string, unknown> | null;
+  afterData: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface AdminBookingRow extends Booking {
+  username?: string;
+  email?: string;
+  venueName?: string;
+  slotStart?: string;
+  slotEnd?: string;
+  venueId?: string;
+}
+
+export interface AdminQueueEntry {
+  userId: string;
+  username: string;
+  skillTier: number;
+  tournamentId: string | null;
+  tournamentName: string | null;
+  preferredVenueId: string | null;
+  roundNumber: number;
+  waitSeconds: number;
+  hasPlayedSolo: boolean;
+  soloTarget: number | null;
+}
+
+export interface AdminQueueOverview {
+  globalSize: number;
+  tournaments: Array<{ tournamentId: string; name: string; size: number }>;
+  entries: AdminQueueEntry[];
+}
+
+export interface SystemHealth {
+  database: 'ok' | 'error';
+  redis: 'ok' | 'error';
+  tableCounts: Record<string, number>;
+}
+
+export interface AdminUserDetail extends User {
+  suspendedAt: string | null;
+  totalMatches: number;
+  confirmedBookings: number;
+  tournaments: Array<{
+    id: string;
+    name: string;
+    status: string;
+    wins: number;
+    losses: number;
+  }>;
+}
+
+export interface AdminIntegrationsConfig {
+  meta: { configured: boolean; apiKeyPreview: string | null };
+  email: { enabled: boolean; provider: string; from: string | null };
+  stripe: { configured: boolean; mode: string };
 }

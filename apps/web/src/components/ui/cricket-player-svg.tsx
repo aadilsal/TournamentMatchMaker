@@ -18,11 +18,11 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
     >
       <defs>
-        {/* Helmet — shiny purple */}
+        {/* Helmet — shiny red */}
         <radialGradient id={`${uid}h`} cx="36%" cy="26%" r="72%">
-          <stop offset="0%"   stopColor="#c084fc" />
-          <stop offset="50%"  stopColor="#7c3aed" />
-          <stop offset="100%" stopColor="#4c1d95" />
+          <stop offset="0%"   stopColor="#fca5a5" />
+          <stop offset="50%"  stopColor="#e31837" />
+          <stop offset="100%" stopColor="#7f1d1d" />
         </radialGradient>
 
         {/* Skin — warm peach */}
@@ -79,16 +79,16 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       <rect
         x="48" y="110" width="66" height="56" rx="20"
         fill={`url(#${uid}w)`}
-        style={{ filter: 'drop-shadow(0 3px 8px rgba(124,58,237,0.18))' }}
+        style={{ filter: 'drop-shadow(0 3px 8px rgba(227,24,55,0.18))' }}
       />
       {/* V-neck collar */}
       <path d="M 68 110 L 81 122 L 94 110"
-        fill="none" stroke="#7c3aed" strokeWidth="3.5" strokeLinejoin="round" />
-      {/* Purple accent band */}
-      <rect x="48" y="118" width="66" height="4.5" rx="2" fill="#7c3aed" opacity="0.18" />
+        fill="none" stroke="#e31837" strokeWidth="3.5" strokeLinejoin="round" />
+      {/* Red accent band */}
+      <rect x="48" y="118" width="66" height="4.5" rx="2" fill="#e31837" opacity="0.18" />
       {/* Chest badge */}
-      <circle cx="81" cy="138" r="7.5" fill="#7c3aed" opacity="0.15" />
-      <circle cx="81" cy="138" r="5"   fill="#7c3aed" opacity="0.3" />
+      <circle cx="81" cy="138" r="7.5" fill="#e31837" opacity="0.15" />
+      <circle cx="81" cy="138" r="5"   fill="#e31837" opacity="0.3" />
 
       {/* ═══════════════ ARMS ═══════════════ */}
       {/* Right arm → bat handle */}
@@ -100,9 +100,9 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       {/* Left arm — relaxed hang */}
       <path d="M 52 122 Q 40 136 38 152"
         stroke={`url(#${uid}w)`} strokeWidth="13" strokeLinecap="round" fill="none" />
-      {/* Left glove — purple */}
-      <circle cx="37" cy="154" r="9"   fill="#7c3aed" />
-      <circle cx="37" cy="154" r="6.5" fill="#9333ea" />
+      {/* Left glove — red */}
+      <circle cx="37" cy="154" r="9"   fill="#e31837" />
+      <circle cx="37" cy="154" r="6.5" fill="#b91c1c" />
       <ellipse cx="34" cy="150" rx="3" ry="2" fill="rgba(255,255,255,0.25)" />
 
       {/* ═══════════════ LEGS ═══════════════ */}
@@ -118,8 +118,8 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       <line x1="82" y1="194" x2="112" y2="194" stroke="#bbb8b0" strokeWidth="1.5" />
 
       {/* ═══════════════ SHOES ═══════════════ */}
-      <ellipse cx="67"  cy="213" rx="19" ry="8"  fill="#18163a" />
-      <ellipse cx="95"  cy="213" rx="19" ry="8"  fill="#18163a" />
+      <ellipse cx="67"  cy="213" rx="19" ry="8"  fill="#0a0a0a" />
+      <ellipse cx="95"  cy="213" rx="19" ry="8"  fill="#0a0a0a" />
       {/* Shoe toe shine */}
       <ellipse cx="61"  cy="209" rx="7"  ry="3"  fill="rgba(255,255,255,0.12)" transform="rotate(-15 61 209)" />
       <ellipse cx="89"  cy="209" rx="7"  ry="3"  fill="rgba(255,255,255,0.12)" transform="rotate(-15 89 209)" />
@@ -128,21 +128,21 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       <ellipse
         cx="81" cy="60" rx="43" ry="40"
         fill={`url(#${uid}h)`}
-        style={{ filter: 'drop-shadow(0 5px 16px rgba(124,58,237,0.48))' }}
+        style={{ filter: 'drop-shadow(0 5px 16px rgba(227,24,55,0.48))' }}
       />
       {/* Helmet brim */}
-      <rect x="38" y="73" width="86" height="11" rx="2" fill="#5b21b6" />
+      <rect x="38" y="73" width="86" height="11" rx="2" fill="#991b1b" />
       {/* Visor */}
-      <path d="M 50 83 Q 81 99 112 83 L 110 87 Q 81 106 52 87 Z" fill="#4c1d95" />
+      <path d="M 50 83 Q 81 99 112 83 L 110 87 Q 81 106 52 87 Z" fill="#7f1d1d" />
       {/* Logo badge */}
-      <circle cx="81" cy="52" r="8" fill="#4c1d95" />
-      <circle cx="81" cy="52" r="6" fill="#6d28d9" />
+      <circle cx="81" cy="52" r="8" fill="#7f1d1d" />
+      <circle cx="81" cy="52" r="6" fill="#b91c1c" />
       <text
         x="81" y="55.5"
         textAnchor="middle"
         fontSize="5" fontWeight="bold"
         fontFamily="system-ui,sans-serif"
-        fill="#fbbf24"
+        fill="#ffffff"
       >VR</text>
       {/* Helmet shine */}
       <ellipse cx="60" cy="43" rx="12" ry="7" fill="rgba(255,255,255,0.24)" transform="rotate(-22 60 43)" />
@@ -150,8 +150,8 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
       <line x1="96"  y1="32" x2="99"  y2="50" stroke="rgba(0,0,0,0.12)" strokeWidth="1.5" strokeLinecap="round" />
       <line x1="105" y1="38" x2="107" y2="55" stroke="rgba(0,0,0,0.12)" strokeWidth="1.5" strokeLinecap="round" />
       {/* Chin strap */}
-      <path d="M 38 79 Q 40 97 62 102"  fill="none" stroke="#5b21b6" strokeWidth="2.5" strokeLinecap="round" />
-      <path d="M 124 79 Q 122 97 100 102" fill="none" stroke="#5b21b6" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M 38 79 Q 40 97 62 102"  fill="none" stroke="#991b1b" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M 124 79 Q 122 97 100 102" fill="none" stroke="#991b1b" strokeWidth="2.5" strokeLinecap="round" />
 
       {/* ═══════════════ FACE ═══════════════ */}
       <ellipse cx="81" cy="82" rx="31" ry="25" fill={`url(#${uid}sk)`} />
@@ -165,8 +165,8 @@ export function CricketPlayerSVG({ className }: { className?: string }) {
         animate={{ scaleY: [1, 0.06, 1] }}
         transition={{ duration: 0.22, repeat: Infinity, repeatDelay: 4, ease: 'easeInOut' }}
       >
-        <ellipse cx="70" cy="81" rx="6.5" ry="7"   fill="#18082e" />
-        <ellipse cx="92" cy="81" rx="6.5" ry="7"   fill="#18082e" />
+        <ellipse cx="70" cy="81" rx="6.5" ry="7"   fill="#0a0a0a" />
+        <ellipse cx="92" cy="81" rx="6.5" ry="7"   fill="#0a0a0a" />
         {/* Iris highlight */}
         <circle  cx="72.5" cy="78"  r="2.2" fill="white" />
         <circle  cx="94.5" cy="78"  r="2.2" fill="white" />

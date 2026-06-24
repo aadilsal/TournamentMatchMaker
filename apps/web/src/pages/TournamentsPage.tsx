@@ -111,7 +111,7 @@ export function TournamentsPage() {
                     <div>
                       <h3 className="font-semibold text-base">{t.name}</h3>
                       <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
-                        {t.game} · {t.format.replace(/_/g, ' ')}
+                        {t.game} · Tier {t.skillTier}
                       </p>
                     </div>
                     <Badge variant={variant}>{label}</Badge>

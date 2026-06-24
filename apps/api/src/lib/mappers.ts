@@ -12,7 +12,6 @@ import type {
   RoundStatus,
   TimeSlot,
   Tournament,
-  TournamentFormat,
   TournamentParticipant,
   TournamentPhase,
   TournamentRegistration,
@@ -139,7 +138,6 @@ interface TournamentRow {
   id: string;
   name: string;
   game: string;
-  format: string;
   start_date: Date;
   end_date: Date;
   status: string;
@@ -148,6 +146,8 @@ interface TournamentRow {
   phase?: string;
   current_round_number?: number;
   buyback_price_cents?: number;
+  round_duration_minutes?: number;
+  initial_player_count?: number | null;
   created_at: Date;
   registration_count?: number;
 }
@@ -206,7 +206,6 @@ export function mapTournament(row: TournamentRow): Tournament {
     id: row.id,
     name: row.name,
     game: row.game,
-    format: row.format as TournamentFormat,
     startDate: row.start_date.toISOString(),
     endDate: row.end_date.toISOString(),
     status: row.status as TournamentStatus,
@@ -215,6 +214,8 @@ export function mapTournament(row: TournamentRow): Tournament {
     phase: (row.phase ?? 'normal') as TournamentPhase,
     currentRoundNumber: row.current_round_number ?? 1,
     buybackPriceCents: row.buyback_price_cents ?? 500,
+    roundDurationMinutes: row.round_duration_minutes ?? 180,
+    initialPlayerCount: row.initial_player_count ?? null,
     registrationCount: row.registration_count,
     createdAt: row.created_at.toISOString(),
   };

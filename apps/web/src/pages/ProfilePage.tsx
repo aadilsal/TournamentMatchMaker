@@ -239,7 +239,7 @@ export function ProfilePage() {
 
         {/* Feedback */}
         {update.isSuccess && (
-          <p className="flex items-center gap-2 text-sm text-emerald-400">
+          <p className="flex items-center gap-2 text-sm text-[var(--color-primary)]">
             <CheckCircle2 className="h-4 w-4" /> Profile saved
           </p>
         )}

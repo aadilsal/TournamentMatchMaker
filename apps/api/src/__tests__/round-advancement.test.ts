@@ -1,19 +1,24 @@
 import { describe, expect, it } from '@jest/globals';
-import { playersToAdvance, shouldStartKnockout } from '@vr-tournament/shared';
+import {
+  knockoutThreshold,
+  playersToAdvance,
+  shouldStartKnockout,
+} from '@vr-tournament/shared';
 
 describe('round advancement', () => {
-  it('advances half when above 32', () => {
-    expect(playersToAdvance(50)).toBe(25);
+  it('uses half the field as knockout threshold', () => {
+    expect(knockoutThreshold(100)).toBe(50);
+    expect(knockoutThreshold(17)).toBe(8);
   });
 
-  it('advances to 16 when between 17 and 32', () => {
-    expect(playersToAdvance(25)).toBe(16);
-    expect(playersToAdvance(20)).toBe(16);
+  it('advances half until knockout threshold', () => {
+    expect(playersToAdvance(100, 100)).toBe(50);
+    expect(playersToAdvance(80, 100)).toBe(40);
   });
 
-  it('starts knockout at 16 or fewer', () => {
-    expect(shouldStartKnockout(16)).toBe(true);
-    expect(shouldStartKnockout(10)).toBe(true);
-    expect(shouldStartKnockout(17)).toBe(false);
+  it('starts knockout at half the field or fewer', () => {
+    expect(shouldStartKnockout(50, 100)).toBe(true);
+    expect(shouldStartKnockout(51, 100)).toBe(false);
+    expect(shouldStartKnockout(8, 17)).toBe(true);
   });
 });

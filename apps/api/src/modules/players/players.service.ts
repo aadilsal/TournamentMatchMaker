@@ -177,6 +177,13 @@ export class PlayersService {
          AND t.phase = 'normal'
          AND tr.status = 'active'
          AND tr.ends_at > NOW()
+         AND (
+           t.initial_player_count IS NULL
+           OR (
+             SELECT COUNT(*)::int FROM tournament_participants ap
+             WHERE ap.tournament_id = t.id AND ap.status IN ('active', 'advanced')
+           ) > FLOOR(t.initial_player_count::numeric / 2)
+         )
        ORDER BY t.name ASC`,
       [userId]
     );

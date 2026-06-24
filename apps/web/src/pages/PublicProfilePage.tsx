@@ -98,7 +98,7 @@ export function PublicProfilePage() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {won && m.status === 'completed' && (
-                      <Trophy className="h-4 w-4 text-amber-400 shrink-0" />
+                      <Trophy className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
                     )}
                     <span>
                       vs{' '}

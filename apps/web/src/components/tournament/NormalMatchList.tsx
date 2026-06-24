@@ -61,10 +61,10 @@ function PlayerCell({
       className={cn(
         'flex-1 flex items-center gap-1.5 truncate font-medium',
         align === 'right' && 'justify-end',
-        won && 'text-amber-400'
+        won && 'text-[var(--color-primary)]'
       )}
     >
-      {won && <Trophy className="h-4 w-4 shrink-0 text-amber-400" />}
+      {won && <Trophy className="h-4 w-4 shrink-0 text-[var(--color-primary)]" />}
       <Link to={`/players/${player.username}`} className="hover:underline truncate">
         {player.username}
       </Link>

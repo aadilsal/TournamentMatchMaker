@@ -1,4 +1,4 @@
-/** Hardcoded venue geography — aligned with seeded venues in packages/db/seeds/dev.ts */
+/** Hardcoded venue geography for legacy snap / seed alignment — not used for geo API lists. */
 
 export const VENUE_LOCATIONS: Record<string, string[]> = {
   Pakistan: ['Lahore', 'Karachi'],
@@ -73,5 +73,5 @@ export function isSameCity(
   return a === b;
 }
 
-/** Countries for user profile registration (broader than venue-only list) */
+/** @deprecated Use /geo/countries API — kept for nearest-city snap helpers only */
 export const PROFILE_COUNTRIES = SUPPORTED_COUNTRIES;

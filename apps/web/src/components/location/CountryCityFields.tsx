@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { matchCityName, matchCountryName } from '@/lib/location-api';
-import { getCitiesForCountry } from '@vr-tournament/shared';
 import { useCities, useCountries, useIpLocation } from '@/hooks/useCountriesCities';
 
 interface CountryCityFieldsProps {
@@ -12,6 +11,8 @@ interface CountryCityFieldsProps {
   onCityChange: (city: string) => void;
   onLocationDetected?: (country: string, city: string) => void;
   autoDetectFromIp?: boolean;
+  countryId?: string;
+  cityId?: string;
 }
 
 export function CountryCityFields({
@@ -21,8 +22,11 @@ export function CountryCityFields({
   onCityChange,
   onLocationDetected,
   autoDetectFromIp = true,
+  countryId = 'country',
+  cityId = 'city',
 }: CountryCityFieldsProps) {
   const ipApplied = useRef(false);
+  const pendingIpCity = useRef('');
   const onLocationDetectedRef = useRef(onLocationDetected);
   const onCountryChangeRef = useRef(onCountryChange);
   const onCityChangeRef = useRef(onCityChange);
@@ -53,15 +57,27 @@ export function CountryCityFields({
     if (!matchedCountry) return;
 
     ipApplied.current = true;
-    const supportedCities = getCitiesForCountry(matchedCountry);
-    const detectedCity = matchCityName(ipLocation.city || '', supportedCities) ?? '';
+    pendingIpCity.current = ipLocation.city || '';
+
     if (onLocationDetectedRef.current) {
-      onLocationDetectedRef.current(matchedCountry, detectedCity);
+      onLocationDetectedRef.current(matchedCountry, '');
     } else {
       onCountryChangeRef.current(matchedCountry);
-      if (detectedCity) onCityChangeRef.current(detectedCity);
     }
   }, [autoDetectFromIp, ipLocation, country, countries, countriesLoading]);
+
+  useEffect(() => {
+    if (!pendingIpCity.current || !country || citiesLoading || !cities.length) return;
+
+    const matchedCity = matchCityName(pendingIpCity.current, cities) ?? '';
+    pendingIpCity.current = '';
+
+    if (onLocationDetectedRef.current) {
+      onLocationDetectedRef.current(country, matchedCity);
+    } else if (matchedCity) {
+      onCityChangeRef.current(matchedCity);
+    }
+  }, [country, cities, citiesLoading]);
 
   useEffect(() => {
     if (!country || citiesLoading || !city || !cities.length) return;
@@ -82,9 +98,9 @@ export function CountryCityFields({
   return (
     <div className="grid grid-cols-2 gap-4 items-start">
       <div className="flex min-w-0 flex-col gap-1.5">
-        <Label htmlFor="country">Country</Label>
+        <Label htmlFor={countryId}>Country</Label>
         <Select
-          id="country"
+          id={countryId}
           autoComplete="country-name"
           value={country}
           disabled={countriesLoading || detecting}
@@ -102,9 +118,9 @@ export function CountryCityFields({
         </p>
       </div>
       <div className="flex min-w-0 flex-col gap-1.5">
-        <Label htmlFor="city">City</Label>
+        <Label htmlFor={cityId}>City</Label>
         <Select
-          id="city"
+          id={cityId}
           autoComplete="address-level2"
           value={city}
           disabled={!country || citiesLoading}

@@ -11,8 +11,8 @@ const chapters = [
     title: 'Find your ground',
     description:
       'PostGIS-powered geo search finds certified VR cricket venues within 50km. Filter by city, check live capacity, and pick your arena before slots fill up.',
-    accent: 'from-violet-600/50 via-purple-800/30 to-transparent',
-    glow: 'shadow-violet-500/20',
+    accent: 'from-red-600/50 via-red-900/30 to-transparent',
+    glow: 'shadow-red-500/20',
     visual: 'venues' as const,
   },
   {
@@ -23,8 +23,8 @@ const chapters = [
     title: 'Reserve your crease',
     description:
       'Pick a match session and lock it in instantly. PostgreSQL row locks and Redis slot guards guarantee your slot — zero conflicts, even at tournament launch.',
-    accent: 'from-fuchsia-600/40 via-violet-900/30 to-transparent',
-    glow: 'shadow-fuchsia-500/20',
+    accent: 'from-red-500/40 via-red-950/30 to-transparent',
+    glow: 'shadow-red-500/20',
     visual: 'slots' as const,
   },
   {
@@ -35,8 +35,8 @@ const chapters = [
     title: 'Enter the over',
     description:
       'Skill-tier matchmaking pairs you with the right opponent. Both on Meta Quest? Play remote. Need a venue? We auto-book the nearest VR cricket arena.',
-    accent: 'from-indigo-600/40 via-blue-900/30 to-transparent',
-    glow: 'shadow-indigo-500/20',
+    accent: 'from-white/10 via-red-900/30 to-transparent',
+    glow: 'shadow-red-500/20',
     visual: 'queue' as const,
   },
   {
@@ -47,8 +47,8 @@ const chapters = [
     title: 'Lift the cup',
     description:
       'Tournament brackets, Socket.IO live updates, and email alerts keep you in the fight. From match found to trophy lift — sub-second feedback, every step.',
-    accent: 'from-amber-500/35 via-orange-900/25 to-transparent',
-    glow: 'shadow-amber-500/20',
+    accent: 'from-red-700/35 via-black/25 to-transparent',
+    glow: 'shadow-red-500/20',
     visual: 'bracket' as const,
   },
 ];
@@ -69,13 +69,13 @@ function ChapterVisual({ type, active }: { type: (typeof chapters)[0]['visual'];
             style={{ transitionDelay: `${i * 80}ms` }}
           >
             <div className="flex items-center gap-3">
-              <MapPin className="h-4 w-4 text-violet-400" />
+              <MapPin className="h-4 w-4 text-[var(--color-primary)]" />
               <div>
                 <p className="text-sm font-medium">{name}</p>
                 <p className="text-xs text-[var(--color-muted-foreground)]">{(i + 1.2).toFixed(1)} km away</p>
               </div>
             </div>
-            <span className="text-xs text-emerald-400 font-medium">Open</span>
+            <span className="text-xs text-white font-medium">Open</span>
           </div>
         ))}
       </div>
@@ -112,17 +112,17 @@ function ChapterVisual({ type, active }: { type: (typeof chapters)[0]['visual'];
           </div>
           <div className="h-2 rounded-full bg-white/10 overflow-hidden">
             <motion.div
-              className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
+              className="h-full bg-gradient-to-r from-red-600 to-red-400"
               animate={{ width: active ? ['20%', '75%', '45%'] : '20%' }}
               transition={{ duration: 3, repeat: active ? Infinity : 0, ease: 'easeInOut' }}
             />
           </div>
           <p className="mt-3 text-sm">Searching for opponent… <span className="text-white font-medium">12s</span></p>
         </div>
-        <div className="flex items-center gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
-          <Users className="h-5 w-5 text-emerald-400" />
+        <div className="flex items-center gap-3 rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-3">
+          <Users className="h-5 w-5 text-[var(--color-primary)]" />
           <div>
-            <p className="text-sm font-medium text-emerald-300">Match found!</p>
+            <p className="text-sm font-medium text-white">Match found!</p>
             <p className="text-xs text-[var(--color-muted-foreground)]">Ali_99 vs Hamza_VR — Tier 3</p>
           </div>
         </div>
@@ -137,7 +137,7 @@ function ChapterVisual({ type, active }: { type: (typeof chapters)[0]['visual'];
         { round: 'Final', players: 'You vs TheCaptain' },
       ].map((match, i) => (
         <div key={match.round} className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-3">
-          <Trophy className={cn('h-4 w-4', i === 1 ? 'text-amber-400' : 'text-[var(--color-muted-foreground)]')} />
+          <Trophy className={cn('h-4 w-4', i === 1 ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]')} />
           <div>
             <p className="text-xs text-[var(--color-muted-foreground)]">{match.round}</p>
             <p className="text-sm font-medium">{match.players}</p>

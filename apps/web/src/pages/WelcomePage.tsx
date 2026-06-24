@@ -61,7 +61,7 @@ export function WelcomePage() {
         className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-card)] overflow-hidden"
       >
         {/* Top accent */}
-        <div className="h-1.5 bg-gradient-to-r from-[var(--color-primary)] via-emerald-500 to-[var(--color-primary)]" />
+        <div className="h-1.5 bg-gradient-to-r from-[var(--color-primary)] via-white/40 to-[var(--color-primary)]" />
 
         <div className="p-6 sm:p-8">
           {/* Hero row */}
@@ -82,8 +82,8 @@ export function WelcomePage() {
           <ol className="space-y-5">
             {/* Step 1 */}
             <li className="flex gap-4">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500/20">
-                <CheckCircle2 className="h-4.5 w-4.5 text-emerald-400" />
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/20">
+                <CheckCircle2 className="h-4.5 w-4.5 text-[var(--color-primary)]" />
               </span>
               <div className="pt-0.5">
                 <p className="font-medium">Account created</p>

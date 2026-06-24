@@ -24,6 +24,8 @@ interface SlotSearchHint {
   lng?: number;
   city?: string;
   venueId?: string;
+  roundStartsAt?: Date;
+  roundEndsAt?: Date;
 }
 
 type BookingSlot = { slotId: string; venueId: string; startTime: Date; endTime: Date };
@@ -71,6 +73,20 @@ async function findAvailableSlot(
     AND ts.start_time > NOW()
     AND ts.end_time > NOW()`;
 
+  const roundClause = (baseParamCount: number) => {
+    if (!hint.roundEndsAt) return { sql: '', params: [] as unknown[] };
+    if (hint.roundStartsAt) {
+      return {
+        sql: ` AND ts.start_time >= GREATEST(NOW(), $${baseParamCount + 1}) AND ts.end_time <= $${baseParamCount + 2}`,
+        params: [hint.roundStartsAt, hint.roundEndsAt],
+      };
+    }
+    return {
+      sql: ` AND ts.end_time <= $${baseParamCount + 1}`,
+      params: [hint.roundEndsAt],
+    };
+  };
+
   const runQuery = async (sql: string, params: unknown[]) => {
     const result = await client.query(sql, params);
     const row = result.rows[0];
@@ -84,48 +100,60 @@ async function findAvailableSlot(
   };
 
   if (hint.venueId) {
+    const round = roundClause(1);
     return runQuery(
       `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
        FROM time_slots ts
        JOIN venues v ON v.id = ts.venue_id
-       WHERE v.id = $1 AND ${baseWhere}
+       WHERE v.id = $1 AND ${baseWhere}${round.sql}
        ORDER BY ts.start_time ASC LIMIT 1`,
-      [hint.venueId]
+      [hint.venueId, ...round.params]
     );
   }
 
   if (hint.lat !== undefined && hint.lng !== undefined) {
+    const round = roundClause(2);
     return runQuery(
       `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time,
               ST_Distance(v.location::geography,
                 ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography) AS dist_m
        FROM time_slots ts
        JOIN venues v ON v.id = ts.venue_id
-       WHERE ${baseWhere}
+       WHERE ${baseWhere}${round.sql}
          AND ST_DWithin(v.location::geography,
            ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography, 50000)
        ORDER BY dist_m, ts.start_time ASC LIMIT 1`,
-      [hint.lng, hint.lat]
+      [hint.lng, hint.lat, ...round.params]
     );
   }
 
   if (hint.city) {
+    const round = roundClause(1);
     return runQuery(
       `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
        FROM time_slots ts
        JOIN venues v ON v.id = ts.venue_id
-       WHERE v.city ILIKE $1 AND ${baseWhere}
+       WHERE v.city ILIKE $1 AND ${baseWhere}${round.sql}
        ORDER BY ts.start_time ASC LIMIT 1`,
-      [hint.city]
+      [hint.city, ...round.params]
     );
   }
 
   return null;
 }
 
+function slotWithinRound(
+  slot: BookingSlot,
+  round: { startsAt: Date; endsAt: Date } | null
+): boolean {
+  if (!round) return true;
+  return slot.startTime >= round.startsAt && slot.endTime <= round.endsAt;
+}
+
 async function resolveBookingSlot(
   client: import('pg').PoolClient,
-  bookingId: string | null | undefined
+  bookingId: string | null | undefined,
+  round: { startsAt: Date; endsAt: Date } | null = null
 ): Promise<BookingSlot | null> {
   if (!bookingId) return null;
   const result = await client.query(
@@ -137,12 +165,13 @@ async function resolveBookingSlot(
   );
   const row = result.rows[0];
   if (!row) return null;
-  return {
+  const slot = {
     slotId: row.slot_id,
     venueId: row.venue_id,
     startTime: row.start_time,
     endTime: row.end_time,
   };
+  return slotWithinRound(slot, round) ? slot : null;
 }
 
 function soloInfoFromMeta(
@@ -213,9 +242,26 @@ async function pairInQueue(
 
     const preferredVenueId = p1Meta.preferredVenueId || p2Meta.preferredVenueId || undefined;
 
+    let roundWindow: { startsAt: Date; endsAt: Date } | null = null;
+    if (tournamentId) {
+      const roundResult = await client.query(
+        `SELECT tr.starts_at, tr.ends_at
+         FROM tournaments t
+         JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number
+         WHERE t.id = $1 AND tr.status = 'active'`,
+        [tournamentId]
+      );
+      if (roundResult.rows[0]) {
+        roundWindow = {
+          startsAt: roundResult.rows[0].starts_at,
+          endsAt: roundResult.rows[0].ends_at,
+        };
+      }
+    }
+
     if (needsVenue) {
-      const p1Booking = await resolveBookingSlot(client, p1Meta.bookingId);
-      const p2Booking = await resolveBookingSlot(client, p2Meta.bookingId);
+      const p1Booking = await resolveBookingSlot(client, p1Meta.bookingId, roundWindow);
+      const p2Booking = await resolveBookingSlot(client, p2Meta.bookingId, roundWindow);
       const bookedSlot = pickEarlierSlot(p1Booking, p2Booking);
 
       if (bookedSlot) {
@@ -246,6 +292,8 @@ async function pairInQueue(
           lng: matchPoint?.lng,
           city: city || undefined,
           venueId: preferredVenueId,
+          roundStartsAt: roundWindow?.startsAt,
+          roundEndsAt: roundWindow?.endsAt,
         });
         if (!slot) {
           await client.query('ROLLBACK');

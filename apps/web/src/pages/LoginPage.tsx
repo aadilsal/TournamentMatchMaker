@@ -54,7 +54,7 @@ export function LoginPage() {
     <div className="min-h-[calc(100vh-5rem)] flex -my-8 -mx-4 sm:-mx-6">
 
       {/* ── Left panel — cartoonplayer2.png ── */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col bg-[#080614]">
+      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col bg-[#0a0a0a]">
 
         {/* Subtle dot grid — visible in the dark top area */}
         <div
@@ -69,7 +69,7 @@ export function LoginPage() {
         <div
           className="absolute top-0 left-1/2 -translate-x-1/2 w-72 h-40 pointer-events-none"
           style={{
-            background: 'radial-gradient(ellipse, rgba(124,58,237,0.22) 0%, transparent 70%)',
+            background: 'radial-gradient(ellipse, rgba(227,24,55,0.22) 0%, transparent 70%)',
             filter: 'blur(24px)',
           }}
         />
@@ -88,21 +88,21 @@ export function LoginPage() {
           }}
         />
 
-        {/* Purple brand tint */}
+        {/* Red brand tint */}
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ background: 'rgba(60,20,120,0.15)' }}
+          style={{ background: 'rgba(227,24,55,0.08)' }}
         />
 
         {/* Right-edge blend */}
-        <div className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[#080614]/40 to-transparent pointer-events-none" />
+        <div className="absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[#0a0a0a]/40 to-transparent pointer-events-none" />
 
         {/* Bottom fill — dark behind the text */}
         <div
           className="absolute inset-x-0 bottom-0 pointer-events-none"
           style={{
             height: '52%',
-            background: 'linear-gradient(to top, #080614 45%, rgba(8,6,20,0.85) 65%, transparent 100%)',
+            background: 'linear-gradient(to top, #0a0a0a 45%, rgba(10,10,10,0.85) 65%, transparent 100%)',
           }}
         />
 
@@ -112,9 +112,9 @@ export function LoginPage() {
           {/* Chips row — equal gap above (pt-8) and below (gap-8) matches heading spacing */}
           <div className="flex items-center gap-3">
             {([
-              { label: '🏏 Super Over', borderColor: 'rgba(167,139,250,0.45)', color: '#ddd6fe', bg: 'rgba(124,58,237,0.26)' },
-              { label: '📍 Canada',     borderColor: 'rgba(251,191,36,0.35)',  color: '#fcd34d', bg: 'rgba(251,191,36,0.1)'  },
-              { label: '6 balls only',  borderColor: 'rgba(52,211,153,0.35)',  color: '#6ee7b7', bg: 'rgba(52,211,153,0.13)' },
+              { label: '🏏 Super Over', borderColor: 'rgba(227,24,55,0.45)', color: '#fecaca', bg: 'rgba(227,24,55,0.26)' },
+              { label: '📍 Canada',     borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff', bg: 'rgba(255,255,255,0.08)' },
+              { label: '6 balls only',  borderColor: 'rgba(227,24,55,0.35)',  color: '#fca5a5', bg: 'rgba(227,24,55,0.13)' },
             ] as const).map((chip) => (
               <div
                 key={chip.label}
@@ -133,7 +133,7 @@ export function LoginPage() {
           {/* Heading */}
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <Trophy className="h-5 w-5 text-amber-400" />
+              <Trophy className="h-5 w-5 text-[var(--color-primary)]" />
               <span className="text-white/85 font-semibold tracking-tight">VR Cricket League</span>
             </div>
             <h2 className="text-3xl font-bold text-white leading-snug">

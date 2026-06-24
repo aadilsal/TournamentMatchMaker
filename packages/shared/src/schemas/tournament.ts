@@ -1,11 +1,5 @@
 import { z } from 'zod';
 
-export const tournamentFormatSchema = z.enum([
-  'single_elimination',
-  'double_elimination',
-  'round_robin',
-]);
-
 export const tournamentStatusSchema = z.enum([
   'draft',
   'open',
@@ -17,13 +11,13 @@ export const tournamentStatusSchema = z.enum([
 export const createTournamentSchema = z.object({
   name: z.string().min(1).max(200),
   game: z.string().min(1).max(100),
-  format: tournamentFormatSchema,
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
   status: tournamentStatusSchema.optional(),
   maxPlayers: z.number().int().positive().optional(),
   skillTier: z.number().int().min(1).max(5).optional(),
   buybackPriceCents: z.number().int().min(0).optional(),
+  roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60).optional(),
 });
 
 export const tournamentListQuerySchema = z.object({

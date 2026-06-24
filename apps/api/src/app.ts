@@ -20,6 +20,7 @@ import { createNotificationsRouter } from './modules/notifications/notifications
 import { createGeoRouter } from './modules/geo/geo.routes.js';
 import { createMetaIntegrationRouter } from './modules/integrations/meta.routes.js';
 import { createStripeWebhookRouter } from './modules/integrations/stripe.webhook.js';
+import { createAdminRouter } from './modules/admin/admin.routes.js';
 import { sendSuccess } from './lib/response.js';
 
 export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
@@ -51,6 +52,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   v1.use('/matches', authRateLimit(env), createMatchesRouter(pool, redis, env));
   v1.use('/notifications', authRateLimit(env), createNotificationsRouter(pool, env));
   v1.use('/integrations/meta', createMetaIntegrationRouter(pool, redis, env));
+  v1.use('/admin', authRateLimit(env), createAdminRouter(pool, redis, env));
 
   app.use('/api/v1', v1);
   app.use(errorHandler);

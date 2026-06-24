@@ -166,7 +166,7 @@ export function TimeSlotGrid({
                   isFull
                     ? 'bg-[var(--color-muted-foreground)]/30'
                     : fillPercent >= 85
-                      ? 'bg-amber-500'
+                      ? 'bg-[var(--color-primary)]'
                       : fillPercent >= 60
                         ? 'bg-red-400'
                         : 'bg-[var(--color-primary)]'

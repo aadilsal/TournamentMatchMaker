@@ -30,6 +30,11 @@ export async function fetchLocationFromCoords(lat: number, lng: number): Promise
   return apiGet<IpLocation>(`/geo/reverse?${params.toString()}`);
 }
 
+export async function fetchCityCoords(country: string, city: string): Promise<{ lat: number; lng: number }> {
+  const params = new URLSearchParams({ country, city });
+  return apiGet<{ lat: number; lng: number }>(`/geo/coords?${params.toString()}`);
+}
+
 export function matchCityName(city: string, cities: string[]): string | undefined {
   if (!city) return undefined;
   const exact = cities.find((c) => c === city);

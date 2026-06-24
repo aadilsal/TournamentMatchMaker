@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ApiResponse } from '@vr-tournament/shared';
+import type { ApiMeta, ApiResponse } from '@vr-tournament/shared';
 import { ApiClientError } from './user-messages';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -134,9 +134,56 @@ export async function apiGet<T>(url: string) {
   }
 }
 
+export type ListQueryParams = Record<string, string | number | boolean | undefined | null>;
+
+export function buildQueryString(params: ListQueryParams) {
+  const q = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      q.set(key, String(value));
+    }
+  }
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+export async function apiGetList<T>(path: string, params?: ListQueryParams) {
+  try {
+    const { data } = await api.get<ApiResponse<T[]>>(`${path}${buildQueryString(params ?? {})}`);
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
+    return { items: data.data ?? [], meta: data.meta ?? {} };
+  } catch (err) {
+    throw toApiError(err);
+  }
+}
+
+export type { ApiMeta };
+
 export async function apiPost<T>(url: string, body?: unknown) {
   try {
     const { data } = await api.post<ApiResponse<T>>(url, body);
+    if (!data.success) {
+      throw new ApiClientError(
+        data.error?.message || 'Request failed',
+        data.error?.code,
+        data.error?.details
+      );
+    }
+    return data.data!;
+  } catch (err) {
+    throw toApiError(err);
+  }
+}
+
+export async function apiPut<T>(url: string, body?: unknown) {
+  try {
+    const { data } = await api.put<ApiResponse<T>>(url, body);
     if (!data.success) {
       throw new ApiClientError(
         data.error?.message || 'Request failed',

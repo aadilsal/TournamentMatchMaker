@@ -71,7 +71,7 @@ export function MatchmakingPage() {
           transition={{ duration: 0.3, delay: 0.07 }}
           className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] overflow-hidden"
         >
-          <div className="h-1.5 bg-gradient-to-r from-[var(--color-primary)] via-emerald-500 to-[var(--color-primary)]" />
+          <div className="h-1.5 bg-gradient-to-r from-[var(--color-primary)] via-white/40 to-[var(--color-primary)]" />
 
           <div className="p-6 space-y-6">
             <div>
@@ -160,7 +160,7 @@ export function MatchmakingPage() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.4, delay: 0.15 }}
-          className="hidden lg:block relative rounded-xl overflow-hidden min-h-[340px] bg-[#061a08]"
+          className="hidden lg:block relative rounded-xl overflow-hidden min-h-[340px] bg-[#0a0a0a]"
         >
           {/* Image — heavily darkened + saturated so white bg disappears */}
           <img
@@ -174,17 +174,17 @@ export function MatchmakingPage() {
             }}
           />
 
-          {/* Colour overlay — brings back the green cricket atmosphere */}
-          <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/70 via-emerald-900/40 to-slate-900/60" />
+          {/* Colour overlay — red/black atmosphere */}
+          <div className="absolute inset-0 bg-gradient-to-br from-black/70 via-red-950/40 to-black/60" />
 
           {/* Top edge vignette */}
-          <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-[#061a08] to-transparent" />
+          <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-b from-[#0a0a0a] to-transparent" />
           {/* Bottom gradient + text */}
-          <div className="absolute inset-x-0 bottom-0 pt-24 pb-6 px-5 bg-gradient-to-t from-[#061a08] via-[#061a08]/80 to-transparent">
+          <div className="absolute inset-x-0 bottom-0 pt-24 pb-6 px-5 bg-gradient-to-t from-[#0a0a0a] via-[#0a0a0a]/80 to-transparent">
             <p className="text-3xl font-bold text-white leading-tight">
               6 balls.
             </p>
-            <p className="text-3xl font-bold text-emerald-400 leading-tight">
+            <p className="text-3xl font-bold text-[var(--color-primary)] leading-tight">
               Everything.
             </p>
             <p className="mt-2 text-xs text-white/50 uppercase tracking-widest">
@@ -195,7 +195,7 @@ export function MatchmakingPage() {
           {/* Flame glow pulse */}
           <motion.div
             className="absolute inset-0 pointer-events-none"
-            style={{ background: 'radial-gradient(ellipse at 50% 60%, rgba(255,100,0,0.08) 0%, transparent 70%)' }}
+            style={{ background: 'radial-gradient(ellipse at 50% 60%, rgba(227,24,55,0.12) 0%, transparent 70%)' }}
             animate={{ opacity: [0.5, 1, 0.5] }}
             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
           />

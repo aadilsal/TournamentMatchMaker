@@ -1,6 +1,12 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
-import { KNOCKOUT_ROUNDS, playersToAdvance, shouldStartKnockout } from '@vr-tournament/shared';
+import {
+  KNOCKOUT_ROUNDS,
+  firstKnockoutMatchCount,
+  playersToAdvance,
+  resolveFieldSize,
+  shouldStartKnockout,
+} from '@vr-tournament/shared';
 
 export async function processCloseRoundJob(_job: Job, pool: Pool) {
   const expired = await pool.query(
@@ -36,6 +42,13 @@ async function closeRound(pool: Pool, tournamentId: string, roundNumber: number)
       [tournamentId, roundNumber]
     );
 
+    const tournamentResult = await client.query(
+      `SELECT initial_player_count, round_duration_minutes FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+    const tournamentRow = tournamentResult.rows[0];
+    const roundDurationMinutes = tournamentRow?.round_duration_minutes ?? 180;
+
     const activeResult = await client.query(
       `SELECT tp.*, tr.registered_at FROM tournament_participants tp
        JOIN tournament_registrations tr ON tr.tournament_id = tp.tournament_id AND tr.user_id = tp.user_id
@@ -46,19 +59,29 @@ async function closeRound(pool: Pool, tournamentId: string, roundNumber: number)
 
     const active = activeResult.rows;
     const activeCount = active.length;
+    let fieldSize = resolveFieldSize(tournamentRow?.initial_player_count, activeCount);
 
-    if (shouldStartKnockout(activeCount)) {
-      const sorted = active.slice(0, 16);
-      for (const p of sorted) {
+    if (!tournamentRow?.initial_player_count && activeCount > 0) {
+      await client.query(
+        `UPDATE tournaments SET initial_player_count = $1, updated_at = NOW() WHERE id = $2`,
+        [activeCount, tournamentId]
+      );
+      fieldSize = activeCount;
+    }
+
+    if (shouldStartKnockout(activeCount, fieldSize)) {
+      for (const p of active) {
         await client.query(
           `UPDATE tournament_participants SET status = 'knockout', updated_at = NOW()
            WHERE tournament_id = $1 AND user_id = $2`,
           [tournamentId, p.user_id]
         );
       }
-      for (let slot = 0; slot < 8; slot++) {
-        const p1 = sorted[slot * 2]?.user_id;
-        const p2 = sorted[slot * 2 + 1]?.user_id;
+
+      const matchCount = firstKnockoutMatchCount(active.length);
+      for (let slot = 0; slot < matchCount; slot++) {
+        const p1 = active[slot * 2]?.user_id;
+        const p2 = active[slot * 2 + 1]?.user_id;
         if (!p1 || !p2) continue;
         await client.query(
           `INSERT INTO matches (tournament_id, player1_id, player2_id, status, round_number, phase, bracket_slot)
@@ -66,12 +89,13 @@ async function closeRound(pool: Pool, tournamentId: string, roundNumber: number)
           [tournamentId, p1, p2, KNOCKOUT_ROUNDS.ro16, slot]
         );
       }
+
       await client.query(
         `UPDATE tournaments SET phase = 'knockout', updated_at = NOW() WHERE id = $1`,
         [tournamentId]
       );
     } else {
-      const keepCount = playersToAdvance(activeCount);
+      const keepCount = playersToAdvance(activeCount, fieldSize);
       const advancing = active.slice(0, keepCount);
       const eliminated = active.slice(keepCount);
 
@@ -90,8 +114,7 @@ async function closeRound(pool: Pool, tournamentId: string, roundNumber: number)
       }
 
       const nextStarts = new Date();
-      const nextEnds = new Date(nextStarts);
-      nextEnds.setDate(nextEnds.getDate() + 3);
+      const nextEnds = new Date(nextStarts.getTime() + roundDurationMinutes * 60_000);
 
       await client.query(
         `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)

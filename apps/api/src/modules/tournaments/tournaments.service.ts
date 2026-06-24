@@ -4,6 +4,7 @@ import type {
   CreateTournamentInput,
   EnterTournamentInput,
   RegisterTournamentInput,
+  Tournament,
   TournamentListQuery,
   TournamentMatchesQuery,
 } from '@vr-tournament/shared';
@@ -24,8 +25,10 @@ import { releaseSlotLock } from '../../lib/slot-lock.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import {
   KNOCKOUT_ROUNDS,
+  firstKnockoutMatchCount,
   knockoutRoundLabel,
   playersToAdvance,
+  resolveFieldSize,
   shouldStartKnockout,
   isSlotStartPast,
 } from '@vr-tournament/shared';
@@ -109,25 +112,25 @@ export class TournamentsService {
     try {
       await client.query('BEGIN');
       const result = await client.query(
-        `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players, skill_tier, buyback_price_cents)
+        `INSERT INTO tournaments (name, game, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, round_duration_minutes)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
         [
           input.name,
           input.game,
-          input.format,
           input.startDate,
           input.endDate,
           input.status ?? 'draft',
           input.maxPlayers ?? null,
           input.skillTier ?? 3,
           input.buybackPriceCents ?? 500,
+          input.roundDurationMinutes ?? 180,
         ]
       );
       const tournament = result.rows[0];
       const startsAt = new Date(input.startDate);
-      const endsAt = new Date(startsAt);
-      endsAt.setDate(endsAt.getDate() + 3);
+      const durationMinutes = input.roundDurationMinutes ?? 180;
+      const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
 
       await client.query(
         `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
@@ -253,11 +256,33 @@ export class TournamentsService {
         }
 
         const slotTime = await this.pool.query(
-          `SELECT start_time FROM time_slots WHERE id = $1`,
+          `SELECT start_time, end_time FROM time_slots WHERE id = $1`,
           [input.timeSlotId]
         );
         if (slotTime.rows[0] && isSlotStartPast(slotTime.rows[0].start_time)) {
           throw new AppError('BAD_REQUEST', 'Cannot book a time slot that has already started', 400);
+        }
+
+        const roundWindow = await this.pool.query(
+          `SELECT tr.starts_at, tr.ends_at
+           FROM tournaments t
+           JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number
+           WHERE t.id = $1 AND tr.status = 'active'`,
+          [tournamentId]
+        );
+        const round = roundWindow.rows[0];
+        if (round && slotTime.rows[0]) {
+          const slotStart = new Date(slotTime.rows[0].start_time);
+          const slotEnd = new Date(slotTime.rows[0].end_time);
+          const roundStart = new Date(round.starts_at);
+          const roundEnd = new Date(round.ends_at);
+          if (slotStart < roundStart || slotEnd > roundEnd) {
+            throw new AppError(
+              'BAD_REQUEST',
+              'Time slot must fall within the current tournament round window',
+              400
+            );
+          }
         }
 
         if (input.venueId && input.venueId !== slotCheck.rows[0].venue_id) {
@@ -364,6 +389,23 @@ export class TournamentsService {
     return result.rows.map(mapMatch);
   }
 
+  private async assertBuybackAllowed(tournamentId: string, tournament: Tournament) {
+    const activeCountResult = await this.pool.query(
+      `SELECT COUNT(*)::int AS count FROM tournament_participants
+       WHERE tournament_id = $1 AND status IN ('active', 'advanced')`,
+      [tournamentId]
+    );
+    const activeCount = activeCountResult.rows[0]?.count ?? 0;
+    const fieldSize = resolveFieldSize(tournament.initialPlayerCount, activeCount);
+    if (shouldStartKnockout(activeCount, fieldSize)) {
+      throw new AppError(
+        'CONFLICT',
+        'Buybacks are closed — knockout begins when half the field or fewer remain',
+        409
+      );
+    }
+  }
+
   async createBuybackCheckout(tournamentId: string, userId: string, input: BuybackInput) {
     if (!this.env) throw new AppError('INTERNAL', 'Env not configured', 500);
 
@@ -379,6 +421,8 @@ export class TournamentsService {
     if (participant.status !== 'eliminated') {
       throw new AppError('CONFLICT', 'Only eliminated players can buy back', 409);
     }
+
+    await this.assertBuybackAllowed(tournamentId, tournament);
 
     const roundOpen = await this.pool.query(
       `SELECT id FROM tournament_rounds
@@ -481,6 +525,8 @@ export class TournamentsService {
     if (participant.status !== 'eliminated') {
       throw new AppError('CONFLICT', 'Only eliminated players can buy back', 409);
     }
+
+    await this.assertBuybackAllowed(tournamentId, tournament);
 
     const roundOpen = await this.pool.query(
       `SELECT id FROM tournament_rounds
@@ -709,8 +755,8 @@ export class TournamentsService {
       );
       return {
         tournamentId,
-        format: tournament.format,
         phase: tournament.phase,
+        fieldSize: tournament.initialPlayerCount,
         rounds: [
           {
             round: tournament.currentRoundNumber,
@@ -724,8 +770,8 @@ export class TournamentsService {
 
     return {
       tournamentId,
-      format: tournament.format,
       phase: tournament.phase,
+      fieldSize: tournament.initialPlayerCount,
       rounds,
     };
   }
@@ -765,6 +811,13 @@ export class TournamentsService {
         [tournamentId, roundNumber]
       );
 
+      const tournamentResult = await client.query(
+        `SELECT initial_player_count, round_duration_minutes FROM tournaments WHERE id = $1`,
+        [tournamentId]
+      );
+      const tournamentRow = tournamentResult.rows[0];
+      const roundDurationMinutes = tournamentRow?.round_duration_minutes ?? 180;
+
       const activeResult = await client.query(
         `SELECT tp.*, tr.registered_at FROM tournament_participants tp
          JOIN tournament_registrations tr ON tr.tournament_id = tp.tournament_id AND tr.user_id = tp.user_id
@@ -775,15 +828,24 @@ export class TournamentsService {
 
       const active = activeResult.rows;
       const activeCount = active.length;
+      let fieldSize = resolveFieldSize(tournamentRow?.initial_player_count, activeCount);
 
-      if (shouldStartKnockout(activeCount)) {
+      if (!tournamentRow?.initial_player_count && activeCount > 0) {
+        await client.query(
+          `UPDATE tournaments SET initial_player_count = $1, updated_at = NOW() WHERE id = $2`,
+          [activeCount, tournamentId]
+        );
+        fieldSize = activeCount;
+      }
+
+      if (shouldStartKnockout(activeCount, fieldSize)) {
         await this.generateKnockoutBracket(client, tournamentId, active);
         await client.query(
           `UPDATE tournaments SET phase = 'knockout', updated_at = NOW() WHERE id = $1`,
           [tournamentId]
         );
       } else {
-        const keepCount = playersToAdvance(activeCount);
+        const keepCount = playersToAdvance(activeCount, fieldSize);
         const advancing = active.slice(0, keepCount);
         const eliminated = active.slice(keepCount);
 
@@ -809,8 +871,7 @@ export class TournamentsService {
         }
 
         const nextStarts = new Date();
-        const nextEnds = new Date(nextStarts);
-        nextEnds.setDate(nextEnds.getDate() + 3);
+        const nextEnds = new Date(nextStarts.getTime() + roundDurationMinutes * 60_000);
 
         await client.query(
           `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
@@ -838,16 +899,17 @@ export class TournamentsService {
     tournamentId: string,
     players: Array<{ user_id: string }>
   ) {
-    const sorted = players.slice(0, 16);
-    for (let i = 0; i < sorted.length; i++) {
+    const sorted = players;
+    for (const p of sorted) {
       await client.query(
         `UPDATE tournament_participants SET status = 'knockout', updated_at = NOW()
          WHERE tournament_id = $1 AND user_id = $2`,
-        [tournamentId, sorted[i].user_id]
+        [tournamentId, p.user_id]
       );
     }
 
-    for (let slot = 0; slot < 8; slot++) {
+    const matchCount = firstKnockoutMatchCount(sorted.length);
+    for (let slot = 0; slot < matchCount; slot++) {
       const p1 = sorted[slot * 2]?.user_id;
       const p2 = sorted[slot * 2 + 1]?.user_id;
       if (!p1 || !p2) continue;

@@ -78,3 +78,8 @@ export async function fulfillBuybackFromWebhook(
   const service = new TournamentsService(pool, redis, env);
   return service.fulfillBuyback(buyback.id);
 }
+
+export async function refundBuybackPayment(env: Env, paymentIntentId: string) {
+  const stripe = await getStripe(env);
+  return stripe.refunds.create({ payment_intent: paymentIntentId });
+}

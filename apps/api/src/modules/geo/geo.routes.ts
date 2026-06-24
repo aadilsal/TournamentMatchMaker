@@ -14,6 +14,11 @@ const reverseQuerySchema = z.object({
   lng: z.coerce.number().min(-180).max(180),
 });
 
+const coordsQuerySchema = z.object({
+  country: z.string().min(1).max(100),
+  city: z.string().min(1).max(100),
+});
+
 export function createGeoRouter(): Router {
   const router = Router();
   const service = new GeoService();
@@ -30,8 +35,18 @@ export function createGeoRouter(): Router {
   router.get('/reverse', validate(reverseQuerySchema, 'query'), async (req, res, next) => {
     try {
       const { lat, lng } = req.query as unknown as z.infer<typeof reverseQuerySchema>;
-      const location = service.getLocationFromCoords(lat, lng);
+      const location = await service.getLocationFromCoords(lat, lng);
       sendSuccess(res, location);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/coords', validate(coordsQuerySchema, 'query'), async (req, res, next) => {
+    try {
+      const { country, city } = req.query as unknown as z.infer<typeof coordsQuerySchema>;
+      const coords = await service.geocodeCity(country, city);
+      sendSuccess(res, coords);
     } catch (err) {
       next(err);
     }

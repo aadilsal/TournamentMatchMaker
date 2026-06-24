@@ -172,13 +172,13 @@ async function upsertTournament(
   data: {
     name: string;
     game: string;
-    format: string;
     startDate: Date;
     endDate: Date;
     status: string;
     maxPlayers: number;
     skillTier: number;
     buybackPriceCents: number;
+    roundDurationMinutes?: number;
     phase?: string;
     currentRoundNumber?: number;
   }
@@ -187,20 +187,20 @@ async function upsertTournament(
   if (existing.rows[0]) {
     await client.query(
       `UPDATE tournaments SET
-         game = $2, format = $3, start_date = $4, end_date = $5, status = $6,
-         max_players = $7, skill_tier = $8, buyback_price_cents = $9,
-         phase = $10, current_round_number = $11
+         game = $2, start_date = $3, end_date = $4, status = $5,
+         max_players = $6, skill_tier = $7, buyback_price_cents = $8,
+         round_duration_minutes = $9, phase = $10, current_round_number = $11
        WHERE id = $1`,
       [
         existing.rows[0].id,
         data.game,
-        data.format,
         data.startDate.toISOString(),
         data.endDate.toISOString(),
         data.status,
         data.maxPlayers,
         data.skillTier,
         data.buybackPriceCents,
+        data.roundDurationMinutes ?? 180,
         data.phase ?? 'normal',
         data.currentRoundNumber ?? 1,
       ]
@@ -209,19 +209,19 @@ async function upsertTournament(
   }
 
   const result = await client.query(
-    `INSERT INTO tournaments (name, game, format, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, phase, current_round_number)
+    `INSERT INTO tournaments (name, game, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, round_duration_minutes, phase, current_round_number)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
     [
       data.name,
       data.game,
-      data.format,
       data.startDate.toISOString(),
       data.endDate.toISOString(),
       data.status,
       data.maxPlayers,
       data.skillTier,
       data.buybackPriceCents,
+      data.roundDurationMinutes ?? 180,
       data.phase ?? 'normal',
       data.currentRoundNumber ?? 1,
     ]
@@ -737,7 +737,6 @@ async function seed() {
     const lahoreCupId = await upsertTournament(client, {
       name: 'Lahore VR Championship',
       game: 'VR Cricket',
-      format: 'single_elimination',
       startDate: inDays(7),
       endDate: inDays(10),
       status: 'in_progress',
@@ -840,7 +839,6 @@ async function seed() {
     const karachiOpenId = await upsertTournament(client, {
       name: 'Karachi Open VR',
       game: 'VR Cricket',
-      format: 'single_elimination',
       startDate: inDays(14),
       endDate: inDays(16),
       status: 'open',
@@ -889,7 +887,6 @@ async function seed() {
     const knockoutCupId = await upsertTournament(client, {
       name: 'Punjab Knockout Cup',
       game: 'VR Cricket',
-      format: 'single_elimination',
       startDate: inDays(-7),
       endDate: inDays(3),
       status: 'in_progress',
@@ -917,7 +914,6 @@ async function seed() {
     const winterCupId = await upsertTournament(client, {
       name: 'Winter VR Cup 2025',
       game: 'VR Cricket',
-      format: 'single_elimination',
       startDate: inDays(-30),
       endDate: inDays(-20),
       status: 'completed',
@@ -957,7 +953,6 @@ async function seed() {
     const islamabadLeagueId = await upsertTournament(client, {
       name: 'Islamabad VR League',
       game: 'VR Cricket',
-      format: 'single_elimination',
       startDate: inDays(21),
       endDate: inDays(24),
       status: 'open',

@@ -509,7 +509,7 @@ export function RegisterPage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Card className="border-[var(--color-border)] shadow-lg shadow-purple-950/20 overflow-hidden">
+      <Card className="border-[var(--color-border)] shadow-lg shadow-red-950/20 overflow-hidden">
         <CricketDeliveryBanner />
         <CardHeader className="space-y-1">
           <div className="flex items-center gap-2 text-[var(--color-primary)]">
@@ -598,12 +598,12 @@ export function RegisterPage() {
                               'h-1 flex-1 rounded-full transition-colors',
                               i <= strengthScore
                                 ? strengthScore <= 1
-                                  ? 'bg-red-500'
+                                  ? 'bg-red-900'
                                   : strengthScore <= 2
-                                    ? 'bg-amber-500'
+                                    ? 'bg-red-700'
                                     : strengthScore <= 3
-                                      ? 'bg-blue-500'
-                                      : 'bg-emerald-500'
+                                      ? 'bg-red-500'
+                                      : 'bg-red-400'
                                 : 'bg-[var(--color-muted)]'
                             )}
                           />
@@ -619,7 +619,7 @@ export function RegisterPage() {
                           key={req.id}
                           className={cn(
                             'flex items-center gap-1.5 text-xs',
-                            req.met ? 'text-emerald-400' : 'text-[var(--color-muted-foreground)]'
+                            req.met ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'
                           )}
                         >
                           {req.met ? (
@@ -746,14 +746,14 @@ export function RegisterPage() {
                     form.longitude !== undefined &&
                     form.country &&
                     form.city && (
-                    <p className="text-xs text-emerald-400">
+                    <p className="text-xs text-[var(--color-primary)]">
                       Location saved — {form.city}, {form.country}. We&apos;ll find venues near you when matching.
                     </p>
                   )}
                   {form.latitude !== undefined &&
                     form.longitude !== undefined &&
                     (!form.country || !form.city) && (
-                    <p className="text-xs text-emerald-400">
+                    <p className="text-xs text-[var(--color-primary)]">
                       Coordinates saved. Select your country and city above if they weren&apos;t filled automatically.
                     </p>
                   )}

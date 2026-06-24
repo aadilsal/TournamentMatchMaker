@@ -61,7 +61,7 @@ function MatchNode({
 }) {
   return (
     <div
-      className={`px-3 py-2 flex items-center gap-2 ${won ? 'bg-amber-500/10 text-amber-400' : ''}`}
+      className={`px-3 py-2 flex items-center gap-2 ${won ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : ''}`}
     >
       {won && <Trophy className="h-3.5 w-3.5 shrink-0" />}
       {player ? (

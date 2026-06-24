@@ -8,6 +8,7 @@ import { SocketSyncProvider } from '@/components/sync/SocketSyncProvider';
 import { Button } from '@/components/ui/button';
 import { getAccessToken, setAccessToken, apiPost } from '@/lib/api';
 import { disconnectSocket } from '@/hooks/useSocket';
+import { useAuthUser } from '@/hooks/useAuthUser';
 import { cn } from '@/lib/utils';
 
 const navItems = [
@@ -22,6 +23,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
+  const { isAdmin } = useAuthUser();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
@@ -79,6 +81,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             {isLoggedIn ? (
               <>
                 <NotificationBell />
+                {isAdmin && (
+                  <Link to="/admin" className="hidden sm:block">
+                    <Button variant="outline" size="sm">
+                      Admin
+                    </Button>
+                  </Link>
+                )}
                 <Link to="/profile">
                   <Button
                     variant="ghost"
