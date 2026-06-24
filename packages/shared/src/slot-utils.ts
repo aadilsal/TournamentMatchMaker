@@ -3,6 +3,20 @@ export function isSlotStartPast(startTime: Date | string): boolean {
   return new Date(startTime).getTime() <= Date.now();
 }
 
+/** Returns true when a slot fits entirely inside a booking window (e.g. tournament round). */
+export function isSlotWithinWindow(
+  slotStart: Date | string,
+  slotEnd: Date | string,
+  windowStart: Date | string,
+  windowEnd: Date | string
+): boolean {
+  const start = new Date(slotStart).getTime();
+  const end = new Date(slotEnd).getTime();
+  const wStart = new Date(windowStart).getTime();
+  const wEnd = new Date(windowEnd).getTime();
+  return start >= wStart && end <= wEnd;
+}
+
 /** Returns true when the slot play window has ended. */
 export function isSlotEnded(endTime: Date | string): boolean {
   return new Date(endTime).getTime() <= Date.now();

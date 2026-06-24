@@ -43,6 +43,8 @@ const BY_MESSAGE: Record<string, string> = {
   'match is not currently playable': 'This match is not ready to play yet.',
   'scores must be submitted from your meta quest headset':
     'Scores are submitted from your Meta Quest headset.',
+  'time slot must fall within the current tournament round window':
+    'That time slot is outside the current tournament round. Pick a slot within the active round dates.',
   'register for tournament before joining its queue': 'Register for the tournament before joining the queue.',
   'you are eliminated from this tournament': 'You have been eliminated from this tournament.',
   'buybacks are only available during normal rounds': 'Buybacks are only available during the regular rounds.',

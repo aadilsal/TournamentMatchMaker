@@ -953,8 +953,8 @@ async function seed() {
     const islamabadLeagueId = await upsertTournament(client, {
       name: 'Islamabad VR League',
       game: 'VR Cricket',
-      startDate: inDays(21),
-      endDate: inDays(24),
+      startDate: inDays(0),
+      endDate: inDays(7),
       status: 'open',
       maxPlayers: 32,
       skillTier: 2,
@@ -963,7 +963,8 @@ async function seed() {
       currentRoundNumber: 1,
     });
 
-    await upsertRound(client, islamabadLeagueId, 1, inDays(20), inDays(23), 'active');
+    // Round window must overlap generated venue slots (next 7 days).
+    await upsertRound(client, islamabadLeagueId, 1, inDays(0), inDays(6), 'active');
 
     // --- Casual matchmaking matches for test accounts ---
     const testUserIds = playerIds.slice(0, 3);

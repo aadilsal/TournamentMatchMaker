@@ -32,6 +32,8 @@ interface SlotConfirmModalProps {
 
   isPending?: boolean;
 
+  error?: string | null;
+
 }
 
 
@@ -117,6 +119,8 @@ export function SlotConfirmModal({
   onCancel,
 
   isPending,
+
+  error,
 
 }: SlotConfirmModalProps) {
 
@@ -277,6 +281,15 @@ export function SlotConfirmModal({
                 />
 
               </div>
+
+              {error && (
+                <p
+                  className="mt-4 rounded-lg border border-[var(--color-destructive)]/30 bg-[var(--color-destructive)]/10 px-3 py-2 text-sm text-[var(--color-destructive)]"
+                  role="alert"
+                >
+                  {error}
+                </p>
+              )}
 
             </div>
 

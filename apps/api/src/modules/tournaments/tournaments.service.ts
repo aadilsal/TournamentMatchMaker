@@ -31,6 +31,7 @@ import {
   resolveFieldSize,
   shouldStartKnockout,
   isSlotStartPast,
+  isSlotWithinWindow,
 } from '@vr-tournament/shared';
 import { createBuybackPaymentIntent } from '../../lib/stripe.js';
 
@@ -272,11 +273,14 @@ export class TournamentsService {
         );
         const round = roundWindow.rows[0];
         if (round && slotTime.rows[0]) {
-          const slotStart = new Date(slotTime.rows[0].start_time);
-          const slotEnd = new Date(slotTime.rows[0].end_time);
-          const roundStart = new Date(round.starts_at);
-          const roundEnd = new Date(round.ends_at);
-          if (slotStart < roundStart || slotEnd > roundEnd) {
+          if (
+            !isSlotWithinWindow(
+              slotTime.rows[0].start_time,
+              slotTime.rows[0].end_time,
+              round.starts_at,
+              round.ends_at
+            )
+          ) {
             throw new AppError(
               'BAD_REQUEST',
               'Time slot must fall within the current tournament round window',

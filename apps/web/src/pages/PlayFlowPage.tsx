@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { TimeSlot, Tournament, User, Venue } from '@vr-tournament/shared';
+import type { TimeSlot, Tournament, TournamentRound, User, Venue } from '@vr-tournament/shared';
+import { isSlotWithinWindow } from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
 import { LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
@@ -42,6 +43,21 @@ export function PlayFlowPage() {
     enabled: !!tournamentId,
   });
 
+  const { data: rounds = [] } = useQuery({
+    queryKey: ['tournament-rounds', tournamentId],
+    queryFn: () => apiGet<TournamentRound[]>(`/tournaments/${tournamentId}/rounds`),
+    enabled: !!tournamentId,
+  });
+
+  const activeRound = useMemo(
+    () =>
+      rounds.find(
+        (round) =>
+          round.roundNumber === tournament?.currentRoundNumber && round.status === 'active'
+      ) ?? null,
+    [rounds, tournament?.currentRoundNumber]
+  );
+
   const { data: venues = [] } = useQuery({
     queryKey: ['venues-play'],
     queryFn: () => apiGet<Venue[]>('/venues?limit=50'),
@@ -55,6 +71,13 @@ export function PlayFlowPage() {
     staleTime: LIVE_STALE_TIME,
     refetchInterval: step === 'slot' ? SAFETY_POLL_MS : false,
   });
+
+  const bookableSlots = useMemo(() => {
+    if (!activeRound) return slots;
+    return slots.filter((slot) =>
+      isSlotWithinWindow(slot.startTime, slot.endTime, activeRound.startsAt, activeRound.endsAt)
+    );
+  }, [slots, activeRound]);
 
   const enterMutation = useMutation({
     mutationFn: () =>
@@ -168,13 +191,18 @@ export function PlayFlowPage() {
           <SlotPicker
             selectedDate={selectedDate}
             onDateChange={setSelectedDate}
-            slots={slots}
+            slots={bookableSlots}
             isLoading={slotsLoading}
             selectedSlotId={selectedSlot?.id}
             onSlotSelect={(slot) => {
               setSelectedSlot(slot);
               setShowConfirm(true);
             }}
+            emptyMessage={
+              activeRound && slots.length > 0 && bookableSlots.length === 0
+                ? 'No slots on this date fall within the current tournament round. Try another day.'
+                : undefined
+            }
           />
         </motion.div>
       )}
@@ -186,13 +214,13 @@ export function PlayFlowPage() {
         slotStart={selectedSlot?.startTime ?? ''}
         slotEnd={selectedSlot?.endTime ?? ''}
         onConfirm={() => enterMutation.mutate()}
-        onCancel={() => setShowConfirm(false)}
+        onCancel={() => {
+          setShowConfirm(false);
+          enterMutation.reset();
+        }}
         isPending={enterMutation.isPending}
+        error={enterMutation.isError ? getUserErrorMessage(enterMutation.error) : null}
       />
-
-      {enterMutation.isError && (
-        <p className="text-sm text-[var(--color-destructive)]">{getUserErrorMessage(enterMutation.error)}</p>
-      )}
     </div>
   );
 }
