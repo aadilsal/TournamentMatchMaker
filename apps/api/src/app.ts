@@ -27,10 +27,16 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   const app = express();
 
   app.set('trust proxy', 1);
-  app.use(helmet());
+  app.use(
+    helmet({
+      // API (:3000) serves images to the SPA (:5173) — allow cross-origin embedding.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    })
+  );
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
   app.use('/webhooks/stripe', createStripeWebhookRouter(pool, redis, env));
-  app.use(express.json());
+  // Default 100kb is too small for base64 avatar uploads (schema allows up to ~2MB decoded).
+  app.use(express.json({ limit: '4mb' }));
   app.use(cookieParser());
   app.use(pinoHttp({ level: env.NODE_ENV === 'production' ? 'info' : 'debug' }));
 

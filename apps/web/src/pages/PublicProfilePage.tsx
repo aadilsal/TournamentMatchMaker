@@ -24,7 +24,7 @@ export function PublicProfilePage() {
   if (isLoading || !profile) return <PageLoader label="Loading player…" />;
 
   const avatarUrl = profile.hasProfilePicture
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/v1/players/${profile.username}/avatar`
+    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
     : null;
 
   return (

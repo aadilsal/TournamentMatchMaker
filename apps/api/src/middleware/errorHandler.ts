@@ -25,6 +25,14 @@ export function errorHandler(
     return sendError(res, { code: 'CONFLICT', message: 'You are already registered for this tournament' }, 409);
   }
 
+  if ((err as { type?: string }).type === 'entity.too.large') {
+    return sendError(
+      res,
+      { code: 'PAYLOAD_TOO_LARGE', message: 'Image is too large. Please use a smaller file (max 2MB).' },
+      413
+    );
+  }
+
   console.error('Unhandled error:', err);
   return sendError(res, { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' }, 500);
 }

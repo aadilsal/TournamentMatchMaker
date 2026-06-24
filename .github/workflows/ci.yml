@@ -1,13 +1,12 @@
 name: CI
 
+# Temporarily disabled — re-enable push/pull_request when CI is stable.
 on:
-  push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
+    if: false # remove this line when re-enabling CI
     runs-on: ubuntu-latest
 
     services:

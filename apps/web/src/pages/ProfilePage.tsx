@@ -1,15 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { User } from '@vr-tournament/shared';
 import { apiGet, apiPatch, getAccessToken } from '@/lib/api';
+import { prepareAvatarUpload } from '@/lib/avatar-upload';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { PageLoader } from '@/components/ui/cricket-loader';
-import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode } from 'lucide-react';
+import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import { PlayerQRCode } from '@/components/qr/PlayerQRCode';
 import { Link } from 'react-router-dom';
@@ -30,6 +31,7 @@ const VR_DEVICES = [
 export function ProfilePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     username: '',
     country: '',
@@ -69,28 +71,18 @@ export function ProfilePage() {
   });
 
   const uploadAvatar = useMutation({
-    mutationFn: (file: File) => {
-      return new Promise<User>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = async () => {
-          try {
-            const base64 = (reader.result as string).split(',')[1];
-            const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp';
-            const result = await apiPatch<User>('/players/me/avatar', { data: base64, mimeType });
-            resolve(result);
-          } catch (e) {
-            reject(e);
-          }
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+    mutationFn: async (file: File) => {
+      const { data, mimeType } = await prepareAvatarUpload(file);
+      return apiPatch<User>('/players/me/avatar', { data, mimeType });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
+    onSuccess: (user) => {
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: ['public-profile', user.username] });
+    },
   });
 
   const avatarUrl = profile?.hasProfilePicture && profile.username
-    ? `${API_URL}/api/v1/players/${profile.username}/avatar`
+    ? `${API_URL}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
     : null;
 
   if (isLoading) return <PageLoader label="Loading profile…" />;
@@ -129,23 +121,56 @@ export function ProfilePage() {
           </div>
           <div className="flex items-center gap-4">
             {avatarUrl ? (
-              <img src={avatarUrl} alt="" className="h-16 w-16 rounded-full object-cover border-2 border-[var(--color-primary)]/30" />
+              <img
+                src={avatarUrl}
+                alt=""
+                className="h-16 w-16 shrink-0 rounded-full object-cover border-2 border-[var(--color-primary)]/30"
+              />
             ) : (
-              <div className="h-16 w-16 rounded-full bg-[var(--color-primary)]/15 flex items-center justify-center text-xl font-bold text-[var(--color-primary)]">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)]/15 text-xl font-bold text-[var(--color-primary)]">
                 {form.username.charAt(0).toUpperCase() || '?'}
               </div>
             )}
-            <div className="space-y-1.5">
+            <div className="min-w-0 flex-1 space-y-2">
               <Label htmlFor="avatar">Profile photo</Label>
-              <Input
+              <input
+                ref={avatarInputRef}
                 id="avatar"
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={uploadAvatar.isPending}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) uploadAvatar.mutate(file);
+                  e.target.value = '';
                 }}
               />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={uploadAvatar.isPending}
+                  onClick={() => avatarInputRef.current?.click()}
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  {uploadAvatar.isPending
+                    ? 'Uploading…'
+                    : profile?.hasProfilePicture
+                      ? 'Change photo'
+                      : 'Choose photo'}
+                </Button>
+                <span className="text-xs text-[var(--color-muted-foreground)]">
+                  JPG, PNG, or WebP
+                </span>
+              </div>
+              {uploadAvatar.isError && (
+                <p className="text-xs text-[var(--color-destructive)]">
+                  {getUserErrorMessage(uploadAvatar.error)}
+                </p>
+              )}
             </div>
           </div>
           <div className="space-y-1.5">

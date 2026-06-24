@@ -135,6 +135,7 @@ export class PlayersService {
       totalLosses: row.total_losses,
       totalMatches: row.total_matches,
       createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
     };
   }
 

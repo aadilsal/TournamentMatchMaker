@@ -9,6 +9,7 @@ const BY_CODE: Record<string, string> = {
   CONFLICT: 'That action is not available right now.',
   BAD_REQUEST: 'Please check your details and try again.',
   VALIDATION_ERROR: 'Please check your details and try again.',
+  PAYLOAD_TOO_LARGE: 'That image is too large. Please choose a smaller photo (max 2MB).',
   INTERNAL_ERROR: GENERIC,
   GEO_LOOKUP_FAILED: 'We could not detect your location. Enter your city manually.',
   GEO_OUT_OF_RANGE:
@@ -50,6 +51,7 @@ const BY_MESSAGE: Record<string, string> = {
   'buybacks are only available during normal rounds': 'Buybacks are only available during the regular rounds.',
   'only eliminated players can buy back': 'Only eliminated players can buy back a life.',
   'round time has ended — buybacks are no longer available': 'This round has ended — buybacks are no longer available.',
+  'image must be under 2mb': 'That image is too large. Please choose a smaller photo (max 2MB).',
   'request failed': GENERIC,
   'an unexpected error occurred': GENERIC,
 };

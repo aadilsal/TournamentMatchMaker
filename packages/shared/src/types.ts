@@ -80,6 +80,7 @@ export interface PublicPlayerProfile {
   totalLosses: number;
   totalMatches: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface Venue {
