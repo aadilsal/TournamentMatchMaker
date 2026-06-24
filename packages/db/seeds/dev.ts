@@ -117,7 +117,7 @@ interface MatchSeed {
   venueId?: string | null;
   timeSlotId?: string | null;
   status: string;
-  result?: { player1Score: number; player2Score: number; winnerId: string } | null;
+  result?: { player1Score: number; player2Score: number; winnerId: string | null } | null;
   scheduledAt?: Date;
   roundNumber?: number;
   phase?: 'normal' | 'knockout';
@@ -390,6 +390,93 @@ function completedResult(p1: string, p2: string, p1Score: number, p2Score: numbe
   };
 }
 
+function inProgressResult(p1Score: number, p2Score: number) {
+  return { player1Score: p1Score, player2Score: p2Score, winnerId: null };
+}
+
+/** Seeds RO16 → QF → SF (+ optional Final) for a 16-player knockout bracket demo. */
+async function seedKnockoutBracket(
+  client: PoolClient,
+  tournamentId: string,
+  koPlayers: string[],
+  scheduledAt?: Date
+) {
+  const players = koPlayers.slice(0, 16);
+  if (players.length < 16) {
+    console.warn(`Knockout bracket needs 16 players; got ${players.length}`);
+    return;
+  }
+
+  const ro16Winners: string[] = [];
+  for (let slot = 0; slot < 8; slot++) {
+    const p1 = players[slot * 2];
+    const p2 = players[slot * 2 + 1];
+    const winner = slot % 2 === 0 ? p1 : p2;
+    ro16Winners.push(winner);
+    await insertMatch(client, {
+      tournamentId,
+      player1Id: p1,
+      player2Id: p2,
+      status: 'completed',
+      roundNumber: KNOCKOUT.ro16,
+      phase: 'knockout',
+      bracketSlot: slot,
+      result: completedResult(p1, p2, 20 + slot, 15 + slot),
+    });
+  }
+
+  const qfWinners: string[] = [];
+  for (let slot = 0; slot < 4; slot++) {
+    const p1 = ro16Winners[slot * 2];
+    const p2 = ro16Winners[slot * 2 + 1];
+    const completed = slot < 2;
+    const winner = completed ? p1 : null;
+    if (winner) qfWinners.push(winner);
+    await insertMatch(client, {
+      tournamentId,
+      player1Id: p1,
+      player2Id: p2,
+      status: completed ? 'completed' : 'in_progress',
+      roundNumber: KNOCKOUT.qf,
+      phase: 'knockout',
+      bracketSlot: slot,
+      result: completed ? completedResult(p1, p2, 24, 20) : inProgressResult(10, 8),
+    });
+  }
+
+  await insertMatch(client, {
+    tournamentId,
+    player1Id: ro16Winners[0],
+    player2Id: ro16Winners[2],
+    status: 'confirmed',
+    roundNumber: KNOCKOUT.sf,
+    phase: 'knockout',
+    bracketSlot: 0,
+    scheduledAt,
+  });
+  await insertMatch(client, {
+    tournamentId,
+    player1Id: ro16Winners[4],
+    player2Id: ro16Winners[6],
+    status: 'pending_confirmation',
+    roundNumber: KNOCKOUT.sf,
+    phase: 'knockout',
+    bracketSlot: 1,
+    scheduledAt,
+  });
+
+  await insertMatch(client, {
+    tournamentId,
+    player1Id: ro16Winners[0],
+    player2Id: ro16Winners[4],
+    status: 'pending_confirmation',
+    roundNumber: KNOCKOUT.final,
+    phase: 'knockout',
+    bracketSlot: 0,
+    scheduledAt,
+  });
+}
+
 async function seedMatchmakingQueue(opts: {
   tournamentId: string;
   userId: string;
@@ -471,7 +558,7 @@ function printSeedGuide(tournamentIds: {
   console.log('  Profile tier + points        → /profile (private view)');
   console.log('  Venues geo search            → home page uses Lahore/Karachi coords');
   console.log('  Buyback                      → login imam_lefty / password123 → /matches');
-  console.log('  Knockout bracket             → Punjab Knockout Cup → bracket view');
+  console.log('  Knockout bracket             → Lahore VR Championship → Knockout tab (also Punjab Knockout Cup)');
   console.log('  Notifications                → bell icon for player1/player2/player3');
   console.log('\nTournament IDs (for API/debug):');
   console.log('  Lahore VR Championship:', tournamentIds.lahoreCupId);
@@ -721,6 +808,34 @@ async function seed() {
 
     await syncParticipantStatsFromMatches(client, lahoreCupId, lahorePlayers);
 
+    // Knockout phase — normal rounds 1–2 stay visible; Knockout tab shows bracket
+    const koQualifiers = playerIds.slice(0, 16);
+    for (const pid of koQualifiers) {
+      if (!lahorePlayers.includes(pid)) {
+        await registerParticipant(client, lahoreCupId, pid);
+      }
+      await client.query(
+        `UPDATE tournament_participants
+         SET status = 'knockout', round_number = $3, wins = GREATEST(wins, 2), updated_at = NOW()
+         WHERE tournament_id = $1 AND user_id = $2`,
+        [lahoreCupId, pid, KNOCKOUT.qf]
+      );
+    }
+    await client.query(
+      `UPDATE tournament_participants SET status = 'eliminated', updated_at = NOW()
+       WHERE tournament_id = $1 AND user_id != ALL($2::uuid[])`,
+      [lahoreCupId, koQualifiers]
+    );
+    await client.query(
+      `UPDATE tournaments SET phase = 'knockout', current_round_number = $2 WHERE id = $1`,
+      [lahoreCupId, KNOCKOUT.qf]
+    );
+    await client.query(
+      `UPDATE tournament_rounds SET status = 'closed' WHERE tournament_id = $1`,
+      [lahoreCupId]
+    );
+    await seedKnockoutBracket(client, lahoreCupId, koQualifiers, inDays(2));
+
     // --- Tournament 2: Karachi Open VR (open, round 1) ---
     const karachiOpenId = await upsertTournament(client, {
       name: 'Karachi Open VR',
@@ -796,62 +911,7 @@ async function seed() {
     }
 
     await clearTournamentMatches(client, knockoutCupId);
-
-    const ro16Winners: string[] = [];
-    for (let slot = 0; slot < 8; slot++) {
-      const p1 = koPlayers[slot * 2];
-      const p2 = koPlayers[slot * 2 + 1];
-      const winner = slot % 2 === 0 ? p1 : p2;
-      ro16Winners.push(winner);
-      await insertMatch(client, {
-        tournamentId: knockoutCupId,
-        player1Id: p1,
-        player2Id: p2,
-        status: 'completed',
-        roundNumber: KNOCKOUT.ro16,
-        phase: 'knockout',
-        bracketSlot: slot,
-        result: completedResult(p1, p2, 20 + slot, 15 + slot),
-      });
-    }
-
-    for (let slot = 0; slot < 4; slot++) {
-      const p1 = ro16Winners[slot * 2];
-      const p2 = ro16Winners[slot * 2 + 1];
-      const completed = slot < 2;
-      await insertMatch(client, {
-        tournamentId: knockoutCupId,
-        player1Id: p1,
-        player2Id: p2,
-        status: completed ? 'completed' : 'in_progress',
-        roundNumber: KNOCKOUT.qf,
-        phase: 'knockout',
-        bracketSlot: slot,
-        result: completed ? completedResult(p1, p2, 24, 20) : { player1Score: 10, player2Score: 8, winnerId: p1 },
-      });
-    }
-
-    const sfP1 = ro16Winners[0];
-    const sfP2 = ro16Winners[2];
-    await insertMatch(client, {
-      tournamentId: knockoutCupId,
-      player1Id: sfP1,
-      player2Id: sfP2,
-      status: 'confirmed',
-      roundNumber: KNOCKOUT.sf,
-      phase: 'knockout',
-      bracketSlot: 0,
-      scheduledAt: inDays(1),
-    });
-    await insertMatch(client, {
-      tournamentId: knockoutCupId,
-      player1Id: ro16Winners[4],
-      player2Id: ro16Winners[6],
-      status: 'pending_confirmation',
-      roundNumber: KNOCKOUT.sf,
-      phase: 'knockout',
-      bracketSlot: 1,
-    });
+    await seedKnockoutBracket(client, knockoutCupId, koPlayers, inDays(1));
 
     // --- Tournament 4: Winter VR Cup (completed) ---
     const winterCupId = await upsertTournament(client, {

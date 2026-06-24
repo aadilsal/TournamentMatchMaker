@@ -25,7 +25,7 @@ export function TournamentsPage() {
 
   const { data: tournaments = [], isLoading } = useQuery({
     queryKey: ['tournaments'],
-    queryFn: () => apiGet<Tournament[]>('/tournaments?status=open'),
+    queryFn: () => apiGet<Tournament[]>('/tournaments'),
   });
 
   const { data: queueStatus } = useQuery({

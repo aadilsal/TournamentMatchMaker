@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import type {
@@ -45,6 +45,16 @@ export function TournamentDetailPage() {
     queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`).catch(() => null),
     enabled: !!id && isLoggedIn && !!myRegistration,
   });
+
+  useEffect(() => {
+    if (!tournament || !bracket) return;
+    const hasKnockout =
+      tournament.phase === 'knockout' ||
+      bracket.rounds.some((r) => r.phase === 'knockout' || (r.round ?? 0) >= 100);
+    if (hasKnockout) {
+      setActiveTab('knockout');
+    }
+  }, [tournament, bracket]);
 
   const withdrawMutation = useMutation({
     mutationFn: () => apiDelete(`/tournaments/${id}/register`),
