@@ -44,6 +44,8 @@ services:
       NODE_ENV: development
       PORT: 3000
       CORS_ORIGIN: http://localhost:5173
+      META_API_KEY: c992d7bd6b13bf4220bde1e52d6b76c05abb2170ad3eaed4
+      META_SSH_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQtYp3sfaQfsRelTWXbdnikbVItI91dIu4lvnpcK0Od meta-integration@vrtournament
     volumes:
       - ./apps/api:/app/apps/api
       - ./packages:/app/packages

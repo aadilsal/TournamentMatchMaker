@@ -11,7 +11,7 @@
 
 Pixel Paddle is a tournament matchmaking platform. Players register on the web, join tournaments, book venue slots, and get paired for VR cricket matches. **Scores and solo targets must be submitted from the Meta Quest headset** — the web app does not accept manual scores.
 
-This document describes the **server-to-server HTTP API** your VR application should call. All endpoints are authenticated with a shared API key (not end-user JWTs).
+This document describes the **server-to-server HTTP API** your VR application should call. All endpoints are authenticated with a shared API key or a shared SSH public key (not end-user JWTs).
 
 ### Integration at a glance
 
@@ -56,30 +56,34 @@ All paths below are relative to `/api/v1/integrations/meta`.
 
 ## 3. Authentication
 
-Every request **must** include the shared API key header:
+Every request **must** include at least one of the shared authentication headers:
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `x-meta-api-key` | Yes | Shared secret issued by Pixel Paddle |
+| `x-meta-api-key` | Yes* | Shared secret issued by Pixel Paddle |
+| `x-meta-ssh-public-key` | Yes* | Shared SSH public key issued by Pixel Paddle |
 | `Content-Type` | Yes (POST) | `application/json` |
 | `Accept` | Recommended | `application/json` |
+
+*At least one of the two headers must be present and match the configured value.
 
 **Example:**
 
 ```http
 GET /api/v1/integrations/meta/matches/current?userId=8fe6f2c1-ea04-41a8-a076-8754a696bd16 HTTP/1.1
 Host: api.pixelpaddle.example
-x-meta-api-key: <your-api-key>
+x-meta-api-key: c992d7bd6b13bf4220bde1e52d6b76c05abb2170ad3eaed4
+x-meta-ssh-public-key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQtYp3sfaQfsRelTWXbdnikbVItI91dIu4lvnpcK0Od meta-integration@vrtournament
 Accept: application/json
 ```
 
 | Response if missing/invalid key | HTTP | Error code | Message |
 |---------------------------------|------|------------|---------|
-| No header or wrong key | `401` | `UNAUTHORIZED` | `Invalid Meta API key` |
+| No matching header or wrong value | `401` | `UNAUTHORIZED` | `Invalid Meta API key or SSH public key` |
 
 **Security notes:**
-- Store the API key securely on your backend or in the Quest app’s secure config — never embed in public repos.
-- The API key identifies **your integration**, not the player. Player identity is passed as `userId` (UUID) in each request body/query.
+- Store the shared values securely on your backend or in the Quest app’s secure config — never embed in public repos.
+- The API key and SSH public key identify **your integration**, not the player. Player identity is passed as `userId` (UUID) in each request body/query.
 - `userId` is the Pixel Paddle user UUID. Your app must obtain this after the player authenticates on web (e.g. deep link, QR code, account linking). We can provide a test account for staging.
 
 ---

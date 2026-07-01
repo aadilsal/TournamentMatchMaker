@@ -18,6 +18,7 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
   APP_URL: z.string().default('http://localhost:5173'),
   META_API_KEY: z.string().min(16).default('sample-meta-api-key-change-me'),
+  META_SSH_PUBLIC_KEY: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().default('sk_test_sample_change_me'),
   STRIPE_WEBHOOK_SECRET: z.string().default('whsec_sample_change_me'),
   AWS_ACCESS_KEY_ID: z.string().default('sample-aws-access-key'),
