@@ -2,8 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents } from '@vr-tournament/shared';
 import { getAccessToken } from '@/lib/api';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { API_URL } from '@/lib/config';
 
 export type AppSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 

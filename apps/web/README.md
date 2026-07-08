@@ -12,7 +12,9 @@ pnpm dev
 pnpm --filter @vr-tournament/web dev
 ```
 
-Runs on **http://localhost:5173**. API URL is set via `VITE_API_URL` in `.env`.
+Runs on **http://localhost:5173**. API URL is set via `VITE_API_URL` in the **repo-root** `.env` (Vite `envDir` points at the monorepo root).
+
+Production builds **require** a non-localhost `VITE_API_URL` and will fail if it is missing or points at `localhost`.
 
 ## Layouts
 

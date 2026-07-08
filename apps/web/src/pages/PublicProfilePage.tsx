@@ -5,6 +5,7 @@ import { apiGet } from '@/lib/api';
 import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { PageLoader } from '@/components/ui/cricket-loader';
 import { MapPin, Headset, BarChart3, Trophy, Swords } from 'lucide-react';
+import { API_URL } from '@/lib/config';
 
 export function PublicProfilePage() {
   const { username } = useParams<{ username: string }>();
@@ -24,7 +25,7 @@ export function PublicProfilePage() {
   if (isLoading || !profile) return <PageLoader label="Loading player…" />;
 
   const avatarUrl = profile.hasProfilePicture
-    ? `${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
+    ? `${API_URL}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
     : null;
 
   return (

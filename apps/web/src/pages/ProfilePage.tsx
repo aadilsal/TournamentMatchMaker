@@ -15,7 +15,7 @@ import { motion } from 'motion/react';
 import { PlayerQRCode } from '@/components/qr/PlayerQRCode';
 import { Link } from 'react-router-dom';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+import { API_URL } from '@/lib/config';
 
 const VR_DEVICES = [
   'Meta Quest 3',

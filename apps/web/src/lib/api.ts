@@ -1,9 +1,9 @@
 import axios from 'axios';
 import type { ApiMeta, ApiResponse } from '@vr-tournament/shared';
 import { ApiClientError } from './user-messages';
+import { API_URL } from './config';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-
+export { API_URL } from './config';
 export { ApiClientError } from './user-messages';
 export { getUserErrorMessage, getRegisterConflict } from './user-messages';
 export const api = axios.create({
