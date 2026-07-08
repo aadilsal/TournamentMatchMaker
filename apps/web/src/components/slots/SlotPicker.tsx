@@ -1,7 +1,7 @@
 import type { TimeSlot } from '@vr-tournament/shared';
 import { ChevronRight, Clock, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { PageLoader } from '@/components/ui/cricket-loader';
+import { ListSkeleton } from '@/components/ui/skeleton';
 
 export function todayString() {
   return new Date().toISOString().split('T')[0];
@@ -104,7 +104,7 @@ export function TimeSlotGrid({
   renderSlotAction,
 }: TimeSlotGridProps) {
   if (isLoading) {
-    return <PageLoader label="Loading slots…" />;
+    return <ListSkeleton count={4} />;
   }
 
   if (slots.length === 0) {

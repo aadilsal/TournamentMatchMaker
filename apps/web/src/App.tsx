@@ -1,53 +1,84 @@
+import { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useBlockSaveShortcut } from '@/hooks/useBlockSaveShortcut';
 import { MarketingLayout } from '@/layouts/MarketingLayout';
-import { AppLayout } from '@/layouts/AppLayout';
-import { AdminLayout } from '@/layouts/AdminLayout';
-import { AdminGuard } from '@/components/admin/AdminGuard';
-import { LandingPage } from '@/pages/LandingPage';
-import { LoginPage } from '@/pages/LoginPage';
-import { RegisterPage } from '@/pages/RegisterPage';
-import { ProfilePage } from '@/pages/ProfilePage';
-import { VenuesPage } from '@/pages/VenuesPage';
-import { VenueDetailPage } from '@/pages/VenueDetailPage';
-import { BookingsPage } from '@/pages/BookingsPage';
-import { TournamentsPage } from '@/pages/TournamentsPage';
-import { TournamentDetailPage } from '@/pages/TournamentDetailPage';
-import { MatchesPage } from '@/pages/MatchesPage';
-import { PlayFlowPage } from '@/pages/PlayFlowPage';
-import { PublicProfilePage } from '@/pages/PublicProfilePage';
-import { WelcomePage } from '@/pages/WelcomePage';
-import { AdminDashboardPage } from '@/pages/admin/DashboardPage';
-import { AdminMatchesPage } from '@/pages/admin/MatchesPage';
-import { AdminMatchDetailPage } from '@/pages/admin/MatchDetailPage';
-import { AdminTournamentsPage } from '@/pages/admin/TournamentsPage';
-import { AdminTournamentDetailPage } from '@/pages/admin/TournamentDetailPage';
-import { AdminTournamentFormPage } from '@/pages/admin/TournamentFormPage';
-import { AdminVenuesPage } from '@/pages/admin/VenuesPage';
-import { AdminVenueDetailPage } from '@/pages/admin/VenueDetailPage';
-import { AdminVenueFormPage } from '@/pages/admin/VenueFormPage';
-import { AdminUsersPage } from '@/pages/admin/UsersPage';
-import { AdminBookingsPage } from '@/pages/admin/BookingsPage';
-import { AdminQueuePage } from '@/pages/admin/QueuePage';
-import { AdminBuybacksPage } from '@/pages/admin/BuybacksPage';
-import { AdminNotificationsPage } from '@/pages/admin/NotificationsPage';
-import { AdminSystemPage } from '@/pages/admin/SystemPage';
-import { AdminUserFormPage } from '@/pages/admin/UserFormPage';
-import { AdminUserDetailPage } from '@/pages/admin/UserDetailPage';
-import { AdminMatchFormPage } from '@/pages/admin/MatchFormPage';
-import { AdminBookingFormPage } from '@/pages/admin/BookingFormPage';
-import { AdminBuybackDetailPage } from '@/pages/admin/BuybackDetailPage';
-import { AdminIntegrationsPage } from '@/pages/admin/IntegrationsPage';
+import { RouteFallback } from '@/components/ui/route-fallback';
+import { lazyNamed } from '@/lib/lazy-page';
+
+const AppLayout = lazyNamed(() => import('@/layouts/AppLayout'), 'AppLayout');
+const AdminLayout = lazyNamed(() => import('@/layouts/AdminLayout'), 'AdminLayout');
+const AdminGuard = lazyNamed(() => import('@/components/admin/AdminGuard'), 'AdminGuard');
+
+const LandingPage = lazyNamed(() => import('@/pages/LandingPage'), 'LandingPage');
+const LoginPage = lazyNamed(() => import('@/pages/LoginPage'), 'LoginPage');
+const RegisterPage = lazyNamed(() => import('@/pages/RegisterPage'), 'RegisterPage');
+const ProfilePage = lazyNamed(() => import('@/pages/ProfilePage'), 'ProfilePage');
+const VenuesPage = lazyNamed(() => import('@/pages/VenuesPage'), 'VenuesPage');
+const VenueDetailPage = lazyNamed(() => import('@/pages/VenueDetailPage'), 'VenueDetailPage');
+const BookingsPage = lazyNamed(() => import('@/pages/BookingsPage'), 'BookingsPage');
+const TournamentsPage = lazyNamed(() => import('@/pages/TournamentsPage'), 'TournamentsPage');
+const TournamentDetailPage = lazyNamed(() => import('@/pages/TournamentDetailPage'), 'TournamentDetailPage');
+const MatchesPage = lazyNamed(() => import('@/pages/MatchesPage'), 'MatchesPage');
+const PlayFlowPage = lazyNamed(() => import('@/pages/PlayFlowPage'), 'PlayFlowPage');
+const PublicProfilePage = lazyNamed(() => import('@/pages/PublicProfilePage'), 'PublicProfilePage');
+const WelcomePage = lazyNamed(() => import('@/pages/WelcomePage'), 'WelcomePage');
+
+const AdminDashboardPage = lazyNamed(() => import('@/pages/admin/DashboardPage'), 'AdminDashboardPage');
+const AdminMatchesPage = lazyNamed(() => import('@/pages/admin/MatchesPage'), 'AdminMatchesPage');
+const AdminMatchDetailPage = lazyNamed(() => import('@/pages/admin/MatchDetailPage'), 'AdminMatchDetailPage');
+const AdminTournamentsPage = lazyNamed(() => import('@/pages/admin/TournamentsPage'), 'AdminTournamentsPage');
+const AdminTournamentDetailPage = lazyNamed(
+  () => import('@/pages/admin/TournamentDetailPage'),
+  'AdminTournamentDetailPage'
+);
+const AdminTournamentFormPage = lazyNamed(
+  () => import('@/pages/admin/TournamentFormPage'),
+  'AdminTournamentFormPage'
+);
+const AdminVenuesPage = lazyNamed(() => import('@/pages/admin/VenuesPage'), 'AdminVenuesPage');
+const AdminVenueDetailPage = lazyNamed(() => import('@/pages/admin/VenueDetailPage'), 'AdminVenueDetailPage');
+const AdminVenueFormPage = lazyNamed(() => import('@/pages/admin/VenueFormPage'), 'AdminVenueFormPage');
+const AdminUsersPage = lazyNamed(() => import('@/pages/admin/UsersPage'), 'AdminUsersPage');
+const AdminBookingsPage = lazyNamed(() => import('@/pages/admin/BookingsPage'), 'AdminBookingsPage');
+const AdminQueuePage = lazyNamed(() => import('@/pages/admin/QueuePage'), 'AdminQueuePage');
+const AdminBuybacksPage = lazyNamed(() => import('@/pages/admin/BuybacksPage'), 'AdminBuybacksPage');
+const AdminNotificationsPage = lazyNamed(
+  () => import('@/pages/admin/NotificationsPage'),
+  'AdminNotificationsPage'
+);
+const AdminSystemPage = lazyNamed(() => import('@/pages/admin/SystemPage'), 'AdminSystemPage');
+const AdminUserFormPage = lazyNamed(() => import('@/pages/admin/UserFormPage'), 'AdminUserFormPage');
+const AdminUserDetailPage = lazyNamed(() => import('@/pages/admin/UserDetailPage'), 'AdminUserDetailPage');
+const AdminMatchFormPage = lazyNamed(() => import('@/pages/admin/MatchFormPage'), 'AdminMatchFormPage');
+const AdminBookingFormPage = lazyNamed(() => import('@/pages/admin/BookingFormPage'), 'AdminBookingFormPage');
+const AdminBuybackDetailPage = lazyNamed(
+  () => import('@/pages/admin/BuybackDetailPage'),
+  'AdminBuybackDetailPage'
+);
+const AdminIntegrationsPage = lazyNamed(
+  () => import('@/pages/admin/IntegrationsPage'),
+  'AdminIntegrationsPage'
+);
 
 function AppShell({ children }: { children: React.ReactNode }) {
-  return <AppLayout>{children}</AppLayout>;
+  return (
+    <Suspense fallback={<RouteFallback variant="app" />}>
+      <AppLayout>
+        <Suspense fallback={<RouteFallback variant="app-content" />}>{children}</Suspense>
+      </AppLayout>
+    </Suspense>
+  );
 }
 
 function AdminShell({ children }: { children: React.ReactNode }) {
   return (
-    <AdminGuard>
-      <AdminLayout>{children}</AdminLayout>
-    </AdminGuard>
+    <Suspense fallback={<RouteFallback variant="admin" />}>
+      <AdminGuard>
+        <AdminLayout>
+          <Suspense fallback={<RouteFallback variant="admin-content" />}>{children}</Suspense>
+        </AdminLayout>
+      </AdminGuard>
+    </Suspense>
   );
 }
 
@@ -58,7 +89,14 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<MarketingLayout />}>
-          <Route path="/" element={<LandingPage />} />
+          <Route
+            path="/"
+            element={
+              <Suspense fallback={<RouteFallback variant="marketing" />}>
+                <LandingPage />
+              </Suspense>
+            }
+          />
         </Route>
 
         <Route path="/login" element={<AppShell><LoginPage /></AppShell>} />
@@ -75,7 +113,6 @@ export function App() {
         <Route path="/matchmaking" element={<Navigate to="/tournaments" replace />} />
         <Route path="/matches" element={<AppShell><MatchesPage /></AppShell>} />
 
-        {/* Admin panel */}
         <Route path="/admin" element={<AdminShell><AdminDashboardPage /></AdminShell>} />
         <Route path="/admin/matches" element={<AdminShell><AdminMatchesPage /></AdminShell>} />
         <Route path="/admin/matches/new" element={<AdminShell><AdminMatchFormPage /></AdminShell>} />

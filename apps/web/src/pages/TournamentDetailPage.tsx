@@ -14,6 +14,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { NormalMatchList } from '@/components/tournament/NormalMatchList';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
+import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 
 export function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -73,7 +74,7 @@ export function TournamentDetailPage() {
     navigate(`/play?tournament=${id}`);
   };
 
-  if (isLoading || !tournament) return <p>Loading...</p>;
+  if (isLoading || !tournament) return <DetailPageSkeleton />;
 
   const normalRounds = bracket?.rounds.filter((r) => r.phase !== 'knockout' && (r.round ?? 0) < 100) ?? [];
   const koRounds = bracket?.rounds.filter((r) => r.phase === 'knockout' || (r.round ?? 0) >= 100) ?? [];

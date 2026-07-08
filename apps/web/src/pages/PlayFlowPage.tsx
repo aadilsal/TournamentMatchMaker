@@ -7,7 +7,7 @@ import { apiGet, apiPost, getAccessToken } from '@/lib/api';
 import { LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
-import { PageLoader } from '@/components/ui/cricket-loader';
+import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 import { MapPin, Clock, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SlotConfirmModal, type EnterTournamentResult } from '@/components/tournament/SlotConfirmModal';
@@ -96,7 +96,7 @@ export function PlayFlowPage() {
     onSuccess: () => navigate('/tournaments'),
   });
 
-  if (tournamentLoading || !tournament) return <PageLoader label="Loading…" />;
+  if (tournamentLoading || !tournament) return <DetailPageSkeleton />;
 
   if (profile?.hasVrHeadset) {
     return (

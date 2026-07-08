@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
-import { PageLoader } from '@/components/ui/cricket-loader';
+import { ProfileSkeleton } from '@/components/ui/route-fallback';
 import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import { PlayerQRCode } from '@/components/qr/PlayerQRCode';
@@ -85,7 +85,7 @@ export function ProfilePage() {
     ? `${API_URL}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
     : null;
 
-  if (isLoading) return <PageLoader label="Loading profile…" />;
+  if (isLoading) return <ProfileSkeleton />;
 
   return (
     <div className="max-w-lg mx-auto space-y-6">

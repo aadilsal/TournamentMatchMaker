@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { Match, PublicPlayerProfile } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import { Badge, matchStatusBadge } from '@/components/ui/badge';
-import { PageLoader } from '@/components/ui/cricket-loader';
+import { ProfileSkeleton } from '@/components/ui/route-fallback';
+import { ListSkeleton } from '@/components/ui/skeleton';
 import { MapPin, Headset, BarChart3, Trophy, Swords } from 'lucide-react';
 import { API_URL } from '@/lib/config';
 
@@ -22,7 +23,14 @@ export function PublicProfilePage() {
     enabled: !!username,
   });
 
-  if (isLoading || !profile) return <PageLoader label="Loading player…" />;
+  if (isLoading || !profile) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-8">
+        <ProfileSkeleton />
+        <ListSkeleton count={4} />
+      </div>
+    );
+  }
 
   const avatarUrl = profile.hasProfilePicture
     ? `${API_URL}/api/v1/players/${profile.username}/avatar?v=${encodeURIComponent(profile.updatedAt)}`
