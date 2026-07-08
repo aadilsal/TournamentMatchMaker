@@ -105,7 +105,16 @@ Real-time events defined in `@vr-tournament/shared` (`socket-events.ts`). The AP
 
 ## Stripe
 
-Buyback checkout creates a PaymentIntent. Fulfillment happens in the webhook handler at `POST /webhooks/stripe` on `payment_intent.succeeded`.
+Buyback checkout creates a Stripe PaymentIntent via `POST /tournaments/:id/buyback/checkout`. Fulfillment is webhook-only:
+
+| Event | Action |
+|-------|--------|
+| `payment_intent.succeeded` | Fulfill buyback (re-enter player) |
+| `payment_intent.payment_failed` | Mark buyback as `failed` |
+
+Webhook URL: `POST /webhooks/stripe`
+
+Set real `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `VITE_STRIPE_PUBLISHABLE_KEY` — sample keys disable buyback checkout.
 
 ## Scripts
 

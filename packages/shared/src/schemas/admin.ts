@@ -215,7 +215,6 @@ export const adminCreateBuybackSchema = z.object({
   roundNumber: z.number().int().positive(),
   matchId: z.string().uuid().optional(),
   amountCents: z.number().int().min(0),
-  fulfill: z.boolean().optional().default(true),
 });
 
 export const adminUpdateBuybackSchema = z.object({

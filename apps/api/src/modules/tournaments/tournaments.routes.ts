@@ -152,20 +152,6 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
     }
   );
 
-  router.post(
-    '/:id/buyback',
-    authenticate(env),
-    validate(buybackSchema),
-    async (req, res, next) => {
-      try {
-        const buyback = await service.buyback(req.params.id as string, req.user!.sub, req.body);
-        sendSuccess(res, buyback, undefined, 201);
-      } catch (err) {
-        next(err);
-      }
-    }
-  );
-
   router.delete('/:id/register', authenticate(env), async (req, res, next) => {
     try {
       const registration = await service.withdraw(req.params.id as string, req.user!.sub);

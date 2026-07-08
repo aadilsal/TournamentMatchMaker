@@ -9,7 +9,10 @@ import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Heart } from 'lucide-react';
 
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_sample_change_me');
+const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_sample_change_me';
+const stripeConfigured =
+  !!publishableKey && !publishableKey.includes('sample') && publishableKey.startsWith('pk_');
+const stripePromise = stripeConfigured ? loadStripe(publishableKey) : null;
 
 interface BuybackButtonProps {
   tournamentId: string;
@@ -78,6 +81,14 @@ export function BuybackButton({ tournamentId, tournament, matchId, onSuccess }: 
   });
 
   const price = (tournament.buybackPriceCents / 100).toFixed(2);
+
+  if (!stripeConfigured || !stripePromise) {
+    return (
+      <p className="text-xs text-[var(--color-muted-foreground)]">
+        Buyback payments are temporarily unavailable. Stripe is not configured.
+      </p>
+    );
+  }
 
   if (clientSecret) {
     return (

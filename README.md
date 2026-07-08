@@ -189,7 +189,7 @@ Copy `.env.example` to `.env`. Key variables:
 | `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Auth (min 32 chars) |
 | `VITE_API_URL` | Frontend → API base URL |
 | `META_API_KEY` | Meta Quest integration |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `VITE_STRIPE_PUBLISHABLE_KEY` | Buyback payments |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `VITE_STRIPE_PUBLISHABLE_KEY` | Buyback payments (webhook events: `payment_intent.succeeded`, `payment_intent.payment_failed`) |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SES_FROM_EMAIL` | Worker email (SES) |
 | `NOTIFICATION_EMAIL_ENABLED` | Toggle email dispatch |
 

@@ -80,39 +80,23 @@ export class AdminBuybacksService {
     };
   }
 
-  async create(actorId: string, input: AdminCreateBuybackInput) {
-    const result = await this.pool.query(
-      `INSERT INTO buybacks (user_id, tournament_id, round_number, match_id, amount_cents, status)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [
-        input.userId,
-        input.tournamentId,
-        input.roundNumber,
-        input.matchId ?? null,
-        input.amountCents,
-        input.fulfill ? 'completed' : 'pending',
-      ]
+  async create(_actorId: string, _input: AdminCreateBuybackInput) {
+    throw new AppError(
+      'BAD_REQUEST',
+      'Buybacks must be purchased by players through Stripe checkout',
+      400
     );
-
-    if (input.fulfill) {
-      await this.pool.query(
-        `UPDATE tournament_participants SET status = 'active', buyback_count = buyback_count + 1, updated_at = NOW()
-         WHERE tournament_id = $1 AND user_id = $2`,
-        [input.tournamentId, input.userId]
-      );
-    }
-
-    await writeAudit(this.pool, {
-      actorId,
-      action: 'buyback.create',
-      entityType: 'buyback',
-      entityId: result.rows[0].id,
-    });
-    return mapBuyback(result.rows[0]);
   }
 
   async update(actorId: string, id: string, input: AdminUpdateBuybackInput) {
     if (!input.status) return this.getById(id);
+    if (input.status === 'completed') {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Completed buybacks are only set after a successful Stripe payment',
+        400
+      );
+    }
     await this.pool.query(`UPDATE buybacks SET status = $1 WHERE id = $2`, [input.status, id]);
     await writeAudit(this.pool, {
       actorId,

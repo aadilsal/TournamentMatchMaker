@@ -1,4 +1,5 @@
 import type { Env } from '../../../config/env.js';
+import { isStripeConfigured } from '../../../lib/stripe.js';
 import { enqueueNotification } from '../../../lib/bullmq.js';
 
 export class AdminIntegrationsService {
@@ -18,7 +19,7 @@ export class AdminIntegrationsService {
         from: this.env.RESEND_FROM_EMAIL ?? this.env.AWS_SES_FROM_EMAIL ?? null,
       },
       stripe: {
-        configured: !!this.env.STRIPE_SECRET_KEY && !this.env.STRIPE_SECRET_KEY.includes('sample'),
+        configured: isStripeConfigured(this.env),
         mode: this.env.STRIPE_SECRET_KEY?.startsWith('sk_live') ? 'live' : 'test',
       },
     };

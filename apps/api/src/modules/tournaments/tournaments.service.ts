@@ -453,6 +453,12 @@ export class TournamentsService {
     const buyback = buybackRow.rows[0];
     if (!buyback) throw new AppError('NOT_FOUND', 'Buyback not found', 404);
     if (buyback.status === 'completed') return mapBuyback(buyback);
+    if (buyback.status === 'failed') {
+      throw new AppError('CONFLICT', 'Buyback payment failed', 409);
+    }
+    if (!buyback.stripe_payment_intent_id) {
+      throw new AppError('BAD_REQUEST', 'Buyback must be paid via Stripe', 400);
+    }
 
     const tournamentId = buyback.tournament_id;
     const userId = buyback.user_id;
@@ -505,98 +511,6 @@ export class TournamentsService {
 
       const updated = await this.pool.query(`SELECT * FROM buybacks WHERE id = $1`, [buybackId]);
       return mapBuyback(updated.rows[0]);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  }
-
-  /** @deprecated Use createBuybackCheckout + Stripe webhook */
-  async buyback(tournamentId: string, userId: string, input: BuybackInput) {
-    if (!this.redis) throw new AppError('INTERNAL', 'Redis not configured', 500);
-
-    const tournament = await this.getById(tournamentId);
-    if (tournament.phase !== 'normal') {
-      throw new AppError('CONFLICT', 'Buybacks are only available during normal rounds', 409);
-    }
-
-    const participant = await this.getParticipant(tournamentId, userId);
-    if (!participant) {
-      throw new AppError('FORBIDDEN', 'Not registered for this tournament', 403);
-    }
-    if (participant.status !== 'eliminated') {
-      throw new AppError('CONFLICT', 'Only eliminated players can buy back', 409);
-    }
-
-    await this.assertBuybackAllowed(tournamentId, tournament);
-
-    const roundOpen = await this.pool.query(
-      `SELECT id FROM tournament_rounds
-       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at > NOW()`,
-      [tournamentId, participant.roundNumber]
-    );
-    if (!roundOpen.rows[0]) {
-      throw new AppError('CONFLICT', 'Round time has ended — buybacks are no longer available', 409);
-    }
-
-    const reg = await this.getRegistration(tournamentId, userId);
-    let preferredVenueId: string | null = null;
-    if (reg?.bookingId) {
-      const venueRow = await this.pool.query(
-        `SELECT ts.venue_id FROM bookings b
-         JOIN time_slots ts ON ts.id = b.time_slot_id
-         WHERE b.id = $1`,
-        [reg.bookingId]
-      );
-      preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
-    }
-
-    const client = await this.pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const buybackResult = await client.query(
-        `INSERT INTO buybacks (user_id, tournament_id, round_number, match_id, amount_cents, status)
-         VALUES ($1, $2, $3, $4, $5, 'completed')
-         RETURNING *`,
-        [
-          userId,
-          tournamentId,
-          participant.roundNumber,
-          input.matchId ?? null,
-          tournament.buybackPriceCents,
-        ]
-      );
-
-      await client.query(
-        `UPDATE tournament_participants
-         SET status = 'active', buyback_count = buyback_count + 1, updated_at = NOW()
-         WHERE tournament_id = $1 AND user_id = $2`,
-        [tournamentId, userId]
-      );
-
-      await client.query('COMMIT');
-
-      await requeuePlayer(this.pool, this.redis, userId, {
-        tournamentId,
-        roundNumber: participant.roundNumber,
-        preferredVenueId,
-        bookingId: reg?.bookingId ?? null,
-      }, this.env);
-
-      if (this.env) {
-        enqueueNotification(this.env, {
-          userId,
-          type: 'buyback_completed',
-          channels: ['in_app', 'email'],
-          payload: { tournamentId, amountCents: tournament.buybackPriceCents },
-          idempotencyKey: `buyback:${buybackResult.rows[0].id}`,
-        }).catch(console.error);
-      }
-
-      return mapBuyback(buybackResult.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

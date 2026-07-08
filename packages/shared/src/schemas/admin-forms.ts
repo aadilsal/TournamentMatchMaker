@@ -285,7 +285,6 @@ export function toAdminBuybackInput(form: AdminBuybackFormInput) {
     tournamentId: form.tournamentId,
     roundNumber: parseInt(form.roundNumber, 10),
     amountCents: Math.round(parseFloat(form.amountDollars) * 100),
-    fulfill: true,
   });
 }
 
