@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { ProfileSkeleton } from '@/components/ui/route-fallback';
 import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
-import { PlayerQRCode } from '@/components/qr/PlayerQRCode';
+import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
 import { Link } from 'react-router-dom';
 
 import { API_URL } from '@/lib/config';
@@ -278,16 +278,8 @@ export function ProfilePage() {
       </motion.form>
 
       {profile && (
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-            <QrCode className="h-3.5 w-3.5" />
-            Venue QR card
-          </div>
-          <PlayerQRCode
-            userId={profile.id}
-            username={profile.username}
-            avatarUrl={avatarUrl}
-          />
+        <section className="space-y-3 mt-4">
+          <MetaLinkCodeDisplay />
         </section>
       )}
     </div>

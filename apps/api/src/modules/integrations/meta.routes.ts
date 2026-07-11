@@ -1,48 +1,54 @@
 import { Router } from 'express';
 import {
   metaCurrentMatchQuerySchema,
-  metaRequestOtpSchema,
   metaSoloTargetSchema,
   metaSubmitScoreSchema,
-  metaVerifyOtpSchema,
+  metaVerifyLinkCodeSchema,
 } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
 import type { RedisClient } from '../../lib/redis.js';
 import { metaApiKey } from '../../middleware/metaAuth.js';
+import { authenticate } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { MetaIntegrationService } from './meta.service.js';
-import { MetaOtpService } from './meta-otp.service.js';
+import { MetaLinkService } from './meta-link.service.js';
 
 export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
   const service = new MetaIntegrationService(pool, redis, env);
-  const otpService = new MetaOtpService(pool, redis, env);
+  const linkService = new MetaLinkService(pool, redis, env);
 
-  router.use(metaApiKey(env));
-
-  router.post('/identity/request-otp', validate(metaRequestOtpSchema), async (req, res, next) => {
+  // 1. Web App Endpoint: Generate a new 4-digit code (Requires web login session)
+  router.get('/link-code', authenticate(env), async (req, res, next) => {
     try {
-      const { email } = req.body as { email: string };
-      const data = await otpService.requestOtp(email);
+      const data = await linkService.generateLinkCode(req.user!.sub);
       sendSuccess(res, data);
     } catch (err) {
       next(err);
     }
   });
 
-  router.post('/identity/verify-otp', validate(metaVerifyOtpSchema), async (req, res, next) => {
-    try {
-      const { email, otp } = req.body as { email: string; otp: string };
-      const data = await otpService.verifyOtp(email, otp);
-      sendSuccess(res, data);
-    } catch (err) {
-      next(err);
-    }
-  });
+  // 2. VR Headset Endpoints (Requires Meta API Key)
+  const metaApiRouter = Router();
+  metaApiRouter.use(metaApiKey(env));
 
-  router.get(
+  metaApiRouter.post(
+    '/identity/verify-link-code',
+    validate(metaVerifyLinkCodeSchema),
+    async (req, res, next) => {
+      try {
+        const { code } = req.body as { code: string };
+        const data = await linkService.verifyLinkCode(code);
+        sendSuccess(res, data);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  metaApiRouter.get(
     '/matches/current',
     validate(metaCurrentMatchQuerySchema, 'query'),
     async (req, res, next) => {
@@ -56,7 +62,7 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     }
   );
 
-  router.post(
+  metaApiRouter.post(
     '/matches/:id/scores',
     validate(metaSubmitScoreSchema),
     async (req, res, next) => {
@@ -69,7 +75,7 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     }
   );
 
-  router.post('/solo-target', validate(metaSoloTargetSchema), async (req, res, next) => {
+  metaApiRouter.post('/solo-target', validate(metaSoloTargetSchema), async (req, res, next) => {
     try {
       const result = await service.submitSoloTarget(req.body);
       sendSuccess(res, result, undefined, 201);
@@ -77,6 +83,8 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
       next(err);
     }
   });
+
+  router.use('/', metaApiRouter);
 
   return router;
 }
