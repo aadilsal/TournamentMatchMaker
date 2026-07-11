@@ -136,7 +136,7 @@ All responses use the same JSON shape:
 
 ## 5. Endpoints
 
-There are **three** endpoints. The two primary ones for match play are **Get Current Match** and **Submit Score**. **Submit Solo Target** is used when a player plays alone while waiting for an opponent.
+There are **five** endpoints. The two primary ones for match play are **Get Current Match** and **Submit Score**. **Submit Solo Target** is used when a player plays alone while waiting for an opponent. The two **Identity** endpoints (`request-otp` / `verify-otp`, §5.4) let the Quest app resolve a player's `userId` from their email without typing a UUID.
 
 ---
 
@@ -454,6 +454,164 @@ If `canSubmitSoloTarget` is `true` and `soloTarget` is `null`, prompt the player
 
 ---
 
+### 5.4 Identity — obtain `userId` via email OTP
+
+Use this flow to resolve a player's Pixel Paddle `userId` from inside the Quest app **without** typing a UUID. The player enters the **email** they registered with on the web app, receives a 6‑digit code by email, and enters it in VR. On success you receive their `userId` (use it for all other endpoints).
+
+```
+Quest app                         Pixel Paddle API
+   │  1. player enters email            │
+   │ ─ POST /identity/request-otp ─────▶│  emails a 6-digit code
+   │                                    │
+   │  2. player enters the code         │
+   │ ─ POST /identity/verify-otp ──────▶│  returns { userId, username }
+   │ ◀───────────── userId ─────────────│
+```
+
+Key rules:
+
+- The code is **6 numeric digits** and **expires 5 minutes** after it is sent.
+- **Resend** = call `POST /identity/request-otp` again for the same email. There is a **60‑second cooldown** between sends, and a maximum of **5 sends** per active code window.
+- A code allows up to **5 incorrect attempts**, after which it is invalidated and the player must request a new one.
+- A successful verification **consumes** the code (it cannot be reused).
+- The email must belong to an existing Pixel Paddle account (the player must have registered on web first).
+
+Both endpoints require the same `x-meta-api-key` / `x-meta-ssh-public-key` header as every other endpoint.
+
+---
+
+#### 5.4.1 Request OTP (also used to resend)
+
+```
+POST /identity/request-otp
+```
+
+##### Request body
+
+```json
+{ "email": "player20@vrtournament.com" }
+```
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `email` | string | Yes | Valid email; the account's registered email (case-insensitive) |
+
+##### Example request
+
+```bash
+curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/identity/request-otp" \
+  -H "x-meta-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"player20@vrtournament.com"}'
+```
+
+##### Example response — `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "email": "player20@vrtournament.com",
+    "sent": true,
+    "expiresInSeconds": 300,
+    "resendAvailableInSeconds": 60,
+    "resendsRemaining": 4
+  },
+  "error": null,
+  "meta": {}
+}
+```
+
+##### Response fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `email` | string | Normalised (lowercased) email the code was sent to |
+| `sent` | boolean | `true` when the code email was dispatched |
+| `expiresInSeconds` | number | Seconds until the code expires (300 = 5 min) |
+| `resendAvailableInSeconds` | number | Seconds to wait before another `request-otp` is allowed |
+| `resendsRemaining` | number | How many more times a code can be sent in this window |
+
+##### Errors
+
+| HTTP | Code | Message | When |
+|------|------|---------|------|
+| `400` | `VALIDATION_ERROR` | Invalid request data | Missing/malformed email |
+| `404` | `NOT_FOUND` | `No Pixel Paddle account found for this email` | Email not registered |
+| `429` | `RATE_LIMITED` | `Please wait Ns before requesting another code` | Resend attempted within 60s cooldown (`details.retryAfterSeconds`) |
+| `429` | `RATE_LIMITED` | `Maximum number of codes requested...` | More than 5 sends in one window |
+
+---
+
+#### 5.4.2 Verify OTP → returns `userId`
+
+```
+POST /identity/verify-otp
+```
+
+##### Request body
+
+```json
+{ "email": "player20@vrtournament.com", "otp": "123456" }
+```
+
+| Field | Type | Required | Constraints |
+|-------|------|----------|-------------|
+| `email` | string | Yes | Same email used in `request-otp` |
+| `otp` | string | Yes | Exactly 6 digits |
+
+##### Example request
+
+```bash
+curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/identity/verify-otp" \
+  -H "x-meta-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"player20@vrtournament.com","otp":"123456"}'
+```
+
+##### Example response — `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "verified": true,
+    "userId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
+    "username": "player20",
+    "email": "player20@vrtournament.com"
+  },
+  "error": null,
+  "meta": {}
+}
+```
+
+##### Response fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `verified` | boolean | Always `true` on success |
+| `userId` | UUID | **The Pixel Paddle user ID** — store it and use in all other endpoints |
+| `username` | string | Player's display name |
+| `email` | string | Verified email |
+
+##### Errors
+
+| HTTP | Code | Message | When |
+|------|------|---------|------|
+| `400` | `VALIDATION_ERROR` | Invalid request data | `otp` not 6 digits / bad email |
+| `400` | `OTP_INVALID` | `Incorrect verification code` | Wrong code (`details.attemptsRemaining`) |
+| `410` | `OTP_EXPIRED` | `This code has expired or was never requested...` | Code expired (>5 min) or no active request |
+| `429` | `TOO_MANY_ATTEMPTS` | `Too many incorrect attempts...` | More than 5 wrong attempts — request a new code |
+
+##### Recommended VR handling
+
+- Show a 6-digit code entry with a visible **countdown (300s)** and a **Resend** button disabled for 60s.
+- On `OTP_INVALID`, show `details.attemptsRemaining`.
+- On `OTP_EXPIRED` / `TOO_MANY_ATTEMPTS`, send the player back to the request step.
+- Cache the returned `userId` on the device so this flow is only needed once (until logout/unlink).
+
+---
+
 ## 6. Game rules (for VR logic & UI)
 
 ### 6.1 Chase mode
@@ -589,6 +747,7 @@ On `429 RATE_LIMITED`, back off exponentially and retry.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |
+| 1.1 | July 2026 | Added Identity endpoints (`/identity/request-otp`, `/identity/verify-otp`) — resolve `userId` via email OTP (5-min expiry, 60s resend cooldown) |
 
 ---
 
@@ -596,7 +755,7 @@ On `429 RATE_LIMITED`, back off exponentially and retry.
 
 Please confirm with our team before go-live:
 
-1. **How will the Quest app obtain `userId`?** (OAuth, deep link from web, manual entry for pilot?)
+1. **How will the Quest app obtain `userId`?** Recommended: the **email OTP flow** (§5.4) — player enters their registered email, gets a 6-digit code, and the app receives the `userId` on verify. (QR-at-venue remains available as a fallback.)
 2. **Staging schedule** for paired testing with two headsets.
 3. **Error telemetry** — will you send us correlation IDs on failed requests?
 4. **Production API key** rotation process.
