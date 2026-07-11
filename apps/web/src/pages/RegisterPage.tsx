@@ -28,7 +28,6 @@ import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { fetchLocationFromCoords } from '@/lib/location-api';
-import { downloadPlayerQR } from '@/lib/player-qr';
 
 /* ─────────────────────────────────────────────
    Animated cricket delivery banner
@@ -300,11 +299,6 @@ export function RegisterPage() {
     onSuccess: async (data, variables) => {
       setAccessToken(data.accessToken);
       connectSocket();
-      try {
-        await downloadPlayerQR(data.user.id, data.user.username);
-      } catch (err) {
-        console.error('Failed to download venue QR code:', err);
-      }
       navigate('/welcome', {
         state: {
           hasVrHeadset: variables.hasVrHeadset ?? false,

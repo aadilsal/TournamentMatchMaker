@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { ProfileSkeleton } from '@/components/ui/route-fallback';
-import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, QrCode, Upload } from 'lucide-react';
+import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
 import { Link } from 'react-router-dom';
