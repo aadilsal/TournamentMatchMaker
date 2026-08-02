@@ -1,12 +1,11 @@
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { PublicPlayerProfile } from '@vr-tournament/shared';
+import type { Match, PublicPlayerProfile } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
+import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { ProfileSkeleton } from '@/components/ui/route-fallback';
 import { ListSkeleton } from '@/components/ui/skeleton';
-import { PlayerMatchHistory } from '@/components/player/PlayerMatchHistory';
-import { PlayerTournamentHistory } from '@/components/player/PlayerTournamentHistory';
-import { MapPin, Headset, BarChart3 } from 'lucide-react';
+import { MapPin, Headset, BarChart3, Trophy, Swords } from 'lucide-react';
 import { API_URL } from '@/lib/config';
 
 export function PublicProfilePage() {
@@ -15,6 +14,12 @@ export function PublicProfilePage() {
   const { data: profile, isLoading } = useQuery({
     queryKey: ['public-profile', username],
     queryFn: () => apiGet<PublicPlayerProfile>(`/players/${username}`),
+    enabled: !!username,
+  });
+
+  const { data: matches = [] } = useQuery({
+    queryKey: ['public-matches', username],
+    queryFn: () => apiGet<Match[]>(`/players/${username}/matches`),
     enabled: !!username,
   });
 
@@ -81,9 +86,48 @@ export function PublicProfilePage() {
         </div>
       </div>
 
-      <PlayerTournamentHistory username={profile.username} />
-
-      <PlayerMatchHistory username={profile.username} playerId={profile.id} />
+      <section>
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Swords className="h-5 w-5 text-[var(--color-primary)]" />
+          Match history
+        </h2>
+        {matches.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">No completed matches yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {matches.map((m) => {
+              const isP1 = m.player1Id === profile.id;
+              const opponent = isP1 ? m.player2 : m.player1;
+              const won = m.result?.winnerId === profile.id;
+              const badge = matchStatusBadge(m.status);
+              return (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] px-4 py-3 text-sm"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    {won && m.status === 'completed' && (
+                      <Trophy className="h-4 w-4 text-[var(--color-primary)] shrink-0" />
+                    )}
+                    <span>
+                      vs{' '}
+                      <Link to={`/players/${opponent?.username}`} className="font-medium hover:underline">
+                        {opponent?.username ?? '—'}
+                      </Link>
+                    </span>
+                    {m.result && (
+                      <span className="text-[var(--color-muted-foreground)]">
+                        ({m.result.player1Score}–{m.result.player2Score})
+                      </span>
+                    )}
+                  </div>
+                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

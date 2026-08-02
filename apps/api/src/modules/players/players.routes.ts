@@ -80,15 +80,6 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
     }
   });
 
-  router.get('/:username/tournaments', async (req, res, next) => {
-    try {
-      const tournaments = await service.getPublicTournaments(req.params.username as string);
-      sendSuccess(res, tournaments);
-    } catch (err) {
-      next(err);
-    }
-  });
-
   router.get('/:username/avatar', async (req, res, next) => {
     try {
       const userId = await service.resolveUserIdByUsername(req.params.username as string);

@@ -13,8 +13,6 @@ import { ProfileSkeleton } from '@/components/ui/route-fallback';
 import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
-import { PlayerMatchHistory } from '@/components/player/PlayerMatchHistory';
-import { PlayerTournamentHistory } from '@/components/player/PlayerTournamentHistory';
 import { Link } from 'react-router-dom';
 
 import { API_URL } from '@/lib/config';
@@ -90,7 +88,7 @@ export function ProfilePage() {
   if (isLoading) return <ProfileSkeleton />;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-lg mx-auto space-y-6">
       {/* Header */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
@@ -283,13 +281,6 @@ export function ProfilePage() {
         <section className="space-y-3 mt-4">
           <MetaLinkCodeDisplay />
         </section>
-      )}
-
-      {profile && (
-        <div className="space-y-8 pt-4">
-          <PlayerTournamentHistory username={profile.username} />
-          <PlayerMatchHistory username={profile.username} playerId={profile.id} />
-        </div>
       )}
     </div>
   );

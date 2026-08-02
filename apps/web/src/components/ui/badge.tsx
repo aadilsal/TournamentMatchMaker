@@ -54,17 +54,6 @@ export function matchStatusBadge(status: string) {
   return map[status] ?? { label: status, variant: 'neutral' as BadgeVariant };
 }
 
-export function participantStatusBadge(status: string) {
-  const map: Record<string, { label: string; variant: BadgeVariant }> = {
-    active: { label: 'Still in', variant: 'success' },
-    advanced: { label: 'Advanced', variant: 'success' },
-    knockout: { label: 'Knockout', variant: 'info' },
-    eliminated: { label: 'Eliminated', variant: 'danger' },
-    out: { label: 'Out', variant: 'neutral' },
-  };
-  return map[status] ?? { label: status, variant: 'neutral' as BadgeVariant };
-}
-
 export function bookingStatusBadge(status: string) {
   const map: Record<string, { label: string; variant: BadgeVariant }> = {
     confirmed: { label: 'Confirmed', variant: 'success' },

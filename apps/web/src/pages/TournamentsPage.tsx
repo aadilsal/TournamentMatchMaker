@@ -2,10 +2,6 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { QueuePairFailedEvent, QueueStatus, Tournament } from '@vr-tournament/shared';
-import {
-  ACTIVE_TOURNAMENT_STATUSES,
-  PUBLIC_TOURNAMENT_STATUSES,
-} from '@vr-tournament/shared';
 import { apiGet, getAccessToken } from '@/lib/api';
 import {
   LIVE_QUERY_KEYS,
@@ -15,7 +11,6 @@ import {
 } from '@/lib/query-keys';
 import { useSocketEvent } from '@/hooks/useSocket';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/select';
 import { Badge, tournamentStatusBadge } from '@/components/ui/badge';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -23,66 +18,14 @@ import { CricketBallLoader } from '@/components/ui/cricket-loader';
 import { Trophy, Calendar, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 
-const STATUS_FILTERS = [
-  {
-    value: 'active',
-    label: 'Active',
-    statuses: ACTIVE_TOURNAMENT_STATUSES,
-    emptyTitle: 'No active tournaments',
-    emptyDescription: 'Check back soon for new seasons — or view completed ones.',
-  },
-  {
-    value: 'in_progress',
-    label: 'Live now',
-    statuses: ['in_progress'],
-    emptyTitle: 'Nothing live right now',
-    emptyDescription: 'No tournament is currently in progress.',
-  },
-  {
-    value: 'open',
-    label: 'Open for entry',
-    statuses: ['open'],
-    emptyTitle: 'No tournaments open',
-    emptyDescription: 'Registration is closed everywhere at the moment.',
-  },
-  {
-    value: 'completed',
-    label: 'Completed',
-    statuses: ['completed'],
-    emptyTitle: 'No completed tournaments',
-    emptyDescription: 'Finished tournaments will show up here.',
-  },
-  {
-    value: 'all',
-    label: 'All',
-    statuses: PUBLIC_TOURNAMENT_STATUSES,
-    emptyTitle: 'No tournaments yet',
-    emptyDescription: 'Check back soon for new seasons.',
-  },
-] as const satisfies ReadonlyArray<{
-  value: string;
-  label: string;
-  statuses: readonly string[];
-  emptyTitle: string;
-  emptyDescription: string;
-}>;
-
-type StatusFilter = (typeof STATUS_FILTERS)[number]['value'];
-
 export function TournamentsPage() {
   const navigate = useNavigate();
   const isLoggedIn = !!getAccessToken();
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active');
-
-  const activeFilter =
-    STATUS_FILTERS.find((f) => f.value === statusFilter) ?? STATUS_FILTERS[0];
-  const statusParam = activeFilter.statuses.join(',');
 
   const { data: tournaments = [], isLoading } = useQuery({
-    queryKey: ['tournaments', statusParam],
-    queryFn: () =>
-      apiGet<Tournament[]>(`/tournaments?status=${encodeURIComponent(statusParam)}`),
+    queryKey: ['tournaments'],
+    queryFn: () => apiGet<Tournament[]>('/tournaments'),
   });
 
   const { data: queueStatus } = useQuery({
@@ -112,36 +55,17 @@ export function TournamentsPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/25">
-                <Trophy className="h-4.5 w-4.5 text-[var(--color-primary)]" />
-              </span>
-              <h1 className="text-2xl font-bold tracking-tight">Tournaments</h1>
-            </div>
-            <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
-              {isLoggedIn
-                ? 'Pick a tournament — we match you automatically once you enter.'
-                : 'Browse open tournaments. Register to join.'}
-            </p>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-[var(--color-muted-foreground)]">
-            <span className="shrink-0">Show</span>
-            <Select
-              className="h-9 w-auto min-w-[9.5rem]"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              aria-label="Filter tournaments by status"
-            >
-              {STATUS_FILTERS.map((f) => (
-                <option key={f.value} value={f.value}>
-                  {f.label}
-                </option>
-              ))}
-            </Select>
-          </label>
+        <div className="flex items-center gap-2 mb-1">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/25">
+            <Trophy className="h-4.5 w-4.5 text-[var(--color-primary)]" />
+          </span>
+          <h1 className="text-2xl font-bold tracking-tight">Tournaments</h1>
         </div>
+        <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
+          {isLoggedIn
+            ? 'Pick a tournament — we match you automatically once you enter.'
+            : 'Browse open tournaments. Register to join.'}
+        </p>
       </motion.div>
 
       {isLoggedIn && queueStatus?.inQueue && (
@@ -168,8 +92,8 @@ export function TournamentsPage() {
       ) : tournaments.length === 0 ? (
         <EmptyState
           icon={<Trophy className="h-12 w-12" />}
-          title={activeFilter.emptyTitle}
-          description={activeFilter.emptyDescription}
+          title="No open tournaments"
+          description="Check back soon for new seasons."
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
