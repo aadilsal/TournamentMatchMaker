@@ -24,6 +24,8 @@ import { requeuePlayer, removeFromQueue } from '../../lib/requeue-player.js';
 import { releaseSlotLock } from '../../lib/slot-lock.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import {
+  ACTIVE_TOURNAMENT_STATUSES,
+  PUBLIC_TOURNAMENT_STATUSES,
   KNOCKOUT_ROUNDS,
   firstKnockoutMatchCount,
   knockoutRoundLabel,
@@ -59,10 +61,24 @@ export class TournamentsService {
     const params: unknown[] = [];
     let where = 'WHERE 1=1';
 
-    if (query.status) {
-      params.push(query.status);
-      where += ` AND t.status = $${params.length}`;
+    // Drafts are never public, whatever the caller asks for. Default to the active
+    // statuses so completed tournaments only show up when explicitly requested.
+    const requested =
+      Array.isArray(query.status) && query.status.length
+        ? query.status
+        : [...ACTIVE_TOURNAMENT_STATUSES];
+    const statuses = requested.filter((status) =>
+      (PUBLIC_TOURNAMENT_STATUSES as readonly string[]).includes(status)
+    );
+    if (statuses.length === 0) {
+      return { items: [], nextCursor: null };
     }
+    const statusPlaceholders = statuses.map((status) => {
+      params.push(status);
+      return `$${params.length}`;
+    });
+    where += ` AND t.status IN (${statusPlaceholders.join(', ')})`;
+
     if (query.tier) {
       params.push(query.tier);
       where += ` AND t.skill_tier = $${params.length}`;

@@ -8,6 +8,24 @@ export const tournamentStatusSchema = z.enum([
   'completed',
 ]);
 
+/** Statuses a non-admin visitor is ever allowed to see. Drafts stay internal. */
+export const PUBLIC_TOURNAMENT_STATUSES = ['open', 'closed', 'in_progress', 'completed'] as const;
+
+/** Default public view: everything still running, completed ones hidden until asked for. */
+export const ACTIVE_TOURNAMENT_STATUSES = ['open', 'closed', 'in_progress'] as const;
+
+/** Accepts `?status=open` or `?status=open,in_progress`. */
+const tournamentStatusListSchema = z.preprocess(
+  (value) =>
+    typeof value === 'string'
+      ? value
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : value,
+  z.array(tournamentStatusSchema).min(1)
+);
+
 export const createTournamentSchema = z.object({
   name: z.string().min(1).max(200),
   game: z.string().min(1).max(100),
@@ -21,7 +39,7 @@ export const createTournamentSchema = z.object({
 });
 
 export const tournamentListQuerySchema = z.object({
-  status: tournamentStatusSchema.optional(),
+  status: tournamentStatusListSchema.optional(),
   tier: z.coerce.number().int().min(1).max(5).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   cursor: z.string().uuid().optional(),

@@ -83,6 +83,25 @@ export interface PublicPlayerProfile {
   updatedAt: string;
 }
 
+/** One tournament a player has entered, as shown on their profile history. */
+export interface PlayerTournamentSummary {
+  tournamentId: string;
+  name: string;
+  game: string;
+  status: TournamentStatus;
+  phase: TournamentPhase;
+  skillTier: number;
+  startDate: string;
+  endDate: string;
+  registeredAt: string | null;
+  /** Null when the player registered but the tournament never started for them. */
+  participantStatus: ParticipantStatus | null;
+  roundReached: number | null;
+  wins: number;
+  losses: number;
+  matchesPlayed: number;
+}
+
 export interface Venue {
   id: string;
   name: string;
@@ -262,6 +281,7 @@ export interface Match {
   player2?: Pick<User, 'id' | 'username' | 'skillTier' | 'hasVrHeadset'>;
   venue?: Pick<Venue, 'id' | 'name' | 'city' | 'address'>;
   slot?: Pick<TimeSlot, 'id' | 'startTime' | 'endTime'>;
+  tournament?: { id: string; name: string };
   confirmations?: MatchConfirmations | null;
 }
 

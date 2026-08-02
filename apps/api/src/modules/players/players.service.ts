@@ -1,5 +1,11 @@
 import type { Pool } from 'pg';
-import type { UpdatePlayerInput, UploadAvatarInput, BuybackOption } from '@vr-tournament/shared';
+import type {
+  UpdatePlayerInput,
+  UploadAvatarInput,
+  BuybackOption,
+  PlayerTournamentSummary,
+} from '@vr-tournament/shared';
+import { PUBLIC_TOURNAMENT_STATUSES } from '@vr-tournament/shared';
 import { mapMatch, mapUser } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 
@@ -8,12 +14,14 @@ const MATCH_SELECT = `
          u1.username AS p1_username, u1.skill_tier AS p1_skill_tier, u1.has_vr_headset AS p1_has_vr,
          u2.username AS p2_username, u2.skill_tier AS p2_skill_tier, u2.has_vr_headset AS p2_has_vr,
          v.name AS venue_name, v.city AS venue_city, v.address AS venue_address,
-         ts.start_time AS slot_start, ts.end_time AS slot_end
+         ts.start_time AS slot_start, ts.end_time AS slot_end,
+         t.name AS tournament_name
   FROM matches m
   JOIN users u1 ON u1.id = m.player1_id
   JOIN users u2 ON u2.id = m.player2_id
   LEFT JOIN venues v ON v.id = m.venue_id
   LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
+  LEFT JOIN tournaments t ON t.id = m.tournament_id
 `;
 
 export class PlayersService {
@@ -104,8 +112,9 @@ export class PlayersService {
        FROM users u
        LEFT JOIN LATERAL (
          SELECT
-           COUNT(*) FILTER (WHERE (m.player1_id = u.id AND (m.result->>'winnerId')::uuid = u.id)
-             OR (m.player2_id = u.id AND (m.result->>'winnerId')::uuid = u.id)) AS wins,
+           COUNT(*) FILTER (WHERE m.status = 'completed'
+             AND (m.result->>'winnerId')::uuid = u.id
+             AND (m.player1_id = u.id OR m.player2_id = u.id)) AS wins,
            COUNT(*) FILTER (WHERE m.status = 'completed'
              AND (m.result->>'winnerId') IS NOT NULL
              AND (m.result->>'winnerId')::uuid != u.id
@@ -157,6 +166,75 @@ export class PlayersService {
       [userId, limit]
     );
     return result.rows.map(mapMatch);
+  }
+
+  async getPublicTournaments(
+    username: string,
+    limit = 50
+  ): Promise<PlayerTournamentSummary[]> {
+    const userId = await this.resolveUserIdByUsername(username);
+    if (!userId) {
+      throw new AppError('NOT_FOUND', 'Player not found', 404);
+    }
+
+    // Same rule as the public tournament list: drafts stay internal.
+    const params: unknown[] = [userId];
+    const statusPlaceholders = PUBLIC_TOURNAMENT_STATUSES.map((status) => {
+      params.push(status);
+      return `$${params.length}`;
+    });
+    params.push(limit);
+
+    const result = await this.pool.query(
+      `SELECT t.id AS tournament_id,
+              t.name, t.game, t.status, t.phase, t.skill_tier,
+              t.start_date, t.end_date,
+              COALESCE(reg.registered_at, tp.created_at) AS registered_at,
+              tp.status AS participant_status,
+              tp.round_number,
+              COALESCE(stats.wins, 0)::int AS wins,
+              COALESCE(stats.losses, 0)::int AS losses,
+              COALESCE(stats.played, 0)::int AS matches_played
+       FROM tournaments t
+       LEFT JOIN tournament_registrations reg
+         ON reg.tournament_id = t.id AND reg.user_id = $1
+       LEFT JOIN tournament_participants tp
+         ON tp.tournament_id = t.id AND tp.user_id = $1
+       LEFT JOIN LATERAL (
+         SELECT
+           COUNT(*) FILTER (WHERE m.status = 'completed'
+             AND (m.result->>'winnerId')::uuid = $1) AS wins,
+           COUNT(*) FILTER (WHERE m.status = 'completed'
+             AND (m.result->>'winnerId') IS NOT NULL
+             AND (m.result->>'winnerId')::uuid != $1) AS losses,
+           COUNT(*) FILTER (WHERE m.status = 'completed') AS played
+         FROM matches m
+         WHERE m.tournament_id = t.id
+           AND (m.player1_id = $1 OR m.player2_id = $1)
+       ) stats ON true
+       WHERE (reg.id IS NOT NULL OR tp.id IS NOT NULL)
+         AND t.status IN (${statusPlaceholders.join(', ')})
+       ORDER BY t.start_date DESC, t.id DESC
+       LIMIT $${params.length}`,
+      params
+    );
+
+    return result.rows.map((row) => ({
+      tournamentId: row.tournament_id,
+      name: row.name,
+      game: row.game,
+      status: row.status,
+      phase: row.phase,
+      skillTier: row.skill_tier,
+      startDate: row.start_date.toISOString(),
+      endDate: row.end_date.toISOString(),
+      registeredAt: row.registered_at?.toISOString() ?? null,
+      participantStatus: row.participant_status ?? null,
+      roundReached: row.round_number ?? null,
+      wins: row.wins,
+      losses: row.losses,
+      matchesPlayed: row.matches_played,
+    }));
   }
 
   async resolveUserIdByUsername(username: string): Promise<string | null> {

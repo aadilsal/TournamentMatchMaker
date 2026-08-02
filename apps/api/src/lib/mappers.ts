@@ -187,6 +187,7 @@ interface MatchRow {
   venue_address?: string;
   slot_start?: Date;
   slot_end?: Date;
+  tournament_name?: string;
 }
 
 interface NotificationRow {
@@ -362,6 +363,9 @@ export function mapMatch(row: MatchRow): Match {
       startTime: row.slot_start.toISOString(),
       endTime: row.slot_end!.toISOString(),
     };
+  }
+  if (row.tournament_name && row.tournament_id) {
+    match.tournament = { id: row.tournament_id, name: row.tournament_name };
   }
 
   return match;
