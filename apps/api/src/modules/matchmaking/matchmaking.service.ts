@@ -109,14 +109,17 @@ export class MatchmakingService {
       // in-future slot here let players join the queue with a window the pairer
       // would never match, so they waited in "Finding opponent…" forever with
       // nothing to tell them why.
+      // The window comes from *this player's* round, which is the same round the
+      // pairing worker resolves and the same one the slot picker offered from.
+      // Using the tournament's current round here would reject a player who is
+      // legitimately behind the field.
       const slotRow = await this.pool.query(
         `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
          FROM tournament_round_slots rs
          JOIN time_slots ts ON ts.id = rs.time_slot_id
-         JOIN tournaments t ON t.id = rs.tournament_id
          LEFT JOIN tournament_rounds tr
-           ON tr.tournament_id = t.id
-          AND tr.round_number = t.current_round_number
+           ON tr.tournament_id = rs.tournament_id
+          AND tr.round_number = $3
           AND tr.status = 'active'
          WHERE rs.tournament_id = $1 AND rs.user_id = $2 AND ts.end_time > NOW()
            AND (tr.id IS NULL OR (ts.start_time >= tr.starts_at AND ts.end_time <= tr.ends_at))

@@ -273,12 +273,20 @@ async function pairInQueue(
 
     let roundWindow: { startsAt: Date; endsAt: Date } | null = null;
     if (tournamentId) {
+      // Key the window off the round these two players are actually in, not the
+      // tournament's current round. Those differ whenever a player is behind the
+      // field — newly registered, or held back after an elimination — and the
+      // mismatch was silent and fatal: the slot picker offers, and entry
+      // accepts, slots inside the *player's* round, while this check demanded
+      // the *tournament's* round. Every such entry was discarded here as
+      // "no slots", leaving the player queued forever with nothing to explain it.
+      // findBestPair only pairs equal round numbers, so either side serves.
+      const pairRoundNumber = candidate.roundNumber;
       const roundResult = await client.query(
         `SELECT tr.starts_at, tr.ends_at
-         FROM tournaments t
-         JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number
-         WHERE t.id = $1 AND tr.status = 'active'`,
-        [tournamentId]
+         FROM tournament_rounds tr
+         WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
+        [tournamentId, pairRoundNumber]
       );
       if (roundResult.rows[0]) {
         roundWindow = {
