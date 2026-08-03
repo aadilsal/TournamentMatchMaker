@@ -66,6 +66,19 @@ export async function createBuybackPaymentIntent(
   const existing = pending.rows[0];
   if (existing?.stripe_payment_intent_id) {
     const intent = await stripe.paymentIntents.retrieve(existing.stripe_payment_intent_id);
+
+    // The player already paid and we simply haven't seen the webhook yet.
+    // Treating this as a failure used to mark the paid buyback `failed` and
+    // open a second PaymentIntent — a double charge whose original payment the
+    // webhook then ignored, because it refuses to fulfil a `failed` buyback.
+    if (intent.status === 'succeeded' || intent.status === 'processing') {
+      throw new AppError(
+        'CONFLICT',
+        'Your payment is already going through — give it a moment before trying again',
+        409
+      );
+    }
+
     if (
       intent.client_secret &&
       (intent.status === 'requires_payment_method' ||

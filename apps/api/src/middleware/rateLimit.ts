@@ -14,6 +14,12 @@ interface LimiterOptions {
   key: (req: Request) => string;
   /** Return true to let the request through without consuming budget. */
   skip?: (req: Request) => boolean;
+  /**
+   * What to do when Redis itself is unreachable. Browse traffic would rather
+   * stay up unmetered than 503; a brute-force control that evaporates the
+   * moment Redis blips is not a control at all, so those fail closed.
+   */
+  failClosed?: boolean;
 }
 
 function createRateLimiter(env: Env, options: LimiterOptions) {
@@ -46,7 +52,15 @@ function createRateLimiter(env: Env, options: LimiterOptions) {
       }
 
       next();
-    } catch {
+    } catch (err) {
+      if (options.failClosed) {
+        console.error(`Rate limiter "${options.bucket}" unavailable — refusing request:`, err);
+        return sendError(
+          res,
+          { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable, try again shortly' },
+          503
+        );
+      }
       next();
     }
   };
@@ -142,14 +156,18 @@ export function credentialRateLimit(env: Env) {
     max: 50,
     windowSeconds: 300,
     key: (req) => req.ip ?? 'unknown',
+    failClosed: true,
   });
 
   const perAccount = createRateLimiter(env, {
     bucket: 'auth:account',
     max: 10,
     windowSeconds: 900,
-    key: (req) => String((req.body as { email?: string } | undefined)?.email ?? '').toLowerCase(),
+    key: (req) => String((req.body as { email?: string } | undefined)?.email ?? '')
+      .trim()
+      .toLowerCase(),
     skip: (req) => !(req.body as { email?: string } | undefined)?.email,
+    failClosed: true,
   });
 
   return (req: Request, res: Response, next: NextFunction) =>

@@ -115,11 +115,23 @@ export class MatchmakingService {
       roundNumber = pResult.rows[0]?.round_number ?? 1;
 
       // A tournament match needs a play window for both players — VR included.
+      //
+      // The slot must also sit inside the active round's window, because that is
+      // what the pairing worker enforces (`slotWithinRound`). Accepting a merely
+      // in-future slot here let players join the queue with a window the pairer
+      // would never match, so they waited in "Finding opponent…" forever with
+      // nothing to tell them why.
       const slotRow = await this.pool.query(
         `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
          FROM tournament_round_slots rs
          JOIN time_slots ts ON ts.id = rs.time_slot_id
+         JOIN tournaments t ON t.id = rs.tournament_id
+         LEFT JOIN tournament_rounds tr
+           ON tr.tournament_id = t.id
+          AND tr.round_number = t.current_round_number
+          AND tr.status = 'active'
          WHERE rs.tournament_id = $1 AND rs.user_id = $2 AND ts.end_time > NOW()
+           AND (tr.id IS NULL OR (ts.start_time >= tr.starts_at AND ts.end_time <= tr.ends_at))
          ORDER BY (rs.round_number = $3) DESC, rs.round_number DESC
          LIMIT 1`,
         [input.tournamentId, userId, roundNumber]
@@ -128,7 +140,7 @@ export class MatchmakingService {
       if (!rs) {
         throw new AppError(
           'BAD_REQUEST',
-          'Pick a time slot for this round before entering',
+          'Pick a time slot inside this round’s play window before entering',
           400
         );
       }

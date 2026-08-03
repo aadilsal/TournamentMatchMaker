@@ -13,6 +13,10 @@ import { AppError } from '../../lib/response.js';
 const BCRYPT_ROUNDS = 12;
 const REFRESH_COOKIE = 'refresh_token';
 
+const normaliseEmail = (email: string) => email.trim().toLowerCase();
+
+const SUSPENDED_MESSAGE = 'This account is suspended — contact an administrator';
+
 export class AuthService {
   constructor(
     private pool: Pool,
@@ -29,7 +33,10 @@ export class AuthService {
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
-          input.email,
+          // Stored folded: `checkAvailability` and the unique indexes compare
+          // case-insensitively, so writing the raw casing here let the same
+          // address register twice ("A@x.com" alongside "a@x.com").
+          normaliseEmail(input.email),
           passwordHash,
           input.username,
           input.country ?? null,
@@ -87,7 +94,9 @@ export class AuthService {
   }
 
   async login(email: string, password: string) {
-    const result = await this.pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const result = await this.pool.query('SELECT * FROM users WHERE LOWER(email) = $1', [
+      normaliseEmail(email),
+    ]);
     const row = result.rows[0];
 
     if (!row) {
@@ -97,6 +106,12 @@ export class AuthService {
     const valid = await bcrypt.compare(password, row.password_hash);
     if (!valid) {
       throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);
+    }
+
+    // Checked after the password so a suspended account is not distinguishable
+    // from a wrong password to someone guessing.
+    if (row.suspended_at) {
+      throw new AppError('FORBIDDEN', SUSPENDED_MESSAGE, 403);
     }
 
     const user = mapUser(row);
@@ -123,6 +138,11 @@ export class AuthService {
     const row = result.rows[0];
     if (!row) {
       throw new AppError('UNAUTHORIZED', 'Invalid or expired refresh token', 401);
+    }
+
+    // A suspension landing mid-session must not be survivable by refreshing.
+    if (row.suspended_at) {
+      throw new AppError('FORBIDDEN', SUSPENDED_MESSAGE, 403);
     }
 
     const user = mapUser(row);

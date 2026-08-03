@@ -4,12 +4,15 @@ import type { UserRole } from '@vr-tournament/shared';
 import type { Env } from '../config/env.js';
 import { getRedis } from '../lib/redis.js';
 import { AppError } from '../lib/response.js';
+import { isTokenRevoked } from '../lib/token-revocation.js';
 
 export interface AuthPayload {
   sub: string;
   email: string;
   role: UserRole;
   jti: string;
+  /** Set by `jwt.sign`; used to test the token against the per-user revocation marker. */
+  iat?: number;
 }
 
 declare global {
@@ -35,6 +38,12 @@ export function authenticate(env: Env) {
       const blacklisted = await redis.get(`jwt:blacklist:${payload.jti}`);
       if (blacklisted) {
         return next(new AppError('UNAUTHORIZED', 'Token has been revoked', 401));
+      }
+
+      // A role change, suspension or admin session revocation happens after the
+      // token was minted, so the claims inside it are stale by then.
+      if (await isTokenRevoked(redis, payload.sub, payload.iat)) {
+        return next(new AppError('UNAUTHORIZED', 'Session is no longer valid — sign in again', 401));
       }
 
       req.user = payload;

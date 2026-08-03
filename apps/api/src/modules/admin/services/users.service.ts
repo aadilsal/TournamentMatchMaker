@@ -10,11 +10,24 @@ import { DEFAULT_RATING_POINTS, pointsToTier } from '@vr-tournament/shared';
 import { mapUser } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
+import type { RedisClient } from '../../../lib/redis.js';
+import { revokeUserTokens } from '../../../lib/token-revocation.js';
 
 const BCRYPT_ROUNDS = 12;
 
 export class AdminUsersService {
-  constructor(private pool: Pool) {}
+  constructor(
+    private pool: Pool,
+    private redis?: RedisClient
+  ) {}
+
+  /**
+   * Access tokens embed the role and outlive any change to it, so every
+   * privilege-affecting edit has to invalidate the sessions already issued.
+   */
+  private async invalidateSessions(userId: string) {
+    if (this.redis) await revokeUserTokens(this.redis, userId);
+  }
 
   async list(query: AdminListQuery & { role?: string }) {
     const params: unknown[] = [];
@@ -196,6 +209,13 @@ export class AdminUsersService {
       values
     );
     const user = mapUser(result.rows[0]);
+
+    // A demotion or suspension that leaves existing tokens working is not a
+    // demotion or suspension. Both edits end the user's current sessions.
+    if (input.role !== undefined || input.suspended !== undefined) {
+      await this.invalidateSessions(id);
+    }
+
     await writeAudit(this.pool, {
       actorId,
       action: 'user.update',
@@ -259,6 +279,9 @@ export class AdminUsersService {
   async revokeSessions(actorId: string, id: string) {
     await this.getById(id);
     await this.pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+    // Dropping refresh tokens alone left the current access token working for
+    // the rest of its lifetime, which made this control useless in an incident.
+    await this.invalidateSessions(id);
     await writeAudit(this.pool, {
       actorId,
       action: 'user.revoke_sessions',

@@ -18,6 +18,40 @@ import {
 
 const { Pool } = pg;
 
+/**
+ * Seeding deletes matches, buybacks, notifications and time slots before it
+ * writes, so pointing it at anything but a local dev database is destructive.
+ * Same guard as `db:reset`, for the same reason.
+ */
+function assertLocalDatabase(url: string | undefined): void {
+  if (!url) {
+    console.error('DATABASE_URL is not set — refusing to seed.');
+    process.exit(1);
+  }
+  if (process.env.SEED_I_KNOW_WHAT_IM_DOING === 'yes') return;
+
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    console.error('DATABASE_URL is not a valid URL — refusing to seed.');
+    process.exit(1);
+  }
+
+  const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', 'postgres', 'db'];
+  if (!LOCAL_HOSTS.includes(host) || process.env.NODE_ENV === 'production') {
+    console.error(
+      `Refusing to seed a non-local database.\n` +
+        `  DATABASE_URL host: ${host}\n` +
+        `  Allowed hosts:     ${LOCAL_HOSTS.join(', ')}\n\n` +
+        `If you really mean it, re-run with SEED_I_KNOW_WHAT_IM_DOING=yes`
+    );
+    process.exit(1);
+  }
+}
+
+assertLocalDatabase(process.env.DATABASE_URL);
+
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const KNOCKOUT = { ro16: 100, qf: 101, sf: 102, final: 103 } as const;

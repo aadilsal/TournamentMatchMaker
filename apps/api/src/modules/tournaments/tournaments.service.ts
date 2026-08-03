@@ -750,6 +750,35 @@ export class TournamentsService {
     }
   }
 
+  /**
+   * The subset of the checkout preconditions that can still change between
+   * paying and the webhook arriving. Throwing here leaves the buyback pending
+   * and the webhook 4xx's, so Stripe retries and the payment stays visible for
+   * a refund rather than silently buying a place in a finished tournament.
+   */
+  private async assertBuybackStillFulfillable(tournamentId: string, roundNumber: number) {
+    const tournament = await this.getById(tournamentId);
+    if (tournament.status === 'completed' || tournament.phase === 'completed') {
+      throw new AppError('CONFLICT', 'Tournament has ended — this buyback cannot be applied', 409);
+    }
+    if (tournament.phase !== 'normal') {
+      throw new AppError(
+        'CONFLICT',
+        'Knockout has started — this buyback cannot be applied',
+        409
+      );
+    }
+
+    const roundOpen = await this.pool.query(
+      `SELECT id FROM tournament_rounds
+       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at > NOW()`,
+      [tournamentId, roundNumber]
+    );
+    if (!roundOpen.rows[0]) {
+      throw new AppError('CONFLICT', 'Round has ended — this buyback cannot be applied', 409);
+    }
+  }
+
   async createBuybackCheckout(tournamentId: string, userId: string, input: BuybackInput) {
     if (!this.env) throw new AppError('INTERNAL', 'Env not configured', 500);
 
@@ -803,6 +832,13 @@ export class TournamentsService {
     const tournamentId = buyback.tournament_id;
     const userId = buyback.user_id;
 
+    // Checkout validated the tournament phase and round, but the payment can
+    // land minutes later — by which time the round may have closed, knockout
+    // may have started, or the tournament may be over. Re-check at the moment
+    // the buyback is actually granted, or the player is re-activated into a
+    // phase that no longer exists.
+    await this.assertBuybackStillFulfillable(tournamentId, buyback.round_number);
+
     const reg = await this.getRegistration(tournamentId, userId);
     const roundSlot = await this.getLatestRoundSlot(tournamentId, userId);
     const preferredVenueId = roundSlot?.venueId ?? null;
@@ -811,8 +847,22 @@ export class TournamentsService {
     try {
       await client.query('BEGIN');
 
+      // Take the row lock first, then re-test the status under it. Stripe
+      // retries and can deliver the same event twice concurrently; without
+      // this both deliveries passed the unlocked check above and each added a
+      // buyback, so the player got two re-entries for one payment.
+      const locked = await client.query(
+        `SELECT status FROM buybacks WHERE id = $1 FOR UPDATE`,
+        [buybackId]
+      );
+      if (locked.rows[0]?.status !== 'pending') {
+        await client.query('ROLLBACK');
+        const settled = await this.pool.query(`SELECT * FROM buybacks WHERE id = $1`, [buybackId]);
+        return mapBuyback(settled.rows[0]);
+      }
+
       await client.query(
-        `UPDATE buybacks SET status = 'completed' WHERE id = $1`,
+        `UPDATE buybacks SET status = 'completed' WHERE id = $1 AND status = 'pending'`,
         [buybackId]
       );
 
@@ -1206,30 +1256,37 @@ export class TournamentsService {
     const nextSlot = Math.floor(slot / 2);
     const isPlayer1 = slot % 2 === 0;
 
-    const existing = await this.pool.query(
-      `SELECT * FROM matches
-       WHERE tournament_id = $1 AND round_number = $2 AND bracket_slot = $3`,
-      [match.tournament_id, nextRound, nextSlot]
+    const col = isPlayer1 ? 'player1_id' : 'player2_id';
+
+    // Both feeder matches can resolve at the same instant, and each one used to
+    // read "no next-round match yet" and insert its own — splitting the bracket
+    // into two half-empty finals. Let the unique index arbitrate: whoever
+    // inserts first wins, the other falls through to filling in its own side.
+    const inserted = await this.pool.query(
+      `INSERT INTO matches (tournament_id, player1_id, player2_id, status, round_number, phase, bracket_slot)
+       VALUES ($1, $2, $3, 'pending_confirmation', $4, 'knockout', $5)
+       ON CONFLICT (tournament_id, round_number, bracket_slot)
+         WHERE phase = 'knockout' AND bracket_slot IS NOT NULL
+       DO NOTHING
+       RETURNING id`,
+      [
+        match.tournament_id,
+        isPlayer1 ? winnerId : null,
+        isPlayer1 ? null : winnerId,
+        nextRound,
+        nextSlot,
+      ]
     );
 
-    if (existing.rows[0]) {
-      const col = isPlayer1 ? 'player1_id' : 'player2_id';
-      await this.pool.query(`UPDATE matches SET ${col} = $1, updated_at = NOW() WHERE id = $2`, [
-        winnerId,
-        existing.rows[0].id,
-      ]);
-    } else {
-      await this.pool.query(
-        `INSERT INTO matches (tournament_id, player1_id, player2_id, status, round_number, phase, bracket_slot)
-         VALUES ($1, $2, $3, 'pending_confirmation', $4, 'knockout', $5)`,
-        [
-          match.tournament_id,
-          isPlayer1 ? winnerId : null,
-          isPlayer1 ? null : winnerId,
-          nextRound,
-          nextSlot,
-        ]
-      );
-    }
+    if (inserted.rows[0]) return;
+
+    // The slot already existed (or the concurrent insert beat us to it): claim
+    // our half of it without disturbing the other side.
+    await this.pool.query(
+      `UPDATE matches SET ${col} = $1, updated_at = NOW()
+       WHERE tournament_id = $2 AND round_number = $3 AND bracket_slot = $4
+         AND phase = 'knockout'`,
+      [winnerId, match.tournament_id, nextRound, nextSlot]
+    );
   }
 }

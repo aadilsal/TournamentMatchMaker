@@ -51,7 +51,7 @@ export async function processExpireMatchesJob(
               payload: { matchId: match.id },
               idempotencyKey: `match-expired:${match.id}:${userId}`,
             },
-            { jobId: `match-expired:${match.id}:${userId}` }
+            { jobId: `match-expired~${match.id}~${userId}` }
           );
         }
         if (match.time_slot_id) {

@@ -538,7 +538,7 @@ async function pairInQueue(
           payload: eventPayload,
           idempotencyKey: `match-found:${matchId}:${playerId}`,
         },
-        { jobId: `match-found:${matchId}:${playerId}` }
+        { jobId: `match-found~${matchId}~${playerId}` }
       );
     }
 

@@ -33,6 +33,9 @@ const MIGRATION_MARKERS = {
     column: { table: 'tournaments', name: 'round_duration_minutes' },
   },
   '1738000000012_round-slots-and-live-participation': { table: 'tournament_round_slots' },
+  // Adds no table or column of its own — only indexes and constraints — so it
+  // is detected by one of the indexes it creates.
+  '1738000000013_knockout-bracket-and-email-case': { index: 'idx_users_email_lower' },
 };
 
 async function tableExists(client, table) {
@@ -57,11 +60,22 @@ async function columnExists(client, table, column) {
   return !!rows[0]?.exists;
 }
 
+async function indexExists(client, index) {
+  const { rows } = await client.query(
+    `SELECT EXISTS (
+       SELECT FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1
+     ) AS exists`,
+    [index]
+  );
+  return !!rows[0]?.exists;
+}
+
 async function migrationAlreadyApplied(client, name) {
   const marker = MIGRATION_MARKERS[name];
   if (!marker) return false;
   if (marker.table) return tableExists(client, marker.table);
   if (marker.column) return columnExists(client, marker.column.table, marker.column.name);
+  if (marker.index) return indexExists(client, marker.index);
   return false;
 }
 

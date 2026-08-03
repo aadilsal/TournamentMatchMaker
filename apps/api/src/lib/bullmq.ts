@@ -27,7 +27,17 @@ export interface NotificationJobData {
   idempotencyKey: string;
 }
 
+/**
+ * BullMQ rejects a custom job id containing ':' unless it happens to split into
+ * exactly three parts, so a two- or four-segment idempotency key throws at
+ * enqueue time (silently, wherever the caller swallows the rejection). Callers
+ * shouldn't have to count colons — normalise the delimiter here instead.
+ */
+export function toJobId(idempotencyKey: string): string {
+  return idempotencyKey.replace(/:/g, '~');
+}
+
 export async function enqueueNotification(env: Env, data: NotificationJobData) {
   const queue = getNotificationQueue(env);
-  await queue.add('dispatch', data, { jobId: data.idempotencyKey });
+  await queue.add('dispatch', data, { jobId: toJobId(data.idempotencyKey) });
 }

@@ -13,12 +13,20 @@ export async function processExpireUnplayedSlotsJob(
 ) {
   const client = await pool.connect();
   try {
+    // LEFT JOIN, not JOIN: two VR players pairing outside a tournament get a
+    // match with no time_slot_id, and an inner join skipped those rows entirely.
+    // Nothing else expires a *confirmed* match, so they lived forever and both
+    // players stayed permanently blocked from requeuing behind `hasActiveMatch`.
+    // With no slot to time out against, fall back to the match's own age.
     const expiredMatches = await client.query(
       `SELECT m.*
        FROM matches m
-       JOIN time_slots ts ON ts.id = m.time_slot_id
+       LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
        WHERE m.status IN ('confirmed', 'in_progress')
-         AND ts.end_time < NOW()
+         AND (
+           (ts.id IS NOT NULL AND ts.end_time < NOW())
+           OR (m.time_slot_id IS NULL AND m.created_at < NOW() - INTERVAL '2 hours')
+         )
          AND (m.result IS NULL OR m.result->>'player1Score' IS NULL OR m.result->>'player2Score' IS NULL)`
     );
 
