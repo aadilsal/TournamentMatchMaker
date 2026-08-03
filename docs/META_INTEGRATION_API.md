@@ -1,7 +1,7 @@
 # Pixel Paddle / VR Cricket League — Meta Quest Integration API
 
-**Version:** 1.0  
-**Last updated:** June 2026  
+**Version:** 2.0  
+**Last updated:** August 2026  
 **Audience:** Meta Quest / VR game integration team  
 **Contact:** aadilsalman786@gmail.com
 
