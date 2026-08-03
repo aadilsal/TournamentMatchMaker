@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import type { QueuePairFailedEvent, QueueStatus, Tournament } from '@vr-tournament/shared';
+import type { QueuePairFailedEvent, QueueStatus, Tournament, User } from '@vr-tournament/shared';
 import { apiGet, getAccessToken } from '@/lib/api';
 import {
   LIVE_QUERY_KEYS,
@@ -16,7 +16,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CricketBallLoader } from '@/components/ui/cricket-loader';
-import { Trophy, Calendar, Users } from 'lucide-react';
+import { Trophy, Calendar, Users, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 
 type TournamentView = 'active' | 'completed';
@@ -51,6 +51,17 @@ export function TournamentsPage() {
     refetchInterval: (q) => (queueNeedsPolling(q.state.data) ? SAFETY_POLL_MS : false),
   });
 
+  // A player may hold a place in only one unfinished tournament at a time. The
+  // API enforces it either way; reading it here means we can say so up front
+  // instead of letting them click Join and take a 409.
+  const { data: me } = useQuery({
+    queryKey: LIVE_QUERY_KEYS.me,
+    queryFn: () => apiGet<User>('/players/me'),
+    enabled: isLoggedIn,
+    staleTime: LIVE_STALE_TIME,
+  });
+  const liveTournament = me?.liveTournament ?? null;
+
   useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
     setQueueNotice(data.message);
   });
@@ -82,6 +93,30 @@ export function TournamentsPage() {
             : 'Browse open tournaments. Register to join.'}
         </p>
       </motion.div>
+
+      {isLoggedIn && liveTournament && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 flex items-start gap-3"
+        >
+          <Info className="h-4.5 w-4.5 mt-0.5 shrink-0 text-[var(--color-primary)]" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">
+              You&rsquo;re already playing in{' '}
+              <Link
+                to={`/tournaments/${liveTournament.id}`}
+                className="text-[var(--color-primary)] hover:underline"
+              >
+                {liveTournament.name}
+              </Link>
+            </p>
+            <p className="text-sm text-[var(--color-muted-foreground)] mt-0.5">
+              You can join another tournament once this one finishes, or if you withdraw from it.
+            </p>
+          </div>
+        </motion.div>
+      )}
 
       {isLoggedIn && queueStatus?.inQueue && (
         <motion.div
@@ -162,11 +197,27 @@ export function TournamentsPage() {
                     <Link to={`/tournaments/${t.id}`} className="flex-1">
                       <Button size="sm" variant="outline" className="w-full">Details</Button>
                     </Link>
-                    {t.status === 'open' && (
-                      <Button size="sm" className="flex-1" onClick={() => handleJoin(t.id)}>
-                        {isLoggedIn ? 'Join' : 'Register to join'}
-                      </Button>
-                    )}
+                    {t.status === 'open' &&
+                      (() => {
+                        // The tournament they're already in still offers Join —
+                        // that's their way back into it.
+                        const blocked = !!liveTournament && liveTournament.id !== t.id;
+                        return (
+                          <Button
+                            size="sm"
+                            className="flex-1"
+                            disabled={blocked}
+                            title={
+                              blocked
+                                ? `You're already playing in ${liveTournament!.name}`
+                                : undefined
+                            }
+                            onClick={() => handleJoin(t.id)}
+                          >
+                            {!isLoggedIn ? 'Register to join' : blocked ? 'Already playing' : 'Join'}
+                          </Button>
+                        );
+                      })()}
                   </div>
                 </div>
               </motion.div>

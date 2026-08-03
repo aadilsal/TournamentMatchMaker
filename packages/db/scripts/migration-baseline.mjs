@@ -36,6 +36,10 @@ const MIGRATION_MARKERS = {
   // Adds no table or column of its own — only indexes and constraints — so it
   // is detected by one of the indexes it creates.
   '1738000000013_knockout-bracket-and-email-case': { index: 'idx_users_email_lower' },
+  // Data-only: corrects existing rows and creates no schema artifact to detect.
+  // It is idempotent, so it is never treated as pre-applied — running it twice
+  // is a no-op.
+  '1738000000014_retire-participants-on-completion': { dataOnly: true },
 };
 
 async function tableExists(client, table) {
@@ -76,6 +80,7 @@ async function migrationAlreadyApplied(client, name) {
   if (marker.table) return tableExists(client, marker.table);
   if (marker.column) return columnExists(client, marker.column.table, marker.column.name);
   if (marker.index) return indexExists(client, marker.index);
+  // dataOnly markers fall through: nothing to detect, safe to re-run.
   return false;
 }
 

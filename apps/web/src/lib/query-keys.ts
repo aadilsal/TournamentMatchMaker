@@ -8,6 +8,7 @@ export const LIVE_QUERY_KEYS = {
   bookings: ['bookings'] as const,
   notifications: ['notifications'] as const,
   tournaments: ['tournaments'] as const,
+  me: ['players', 'me'] as const,
 };
 
 export function invalidateLiveQueries(queryClient: QueryClient) {
@@ -16,6 +17,8 @@ export function invalidateLiveQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matchmakingStatus });
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.bookings });
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.notifications });
+  // Carries `liveTournament`, which decides whether Join is offered at all.
+  queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.me });
   invalidateTournamentQueries(queryClient);
 }
 

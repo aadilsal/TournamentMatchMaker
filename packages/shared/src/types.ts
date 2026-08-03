@@ -65,6 +65,18 @@ export interface User {
   hasProfilePicture?: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * The unfinished tournament this player currently holds a place in, if any.
+   * Present on `GET /players/me` only. The UI uses it to explain up front why
+   * joining another tournament is unavailable, instead of letting the player
+   * click Join and hit a 409.
+   */
+  liveTournament?: LiveTournamentRef | null;
+}
+
+export interface LiveTournamentRef {
+  id: string;
+  name: string;
 }
 
 export interface PublicPlayerProfile {

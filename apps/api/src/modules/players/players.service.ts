@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { UpdatePlayerInput, UploadAvatarInput, BuybackOption } from '@vr-tournament/shared';
 import { mapMatch, mapUser } from '../../lib/mappers.js';
+import { findLiveTournament } from '../../lib/live-participation.js';
 import { AppError } from '../../lib/response.js';
 
 const MATCH_SELECT = `
@@ -24,7 +25,11 @@ export class PlayersService {
     if (!result.rows[0]) {
       throw new AppError('NOT_FOUND', 'User not found', 404);
     }
-    return mapUser(result.rows[0]);
+    // Same rule the register and queue-join checks enforce, so the UI can
+    // disable Join and say which tournament is holding the player rather than
+    // letting them click through to a 409.
+    const liveTournament = await findLiveTournament(this.pool, userId);
+    return { ...mapUser(result.rows[0]), liveTournament };
   }
 
   async updateProfile(userId: string, input: UpdatePlayerInput) {

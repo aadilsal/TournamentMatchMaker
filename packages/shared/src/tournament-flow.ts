@@ -1,3 +1,5 @@
+import type { ParticipantStatus } from './types.js';
+
 export const TOURNAMENT_FLOW_GUIDE = {
   title: 'How tournaments run',
   summary:
@@ -56,3 +58,32 @@ export function isValidTournamentTransition(
 ): boolean {
   return from === to || TOURNAMENT_STATUS_TRANSITIONS[from].includes(to);
 }
+
+/**
+ * A player may hold a place in only one unfinished tournament at a time.
+ *
+ * "Still in it" deliberately includes `eliminated`: that player can still buy
+ * back into the round, so letting them register elsewhere would strand the
+ * buyback they already paid for. Only `out` — beaten out, or withdrawn —
+ * releases them.
+ *
+ * Once the tournament itself is completed nobody is holding a place in it, so
+ * every participant is free regardless of the status left on their row.
+ *
+ * This is the single definition. The registration check, the queue-join check,
+ * and the `liveTournament` field the UI reads all derive from it — they used to
+ * each carry their own version and disagreed in both directions.
+ */
+export const TERMINAL_PARTICIPANT_STATUS = 'out' as const;
+
+export function isLiveParticipation(
+  participantStatus: ParticipantStatus,
+  tournamentStatus: TournamentStatusValue
+): boolean {
+  if (tournamentStatus === 'completed') return false;
+  return participantStatus !== TERMINAL_PARTICIPANT_STATUS;
+}
+
+/** SQL form of {@link isLiveParticipation}, for queries that join the two tables. */
+export const LIVE_PARTICIPATION_SQL =
+  `tp.status <> '${TERMINAL_PARTICIPANT_STATUS}' AND t.status <> 'completed'`;

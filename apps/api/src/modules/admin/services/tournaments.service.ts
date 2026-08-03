@@ -135,6 +135,16 @@ export class AdminTournamentsService {
       values
     );
     const tournament = mapTournament(result.rows[0]);
+
+    // Retire on the *transition*, not just in `complete()` — the raw status
+    // dropdown on the edit form reaches 'completed' through here without ever
+    // calling complete(). Players left holding a place in a finished tournament
+    // still occupy idx_one_live_tournament_per_user, so their next registration
+    // fails as a bare unique-violation.
+    if (before.status !== 'completed' && tournament.status === 'completed') {
+      await this.retireParticipants(id);
+    }
+
     await writeAudit(this.pool, {
       actorId,
       action: 'tournament.update',
@@ -179,7 +189,22 @@ export class AdminTournamentsService {
     });
   }
 
+  /**
+   * Nobody holds a place in a finished tournament. Leaving players at
+   * 'active'/'knockout' is what made completing a tournament lock every one of
+   * its players out of ever joining another.
+   */
+  private async retireParticipants(tournamentId: string) {
+    await this.pool.query(
+      `UPDATE tournament_participants
+       SET status = 'out', updated_at = NOW()
+       WHERE tournament_id = $1 AND status <> 'out'`,
+      [tournamentId]
+    );
+  }
+
   async complete(actorId: string, id: string) {
+    // `update` retires the participants as part of the transition to completed.
     return this.update(actorId, id, { status: 'completed', phase: 'completed' });
   }
 

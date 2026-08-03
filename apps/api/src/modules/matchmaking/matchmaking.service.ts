@@ -17,6 +17,7 @@ import { emitToUser } from '../../socket/emitters.js';
 import { emitQueueUpdated } from '../../socket/sync-events.js';
 import { hasActiveMatch } from '../../lib/requeue-player.js';
 import { enqueuePairNow } from '../../lib/matchmaking-queue.js';
+import { assertNoOtherLiveTournament } from '../../lib/live-participation.js';
 import type { Env } from '../../config/env.js';
 
 export type QueuePlayerMeta = NonNullable<ReturnType<typeof parseQueuePlayerMeta>>;
@@ -58,24 +59,11 @@ export class MatchmakingService {
       }
 
       // One live tournament at a time — the queue is another way in, so it needs
-      // the same guard as POST /tournaments/:id/enter.
-      const otherLive = await this.pool.query(
-        `SELECT t.name
-         FROM tournament_participants tp
-         JOIN tournaments t ON t.id = tp.tournament_id
-         WHERE tp.user_id = $1 AND tp.tournament_id <> $2
-           AND tp.status <> 'out'
-           AND t.status IN ('open', 'closed', 'in_progress')
-         LIMIT 1`,
-        [userId, input.tournamentId]
-      );
-      if (otherLive.rows[0]) {
-        throw new AppError(
-          'CONFLICT',
-          `You are already playing in "${otherLive.rows[0].name}" — finish or withdraw from it before joining another tournament`,
-          409
-        );
-      }
+      // the same guard as POST /tournaments/:id/enter. Both now share
+      // lib/live-participation.ts; they used to be written separately and
+      // contradicted each other, so a player could pass one and be refused by
+      // the other.
+      await assertNoOtherLiveTournament(this.pool, userId, input.tournamentId);
     }
 
     if (input.preferredVenueId) {

@@ -22,6 +22,7 @@ import {
   mapTournament,
   mapTournamentRound,
 } from '../../lib/mappers.js';
+import { assertNoOtherLiveTournament } from '../../lib/live-participation.js';
 import { AppError } from '../../lib/response.js';
 import type { Env } from '../../config/env.js';
 import { enqueueNotification } from '../../lib/bullmq.js';
@@ -238,33 +239,20 @@ export class TournamentsService {
   }
 
   /**
-   * A player may only be live in one tournament at a time. "Live" means they
-   * still hold a place in a tournament that has not finished — including an
-   * eliminated player who could still buy back into it.
+   * A player may only be live in one tournament at a time — see
+   * `isLiveParticipation` for the definition, which this shares with the
+   * queue-join check and the `liveTournament` field the tournaments page reads.
+   *
+   * The previous version matched on participant status alone and ignored
+   * whether the tournament had finished. Since completing a tournament left its
+   * players sitting at 'active'/'knockout', finishing one locked every player
+   * in it out of every future tournament. Migration 14 retires those rows and
+   * `complete()` now retires them going forward, so keying off the tournament's
+   * status is safe and `idx_one_live_tournament_per_user` still only ever sees
+   * one live row per player.
    */
   async assertNoOtherLiveTournament(userId: string, tournamentId: string) {
-    // The status list must stay in step with idx_one_live_tournament_per_user
-    // (migration 12). It used to also require the tournament itself to be
-    // open/closed/in_progress, so a player left 'active' in a completed
-    // tournament passed this check and then tripped the index as a raw 23505.
-    const result = await this.pool.query(
-      `SELECT t.id, t.name
-       FROM tournament_participants tp
-       JOIN tournaments t ON t.id = tp.tournament_id
-       WHERE tp.user_id = $1
-         AND tp.tournament_id <> $2
-         AND tp.status IN ('active', 'advanced', 'knockout')
-       LIMIT 1`,
-      [userId, tournamentId]
-    );
-    const other = result.rows[0];
-    if (other) {
-      throw new AppError(
-        'CONFLICT',
-        `You are already playing in "${other.name}" — finish or withdraw from it before joining another tournament`,
-        409
-      );
-    }
+    await assertNoOtherLiveTournament(this.pool, userId, tournamentId);
   }
 
   async register(tournamentId: string, userId: string, input: RegisterTournamentInput) {
