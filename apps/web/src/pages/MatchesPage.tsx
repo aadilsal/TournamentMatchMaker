@@ -1,6 +1,13 @@
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Match, MatchResult, User, BuybackOption } from '@vr-tournament/shared';
+import type {
+  Match,
+  MatchResult,
+  User,
+  BuybackOption,
+  QueueStatus,
+  QueuePairFailedEvent,
+} from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import {
@@ -8,11 +15,14 @@ import {
   LIVE_STALE_TIME,
   SAFETY_POLL_MS,
   matchesNeedPolling,
+  queueNeedsPolling,
 } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Badge, matchStatusBadge } from '@/components/ui/badge';
 import { ListSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
+import { CricketBallLoader } from '@/components/ui/cricket-loader';
+import { useSocketEvent } from '@/hooks/useSocket';
 import { MatchBuybackPrompt } from '@/components/tournament/MatchBuybackPrompt';
 import { BuybackBanner } from '@/components/tournament/BuybackBanner';
 import { useState } from 'react';
@@ -41,6 +51,23 @@ export function MatchesPage() {
     queryFn: () => apiGet<BuybackOption[]>('/players/me/buyback-options'),
     staleTime: LIVE_STALE_TIME,
     refetchInterval: matchesNeedPolling(matches) ? SAFETY_POLL_MS : false,
+  });
+
+  // Searching for an opponent is part of "my matches" from the player's point
+  // of view — without this the page looks empty between entering a tournament
+  // and being paired, and there is nothing to tell them anything is happening.
+  // `match:found` already invalidates both queries, so this swaps itself out
+  // for the real match the moment the pairing lands.
+  const { data: queueStatus } = useQuery({
+    queryKey: LIVE_QUERY_KEYS.matchmakingStatus,
+    queryFn: () => apiGet<QueueStatus>('/matchmaking/status'),
+    staleTime: LIVE_STALE_TIME,
+    refetchInterval: (q) => (queueNeedsPolling(q.state.data) ? SAFETY_POLL_MS : false),
+  });
+
+  const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
+    setQueueNotice(data.message);
   });
 
   const confirmMutation = useMutation({
@@ -113,6 +140,28 @@ export function MatchesPage() {
         </p>
       </motion.div>
 
+      {queueStatus?.inQueue && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-5 flex items-center gap-4"
+        >
+          <CricketBallLoader size="md" />
+          <div className="min-w-0">
+            <p className="font-semibold">Finding opponent…</p>
+            <p className="text-sm text-[var(--color-muted-foreground)]">
+              {queueNotice ??
+                (queueStatus.queueSize && queueStatus.queueSize > 1
+                  ? `${queueStatus.queueSize} players in queue — matching now…`
+                  : 'Waiting for another player to join…')}
+            </p>
+            <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
+              Your match will appear here as soon as you&rsquo;re paired.
+            </p>
+          </div>
+        </motion.div>
+      )}
+
       {buybackOptions.length > 0 && (
         <div className="space-y-3">
           {buybackOptions.map((option) => (
@@ -123,7 +172,7 @@ export function MatchesPage() {
 
       {isLoading ? (
         <ListSkeleton count={3} />
-      ) : active.length === 0 && history.length === 0 ? (
+      ) : active.length === 0 && history.length === 0 && !queueStatus?.inQueue ? (
         <EmptyState
           icon={<Swords className="h-12 w-12" />}
           title="No active matches"
