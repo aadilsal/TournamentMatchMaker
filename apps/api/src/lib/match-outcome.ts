@@ -61,24 +61,11 @@ export async function applyMatchOutcome(
     if (match.tournament_id) {
       const roundNumber = match.round_number ?? 1;
       for (const userId of [match.player1_id, match.player2_id]) {
-        const reg = await pool.query(
-          `SELECT booking_id FROM tournament_registrations WHERE tournament_id = $1 AND user_id = $2`,
-          [match.tournament_id, userId]
-        );
-        let preferredVenueId: string | null = null;
-        const bookingId = reg.rows[0]?.booking_id ?? null;
-        if (bookingId) {
-          const v = await pool.query(
-            `SELECT ts.venue_id FROM bookings b JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
-            [bookingId]
-          );
-          preferredVenueId = v.rows[0]?.venue_id ?? null;
-        }
+        // requeuePlayer recovers the player's chosen play window for this round,
+        // so a rematch keeps a playable slot for VR and venue players alike.
         await requeuePlayer(pool, redis, userId, {
           tournamentId: match.tournament_id,
           roundNumber,
-          preferredVenueId,
-          bookingId,
         }, env);
       }
     }
@@ -86,6 +73,7 @@ export async function applyMatchOutcome(
     emitMatchUpdated([match.player1_id, match.player2_id], {
       matchId,
       status: 'cancelled',
+      tournamentId: match.tournament_id,
     });
 
     return {
@@ -107,7 +95,6 @@ export async function applyMatchOutcome(
 
   const client = await pool.connect();
   let winnerNextRound: number | null = null;
-  let requeueMeta = { preferredVenueId: null as string | null, bookingId: null as string | null };
 
   try {
     await client.query('BEGIN');
@@ -143,18 +130,20 @@ export async function applyMatchOutcome(
         [match.tournament_id, loserId]
       );
 
-      const reg = await client.query(
-        `SELECT booking_id FROM tournament_registrations WHERE tournament_id = $1 AND user_id = $2`,
-        [match.tournament_id, winnerId]
+      // The winner carries their previously chosen play window into the next
+      // round by default; requeuePlayer resolves it from tournament_round_slots.
+      await client.query(
+        `INSERT INTO tournament_round_slots
+           (tournament_id, user_id, round_number, time_slot_id, venue_id, booking_id)
+         SELECT rs.tournament_id, rs.user_id, $1, rs.time_slot_id, rs.venue_id, rs.booking_id
+         FROM tournament_round_slots rs
+         JOIN time_slots ts ON ts.id = rs.time_slot_id
+         WHERE rs.tournament_id = $2 AND rs.user_id = $3 AND ts.end_time > NOW()
+         ORDER BY rs.round_number DESC
+         LIMIT 1
+         ON CONFLICT (tournament_id, user_id, round_number) DO NOTHING`,
+        [winnerNextRound, match.tournament_id, winnerId]
       );
-      const bookingId = reg.rows[0]?.booking_id ?? null;
-      if (bookingId) {
-        const v = await client.query(
-          `SELECT ts.venue_id FROM bookings b JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
-          [bookingId]
-        );
-        requeueMeta = { preferredVenueId: v.rows[0]?.venue_id ?? null, bookingId };
-      }
     }
 
     await client.query('COMMIT');
@@ -172,8 +161,6 @@ export async function applyMatchOutcome(
     await requeuePlayer(pool, redis, winnerId, {
       tournamentId: match.tournament_id,
       roundNumber: winnerNextRound,
-      preferredVenueId: requeueMeta.preferredVenueId,
-      bookingId: requeueMeta.bookingId,
     }, env);
     await removeFromQueue(redis, loserId);
   }
@@ -198,13 +185,17 @@ export async function applyMatchOutcome(
   emitMatchUpdated([match.player1_id, match.player2_id], {
     matchId,
     status: 'completed',
+    tournamentId: match.tournament_id,
   });
 
   return { status: 'completed', result: finalResult };
 }
 
+/** Accepts a pool or a checked-out client so callers can run it inside a transaction. */
+type Queryable = Pick<Pool, 'query'>;
+
 export async function assertMatchSlotPlayable(
-  pool: Pool,
+  pool: Queryable,
   timeSlotId: string | null
 ): Promise<void> {
   if (!timeSlotId) return;

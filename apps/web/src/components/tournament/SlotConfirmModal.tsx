@@ -10,8 +10,6 @@ import { formatSlotTime } from '@/components/slots/SlotPicker';
 
 import { MapPin, Clock, Trophy, X, Sparkles, Loader2 } from 'lucide-react';
 
-import type { Booking, TournamentRegistration } from '@vr-tournament/shared';
-
 
 
 interface SlotConfirmModalProps {
@@ -21,6 +19,9 @@ interface SlotConfirmModalProps {
   tournamentName: string;
 
   venueName: string;
+
+  /** VR players book a play window, not a seat — hide the venue row for them. */
+  showVenue?: boolean;
 
   slotStart: string;
 
@@ -109,6 +110,8 @@ export function SlotConfirmModal({
   tournamentName,
 
   venueName,
+
+  showVenue = true,
 
   slotStart,
 
@@ -248,13 +251,17 @@ export function SlotConfirmModal({
 
                   <h2 id="slot-confirm-title" className="text-xl font-bold tracking-tight">
 
-                    Confirm booking & match
+                    {showVenue ? 'Confirm booking & match' : 'Confirm your play slot'}
 
                   </h2>
 
                   <p className="mt-1 text-sm leading-relaxed text-[var(--color-muted-foreground)]">
 
-                    We&apos;ll lock in your arena slot and start finding an opponent right away.
+                    {showVenue
+
+                      ? 'We’ll lock in your arena slot and start finding an opponent right away.'
+
+                      : 'We’ll schedule your match inside this window and start finding an opponent right away.'}
 
                   </p>
 
@@ -268,7 +275,7 @@ export function SlotConfirmModal({
 
                 <DetailRow icon={Trophy} label="Tournament" value={tournamentName} />
 
-                <DetailRow icon={MapPin} label="Venue" value={venueName} />
+                {showVenue && <DetailRow icon={MapPin} label="Venue" value={venueName} />}
 
                 <DetailRow
 
@@ -313,13 +320,17 @@ export function SlotConfirmModal({
 
                     <Loader2 className="h-4 w-4 animate-spin" />
 
-                    Booking…
+                    {showVenue ? 'Booking…' : 'Confirming…'}
 
                   </span>
 
-                ) : (
+                ) : showVenue ? (
 
                   'Book & find match'
+
+                ) : (
+
+                  'Confirm & find match'
 
                 )}
 
@@ -357,14 +368,7 @@ export function SlotConfirmModal({
 
 
 
-export interface EnterTournamentResult {
-
-  registration: TournamentRegistration;
-
-  booking: Booking | null;
-
-  searching: boolean;
-
-}
+/** Canonical shape now lives in the shared package alongside the API response. */
+export type { EnterTournamentResult } from '@vr-tournament/shared';
 
 

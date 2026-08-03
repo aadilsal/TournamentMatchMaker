@@ -74,4 +74,111 @@ describe('pairing algorithm', () => {
     const pair = findBestPair(entries, now);
     expect(pair).not.toBeNull();
   });
+
+  describe('play windows', () => {
+    const HOUR = 3_600_000;
+
+    it('never pairs players whose play windows do not overlap', () => {
+      const now = Date.now();
+      const entries = [
+        {
+          userId: 'a',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + HOUR,
+          slotEndAt: now + 2 * HOUR,
+        },
+        {
+          userId: 'b',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + 5 * HOUR,
+          slotEndAt: now + 6 * HOUR,
+        },
+      ];
+      expect(findBestPair(entries, now)).toBeNull();
+    });
+
+    it('pairs players whose play windows overlap', () => {
+      const now = Date.now();
+      const entries = [
+        {
+          userId: 'a',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + HOUR,
+          slotEndAt: now + 2 * HOUR,
+        },
+        {
+          userId: 'b',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + HOUR,
+          slotEndAt: now + 2 * HOUR,
+        },
+      ];
+      const pair = findBestPair(entries, now);
+      expect([pair?.candidate.userId, pair?.partner.userId].sort()).toEqual(['a', 'b']);
+    });
+
+    it('picks the opponent sharing a window over one who does not', () => {
+      const now = Date.now();
+      const entries = [
+        {
+          userId: 'a',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + HOUR,
+          slotEndAt: now + 2 * HOUR,
+        },
+        {
+          userId: 'far',
+          joinedAt: now - 41000,
+          city: 'Karachi',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + 8 * HOUR,
+          slotEndAt: now + 9 * HOUR,
+        },
+        {
+          userId: 'near',
+          joinedAt: now - 39000,
+          city: 'Karachi',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + 90 * 60_000,
+          slotEndAt: now + 3 * HOUR,
+        },
+      ];
+      const pair = findBestPair(entries, now);
+      expect([pair?.candidate.userId, pair?.partner.userId].sort()).toEqual(['a', 'near']);
+    });
+
+    it('leaves open-queue players (no window) pairable with anyone', () => {
+      const now = Date.now();
+      const entries = [
+        { userId: 'a', joinedAt: now - 40000, city: 'Lahore', skillTier: 3, roundNumber: 1 },
+        {
+          userId: 'b',
+          joinedAt: now - 40000,
+          city: 'Lahore',
+          skillTier: 3,
+          roundNumber: 1,
+          slotStartAt: now + 5 * HOUR,
+          slotEndAt: now + 6 * HOUR,
+        },
+      ];
+      expect(findBestPair(entries, now)).not.toBeNull();
+    });
+  });
 });

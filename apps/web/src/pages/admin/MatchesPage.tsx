@@ -4,13 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import type { Match, Tournament } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import {
+  AdminQueryError,
   AdminFilterBar,
   AdminFilterField,
   AdminFilterSelect,
   AdminPageHeader,
   AdminTableFooter,
   DataTable,
-  StatusPill,
+  StatusBadge,
 } from '@/components/admin/AdminUi';
 import { Tabs } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -91,7 +92,9 @@ export function AdminMatchesPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="matches" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>
@@ -111,7 +114,7 @@ export function AdminMatchesPage() {
                 </Link>
               ),
               tournament: m.tournamentName ?? '—',
-              status: <StatusPill status={m.status} />,
+              status: <StatusBadge status={m.status} />,
               round: m.roundNumber ?? '—',
               venue: m.venue?.name ?? '—',
               scheduled: m.scheduledAt

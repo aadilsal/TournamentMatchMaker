@@ -13,7 +13,10 @@ export async function processCloseRoundJob(_job: Job, pool: Pool) {
     `SELECT tr.tournament_id, tr.round_number
      FROM tournament_rounds tr
      JOIN tournaments t ON t.id = tr.tournament_id
-     WHERE tr.status = 'active' AND tr.ends_at < NOW() AND t.phase = 'normal'`
+     WHERE tr.status = 'active'
+       AND tr.ends_at < NOW()
+       AND t.phase = 'normal'
+       AND t.status = 'in_progress'`
   );
 
   for (const round of expired.rows) {

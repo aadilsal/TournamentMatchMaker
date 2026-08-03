@@ -112,11 +112,19 @@ export class MatchesService {
       const p2Confirmed = confirms[match.player2_id] === '1';
 
       if (p1Confirmed && p2Confirmed) {
-        if (match.time_slot_id) {
-          await finalizeMatchSlotBookings(client, this.redis, match.time_slot_id, [
-            match.player1_id,
-            match.player2_id,
-          ]);
+        // Only players attending in person take a seat — VR players share the
+        // play window from home.
+        const attendingPlayerIds = [
+          ...(match.p1_has_vr ? [] : [match.player1_id]),
+          ...(match.p2_has_vr ? [] : [match.player2_id]),
+        ];
+        if (match.time_slot_id && attendingPlayerIds.length > 0) {
+          await finalizeMatchSlotBookings(
+            client,
+            this.redis,
+            match.time_slot_id,
+            attendingPlayerIds
+          );
         }
 
         await client.query(
@@ -143,6 +151,7 @@ export class MatchesService {
       emitMatchUpdated([match.player1_id, match.player2_id], {
         matchId,
         status: result.status as MatchUpdatedEvent['status'],
+        tournamentId: match.tournament_id,
       });
       if (match.time_slot_id && result.status === 'confirmed') {
         const slotRow = await this.pool.query(
@@ -223,6 +232,7 @@ export class MatchesService {
       emitMatchUpdated([match.player1_id, match.player2_id], {
         matchId,
         status: 'cancelled',
+        tournamentId: match.tournament_id,
       });
 
       if (match.time_slot_id) {

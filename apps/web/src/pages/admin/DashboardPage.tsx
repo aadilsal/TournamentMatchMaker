@@ -34,14 +34,20 @@ export function AdminDashboardPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Users" value={data.users} sub={`${data.players} players`} />
-        <StatCard label="Venues" value={data.venues} sub={`${data.activeVenues} active`} />
+        <StatCard label="Users" value={data.users} sub={`${data.players} players`} to="/admin/users" />
+        <StatCard
+          label="Venues"
+          value={data.venues}
+          sub={`${data.activeVenues} active`}
+          to="/admin/venues"
+        />
         <StatCard
           label="Ongoing matches"
           value={data.matches.ongoing}
           sub={`${data.matches.total} total`}
+          to="/admin/matches?status=in_progress"
         />
-        <StatCard label="In queue" value={data.queueSize} />
+        <StatCard label="In queue" value={data.queueSize} to="/admin/queue" />
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -49,20 +55,35 @@ export function AdminDashboardPage() {
           label="Open tournaments"
           value={data.tournaments.open}
           sub={`${data.tournaments.in_progress} in progress`}
+          to="/admin/tournaments?status=open"
         />
         <StatCard
           label="Bookings"
           value={data.bookings.confirmed}
           sub={`${data.bookings.pending} pending`}
+          to="/admin/bookings?status=confirmed"
         />
         <StatCard
           label="Buybacks"
           value={data.buybacks.completed}
           sub={`${data.buybacks.pending} pending`}
+          to="/admin/buybacks?status=completed"
         />
-        <StatCard label="Upcoming matches" value={data.matches.upcoming} />
-        <StatCard label="Past matches" value={data.matches.past} />
-        <StatCard label="Failed notifications" value={data.notificationsFailed} />
+        <StatCard
+          label="Upcoming matches"
+          value={data.matches.upcoming}
+          to="/admin/matches?status=confirmed"
+        />
+        <StatCard
+          label="Past matches"
+          value={data.matches.past}
+          to="/admin/matches?status=completed"
+        />
+        <StatCard
+          label="Failed notifications"
+          value={data.notificationsFailed}
+          to="/admin/notifications?status=failed"
+        />
       </div>
     </div>
   );

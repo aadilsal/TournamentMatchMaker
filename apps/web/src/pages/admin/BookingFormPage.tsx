@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { TimeSlot, Venue } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import {
   adminBookingFormSchema,
+  toAdminBookingInput,
   validateAdminForm,
   type FieldErrors,
 } from '@/lib/admin-form-validation';
@@ -12,11 +13,12 @@ import { UserPicker } from '@/components/admin/UserPicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminBookingFormPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [errors, setErrors] = useState<FieldErrors>({});
   const [userId, setUserId] = useState('');
   const [venueId, setVenueId] = useState('');
@@ -34,26 +36,24 @@ export function AdminBookingFormPage() {
     enabled: !!venueId,
   });
 
-  const create = useMutation({
+  const create = useAdminMutation({
     mutationFn: (body: { userId: string; timeSlotId: string }) => apiPost('/admin/bookings', body),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
-      navigate('/admin/bookings');
-    },
+    successMessage: 'Booking created.',
+    invalidate: [['admin', 'bookings']],
+    onSuccess: () => navigate('/admin/bookings'),
   });
 
+  // 'full' slots can't take another booking; 'locked' ones are mid-transaction.
+  const bookableSlots = slots.filter((s) => s.status === 'available');
+
   const handleSubmit = () => {
-    const result = validateAdminForm(adminBookingFormSchema, { userId, timeSlotId });
+    const result = validateAdminForm(adminBookingFormSchema, { userId, venueId, timeSlotId });
     if (!result.ok) {
       setErrors(result.errors);
       return;
     }
-    if (!venueId) {
-      setErrors({ venueId: 'Select a venue' });
-      return;
-    }
     setErrors({});
-    create.mutate(result.data);
+    create.mutate(toAdminBookingInput(result.data));
   };
 
   return (
@@ -63,6 +63,7 @@ export function AdminBookingFormPage() {
       <AdminCard className="p-6 max-w-xl space-y-4">
         <div>
           <UserPicker
+            error={errors.userId}
             value={userId}
             onChange={(id) => {
               setUserId(id);
@@ -77,8 +78,8 @@ export function AdminBookingFormPage() {
         </div>
         <div>
           <Label className="text-xs">Venue</Label>
-          <select
-            className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm mt-1"
+          <Select
+            className="mt-1"
             value={venueId}
             onChange={(e) => {
               setVenueId(e.target.value);
@@ -94,17 +95,25 @@ export function AdminBookingFormPage() {
             {venues.map((v) => (
               <option key={v.id} value={v.id}>{v.name}</option>
             ))}
-          </select>
+          </Select>
           <AdminFieldError message={errors.venueId} />
         </div>
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value);
+              // Slots are per-date; keeping the old id would submit a slot from another day.
+              setTimeSlotId('');
+            }}
+          />
         </div>
         <div>
           <Label className="text-xs">Time slot</Label>
-          <select
-            className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm mt-1"
+          <Select
+            className="mt-1"
             value={timeSlotId}
             onChange={(e) => {
               setTimeSlotId(e.target.value);
@@ -117,19 +126,25 @@ export function AdminBookingFormPage() {
             disabled={!venueId}
           >
             <option value="">Select slot…</option>
-            {slots
-              .filter((s) => s.status !== 'full')
-              .map((s) => (
-                <option key={s.id} value={s.id}>
-                  {new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  {' '}({s.bookedCount}/{s.maxCapacity})
-                </option>
-              ))}
-          </select>
+            {bookableSlots.map((s) => (
+              <option key={s.id} value={s.id}>
+                {new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {' '}({s.bookedCount}/{s.maxCapacity})
+              </option>
+            ))}
+          </Select>
+          {venueId && bookableSlots.length === 0 && (
+            <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+              {slots.length === 0
+                ? 'No slots exist for this date — generate them on the venue page first.'
+                : 'Every slot on this date is full or locked. Try another date.'}
+            </p>
+          )}
           <AdminFieldError message={errors.timeSlotId} />
         </div>
+        <AdminFieldError message={errors._form} />
         <Button onClick={handleSubmit} disabled={create.isPending}>
-          Create booking
+          {create.isPending ? 'Creating…' : 'Create booking'}
         </Button>
       </AdminCard>
     </div>

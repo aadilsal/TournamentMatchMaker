@@ -31,3 +31,23 @@ export function pickEarlierSlot<T extends { startTime: Date | string }>(
   if (!b) return a;
   return new Date(a.startTime).getTime() <= new Date(b.startTime).getTime() ? a : b;
 }
+
+/**
+ * Two players can only be paired when their chosen play windows overlap — the
+ * match carries a single time_slot_id, and both players must be able to submit
+ * a score inside it. Identical slot ids always overlap.
+ */
+export function slotsOverlap(
+  aStart: Date | string | number | null | undefined,
+  aEnd: Date | string | number | null | undefined,
+  bStart: Date | string | number | null | undefined,
+  bEnd: Date | string | number | null | undefined
+): boolean {
+  if (aStart == null || aEnd == null || bStart == null || bEnd == null) return false;
+  const as = new Date(aStart).getTime();
+  const ae = new Date(aEnd).getTime();
+  const bs = new Date(bStart).getTime();
+  const be = new Date(bEnd).getTime();
+  if ([as, ae, bs, be].some((n) => !Number.isFinite(n))) return false;
+  return as < be && bs < ae;
+}

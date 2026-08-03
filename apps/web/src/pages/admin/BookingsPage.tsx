@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { AdminBookingRow, Venue } from '@vr-tournament/shared';
 import { apiDelete, apiGet } from '@/lib/api';
 import {
+  AdminQueryError,
   AdminFilterBar,
   AdminFilterField,
   AdminFilterSearch,
@@ -11,14 +12,16 @@ import {
   AdminPageHeader,
   AdminTableFooter,
   DataTable,
-  StatusPill,
+  StatusBadge,
 } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 export function AdminBookingsPage() {
-  const queryClient = useQueryClient();
+  const askConfirm = useConfirm();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [venueId, setVenueId] = useState('');
@@ -38,12 +41,35 @@ export function AdminBookingsPage() {
     },
   });
 
-  const cancel = useMutation({
-    mutationFn: (id: string) => apiDelete(`/admin/bookings/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
-    },
+  const cancel = useAdminMutation({
+    mutationFn: (booking: AdminBookingRow) => apiDelete(`/admin/bookings/${booking.id}`),
+    successMessage: 'Booking cancelled and the slot released.',
+    invalidate: [['admin', 'bookings']],
   });
+
+  const handleCancel = async (booking: AdminBookingRow) => {
+    const who = booking.username ?? 'this player';
+    const when = booking.slotStart
+      ? new Date(booking.slotStart).toLocaleString([], {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : 'their slot';
+    const ok = await askConfirm({
+      title: 'Cancel this booking?',
+      description: (
+        <>
+          {who}&apos;s booking at {booking.venueName ?? 'the venue'} for <strong>{when}</strong> will be
+          cancelled and the slot freed for someone else. They are not automatically rebooked.
+        </>
+      ),
+      confirmLabel: 'Cancel booking',
+      cancelLabel: 'Keep booking',
+    });
+    if (ok) cancel.mutate(booking);
+  };
 
   return (
     <div>
@@ -81,7 +107,9 @@ export function AdminBookingsPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="bookings" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>
@@ -105,15 +133,16 @@ export function AdminBookingsPage() {
                     minute: '2-digit',
                   })
                 : '—',
-              status: <StatusPill status={b.status} />,
+              status: <StatusBadge status={b.status} />,
               created: new Date(b.createdAt).toLocaleString(),
               actions:
                 b.status === 'confirmed' ? (
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="text-destructive"
-                    onClick={() => cancel.mutate(b.id)}
+                    className="text-[var(--color-destructive)]"
+                    onClick={() => handleCancel(b)}
+                    disabled={cancel.isPending}
                   >
                     Cancel
                   </Button>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { User, UserRole } from '@vr-tournament/shared';
 import {
+  AdminQueryError,
   AdminFilterBar,
   AdminFilterField,
   AdminFilterSearch,
@@ -61,7 +62,9 @@ export function AdminUsersPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="users" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>

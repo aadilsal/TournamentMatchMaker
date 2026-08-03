@@ -44,12 +44,29 @@ export async function processExpireUnplayedSlotsJob(
       }
     }
 
+    // Covers VR players too: they hold a play window in tournament_round_slots
+    // without a venue booking, so a bookings-only query never saw them and they
+    // stayed queued forever against a window that had already closed.
     const queuedWithExpiredSlots = await client.query(
-      `SELECT DISTINCT tr.user_id, tr.tournament_id, b.id AS booking_id
-       FROM tournament_registrations tr
-       JOIN bookings b ON b.id = tr.booking_id AND b.status = 'confirmed'
-       JOIN time_slots ts ON ts.id = b.time_slot_id
-       WHERE ts.end_time < NOW()`
+      `SELECT DISTINCT user_id, tournament_id FROM (
+         SELECT tr.user_id, tr.tournament_id
+         FROM tournament_registrations tr
+         JOIN bookings b ON b.id = tr.booking_id AND b.status = 'confirmed'
+         JOIN time_slots ts ON ts.id = b.time_slot_id
+         WHERE ts.end_time < NOW()
+         UNION
+         SELECT rs.user_id, rs.tournament_id
+         FROM tournament_round_slots rs
+         JOIN time_slots ts ON ts.id = rs.time_slot_id
+         WHERE ts.end_time < NOW()
+       ) expired
+       WHERE NOT EXISTS (
+         SELECT 1 FROM tournament_round_slots live
+         JOIN time_slots lts ON lts.id = live.time_slot_id
+         WHERE live.user_id = expired.user_id
+           AND live.tournament_id = expired.tournament_id
+           AND lts.end_time > NOW()
+       )`
     );
 
     for (const row of queuedWithExpiredSlots.rows) {

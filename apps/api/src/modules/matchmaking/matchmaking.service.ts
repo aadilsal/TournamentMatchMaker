@@ -56,6 +56,26 @@ export class MatchmakingService {
       if (status && !['active', 'advanced'].includes(status)) {
         throw new AppError('FORBIDDEN', 'You are eliminated from this tournament', 403);
       }
+
+      // One live tournament at a time — the queue is another way in, so it needs
+      // the same guard as POST /tournaments/:id/enter.
+      const otherLive = await this.pool.query(
+        `SELECT t.name
+         FROM tournament_participants tp
+         JOIN tournaments t ON t.id = tp.tournament_id
+         WHERE tp.user_id = $1 AND tp.tournament_id <> $2
+           AND tp.status <> 'out'
+           AND t.status IN ('open', 'closed', 'in_progress')
+         LIMIT 1`,
+        [userId, input.tournamentId]
+      );
+      if (otherLive.rows[0]) {
+        throw new AppError(
+          'CONFLICT',
+          `You are already playing in "${otherLive.rows[0].name}" — finish or withdraw from it before joining another tournament`,
+          409
+        );
+      }
     }
 
     if (input.preferredVenueId) {
@@ -80,6 +100,12 @@ export class MatchmakingService {
     }
 
     let roundNumber = 1;
+    let slotId: string | null = null;
+    let slotStartAt: number | null = null;
+    let slotEndAt: number | null = null;
+    let bookingId: string | null = null;
+    let preferredVenueId = input.preferredVenueId ?? null;
+
     if (input.tournamentId) {
       const pResult = await this.pool.query(
         `SELECT round_number FROM tournament_participants
@@ -87,6 +113,30 @@ export class MatchmakingService {
         [input.tournamentId, userId]
       );
       roundNumber = pResult.rows[0]?.round_number ?? 1;
+
+      // A tournament match needs a play window for both players — VR included.
+      const slotRow = await this.pool.query(
+        `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
+         FROM tournament_round_slots rs
+         JOIN time_slots ts ON ts.id = rs.time_slot_id
+         WHERE rs.tournament_id = $1 AND rs.user_id = $2 AND ts.end_time > NOW()
+         ORDER BY (rs.round_number = $3) DESC, rs.round_number DESC
+         LIMIT 1`,
+        [input.tournamentId, userId, roundNumber]
+      );
+      const rs = slotRow.rows[0];
+      if (!rs) {
+        throw new AppError(
+          'BAD_REQUEST',
+          'Pick a time slot for this round before entering',
+          400
+        );
+      }
+      slotId = rs.time_slot_id;
+      slotStartAt = new Date(rs.start_time).getTime();
+      slotEndAt = new Date(rs.end_time).getTime();
+      bookingId = rs.booking_id ?? null;
+      preferredVenueId = preferredVenueId ?? rs.venue_id ?? null;
     }
 
     const joinedAt = Date.now();
@@ -102,8 +152,12 @@ export class MatchmakingService {
       longitude: user.longitude,
       joinedAt,
       tournamentId: input.tournamentId,
-      preferredVenueId: input.preferredVenueId,
+      preferredVenueId,
       roundNumber,
+      bookingId,
+      slotId,
+      slotStartAt,
+      slotEndAt,
     });
 
     const multi = this.redis.multi();

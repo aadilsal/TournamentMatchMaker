@@ -1,29 +1,49 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import type { TimeSlot, Tournament, TournamentRound, User, Venue } from '@vr-tournament/shared';
-import { isSlotWithinWindow } from '@vr-tournament/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  EnterTournamentResult,
+  TimeSlot,
+  Tournament,
+  TournamentRoundSlot,
+  User,
+  Venue,
+} from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
-import { LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
+import { LIVE_STALE_TIME, SAFETY_POLL_MS, invalidateTournamentQueries } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { DetailPageSkeleton } from '@/components/ui/route-fallback';
-import { MapPin, Clock, ChevronRight } from 'lucide-react';
+import { MapPin, Clock, ChevronRight, Headset } from 'lucide-react';
 import { motion } from 'motion/react';
-import { SlotConfirmModal, type EnterTournamentResult } from '@/components/tournament/SlotConfirmModal';
+import { SlotConfirmModal } from '@/components/tournament/SlotConfirmModal';
 import { SlotPicker, todayString } from '@/components/slots/SlotPicker';
 
 type Step = 'venue' | 'slot';
 
+type SlotOption = TimeSlot & {
+  venue: { id: string; name: string; city: string; address: string };
+};
+
+interface SlotOptionsResponse {
+  roundNumber: number;
+  requiresVenue: boolean;
+  round: { startsAt: string; endsAt: string } | null;
+  defaultTimeSlotId: string | null;
+  previousSlot: TournamentRoundSlot | null;
+  slots: SlotOption[];
+}
+
 export function PlayFlowPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const tournamentId = searchParams.get('tournament');
 
   const [step, setStep] = useState<Step>('venue');
   const [selectedVenue, setSelectedVenue] = useState<Venue | null>(null);
   const [selectedDate, setSelectedDate] = useState(todayString());
-  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  const [selectedSlot, setSelectedSlot] = useState<SlotOption | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
@@ -43,115 +63,149 @@ export function PlayFlowPage() {
     enabled: !!tournamentId,
   });
 
-  const { data: rounds = [] } = useQuery({
-    queryKey: ['tournament-rounds', tournamentId],
-    queryFn: () => apiGet<TournamentRound[]>(`/tournaments/${tournamentId}/rounds`),
-    enabled: !!tournamentId,
-  });
-
-  const activeRound = useMemo(
-    () =>
-      rounds.find(
-        (round) =>
-          round.roundNumber === tournament?.currentRoundNumber && round.status === 'active'
-      ) ?? null,
-    [rounds, tournament?.currentRoundNumber]
-  );
+  const hasVr = !!profile?.hasVrHeadset;
+  // VR players play from home, so they only pick a time; venue players pick
+  // where first, then when.
+  const needsVenue = !!profile && !hasVr;
 
   const { data: venues = [] } = useQuery({
     queryKey: ['venues-play'],
     queryFn: () => apiGet<Venue[]>('/venues?limit=50'),
-    enabled: !profile?.hasVrHeadset,
+    enabled: needsVenue,
   });
 
-  const { data: slots = [], isLoading: slotsLoading } = useQuery({
-    queryKey: ['slots', selectedVenue?.id, selectedDate],
-    queryFn: () => apiGet<TimeSlot[]>(`/venues/${selectedVenue!.id}/slots?date=${selectedDate}`),
-    enabled: !!selectedVenue?.id && step === 'slot',
+  // The slot the player already holds in this tournament. Drives the defaults so
+  // re-entering for a new round is one click rather than a full re-pick.
+  const { data: previousRoundSlot } = useQuery({
+    queryKey: ['tournament-my-slot', tournamentId],
+    queryFn: () =>
+      apiGet<TournamentRoundSlot | null>(`/tournaments/${tournamentId}/my-slot`).catch(() => null),
+    enabled: !!tournamentId && !!getAccessToken(),
+  });
+
+  // Jump straight to the slot step on the venue the player used last round.
+  useEffect(() => {
+    if (!needsVenue || selectedVenue || !previousRoundSlot?.venueId) return;
+    const venue = venues.find((v) => v.id === previousRoundSlot.venueId);
+    if (venue) {
+      setSelectedVenue(venue);
+      setStep('slot');
+    }
+  }, [needsVenue, selectedVenue, previousRoundSlot, venues]);
+
+  // Show the day their previous slot falls on so the preselection is visible.
+  const [dateInitialised, setDateInitialised] = useState(false);
+  useEffect(() => {
+    if (dateInitialised || !previousRoundSlot?.slot) return;
+    const start = new Date(previousRoundSlot.slot.startTime);
+    if (start.getTime() > Date.now()) {
+      setSelectedDate(start.toISOString().split('T')[0]!);
+    }
+    setDateInitialised(true);
+  }, [previousRoundSlot, dateInitialised]);
+
+  // Slots are resolved server-side against the current round window, so the
+  // list only ever contains slots the player can actually be scheduled into.
+  const slotStepReady = hasVr || !!selectedVenue;
+  const { data: slotOptions, isLoading: slotsLoading } = useQuery({
+    queryKey: ['tournament-slot-options', tournamentId, selectedDate, selectedVenue?.id ?? null],
+    queryFn: () => {
+      const params = new URLSearchParams({ date: selectedDate });
+      if (selectedVenue?.id) params.set('venueId', selectedVenue.id);
+      return apiGet<SlotOptionsResponse>(`/tournaments/${tournamentId}/slot-options?${params}`);
+    },
+    enabled: !!tournamentId && !!profile && slotStepReady,
     staleTime: LIVE_STALE_TIME,
-    refetchInterval: step === 'slot' ? SAFETY_POLL_MS : false,
+    refetchInterval: SAFETY_POLL_MS,
   });
 
-  const bookableSlots = useMemo(() => {
-    if (!activeRound) return slots;
-    return slots.filter((slot) =>
-      isSlotWithinWindow(slot.startTime, slot.endTime, activeRound.startsAt, activeRound.endsAt)
-    );
-  }, [slots, activeRound]);
+  const slots = useMemo(() => slotOptions?.slots ?? [], [slotOptions]);
+  const previousSlotId = slotOptions?.defaultTimeSlotId ?? previousRoundSlot?.timeSlotId ?? null;
+
+  // Re-entering a later round defaults to the slot the player used last round.
+  useEffect(() => {
+    if (selectedSlot || !previousSlotId) return;
+    const match = slots.find((slot) => slot.id === previousSlotId);
+    if (match) setSelectedSlot(match);
+  }, [previousSlotId, slots, selectedSlot]);
+
+  // VR players skip the venue step entirely.
+  useEffect(() => {
+    if (hasVr) setStep('slot');
+  }, [hasVr]);
 
   const enterMutation = useMutation({
     mutationFn: () =>
       apiPost<EnterTournamentResult>(`/tournaments/${tournamentId}/enter`, {
-        venueId: selectedVenue!.id,
+        ...(needsVenue && selectedVenue ? { venueId: selectedVenue.id } : {}),
         timeSlotId: selectedSlot!.id,
       }),
     onSuccess: () => {
       setShowConfirm(false);
-      navigate('/bookings');
+      // The registration count on the tournament list, detail page and admin
+      // panel all change as a result of this — refresh them immediately rather
+      // than leaving a stale "0 registered" behind.
+      invalidateTournamentQueries(queryClient, tournamentId ?? undefined);
+      navigate(needsVenue ? '/bookings' : '/matches');
     },
   });
 
-  const vrEnterMutation = useMutation({
-    mutationFn: () => apiPost<EnterTournamentResult>(`/tournaments/${tournamentId}/enter`, {}),
-    onSuccess: () => navigate('/tournaments'),
-  });
+  if (tournamentLoading || !tournament || !profile) return <DetailPageSkeleton />;
 
-  if (tournamentLoading || !tournament) return <DetailPageSkeleton />;
-
-  if (profile?.hasVrHeadset) {
-    return (
-      <div className="max-w-lg mx-auto space-y-6 text-center">
-        <div>
-          <h1 className="text-2xl font-bold">{tournament.name}</h1>
-          <p className="text-[var(--color-muted-foreground)] mt-1">
-            You&apos;re ready with your VR headset — no venue booking needed.
-          </p>
-        </div>
-        <Button
-          size="lg"
-          className="w-full"
-          onClick={() => vrEnterMutation.mutate()}
-          disabled={vrEnterMutation.isPending}
-        >
-          {vrEnterMutation.isPending ? 'Finding match…' : 'Find my match'}
-        </Button>
-        {vrEnterMutation.isError && (
-          <p className="text-sm text-[var(--color-destructive)]">{getUserErrorMessage(vrEnterMutation.error)}</p>
-        )}
-      </div>
-    );
-  }
+  const roundNumber = slotOptions?.roundNumber ?? tournament.currentRoundNumber;
+  const steps: Step[] = needsVenue ? ['venue', 'slot'] : ['slot'];
+  const emptySlotMessage = slotOptions?.round
+    ? 'No slots on this date fall within the current tournament round. Try another day.'
+    : undefined;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
       <div>
         <h1 className="text-2xl font-bold">Join {tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          Pick a venue and time slot — we&apos;ll book and find your opponent automatically.
+          {hasVr
+            ? 'Pick the time you want to play in — we’ll find your opponent for that window.'
+            : 'Pick a venue and time slot — we’ll book and find your opponent automatically.'}
+        </p>
+        <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
+          Round {roundNumber}
+          {previousSlotId && ' · your previous slot is preselected'}
         </p>
       </div>
 
-      <div className="flex gap-2">
-        {(['venue', 'slot'] as Step[]).map((s, i) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => {
-              if (s === 'slot' && !selectedVenue) return;
-              setStep(s);
-            }}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              step === s
-                ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30'
-                : 'bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-muted-foreground)]'
-            }`}
-          >
-            {i + 1}. {s === 'venue' ? 'Venue' : 'Slot'}
-          </button>
-        ))}
-      </div>
+      {hasVr && (
+        <div className="flex items-start gap-3 rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4">
+          <Headset className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-primary)]" />
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            You play from your own headset — no venue booking, no seat taken. The slot you pick is
+            the window your match is scheduled in.
+          </p>
+        </div>
+      )}
 
-      {step === 'venue' && (
+      {steps.length > 1 && (
+        <div className="flex gap-2">
+          {steps.map((s, i) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => {
+                if (s === 'slot' && needsVenue && !selectedVenue) return;
+                setStep(s);
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                step === s
+                  ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30'
+                  : 'bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-muted-foreground)]'
+              }`}
+            >
+              {i + 1}. {s === 'venue' ? 'Venue' : 'Slot'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {needsVenue && step === 'venue' && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
           <h2 className="font-semibold flex items-center gap-2">
             <MapPin className="h-4 w-4" /> Choose venue
@@ -162,6 +216,7 @@ export function PlayFlowPage() {
               type="button"
               onClick={() => {
                 setSelectedVenue(v);
+                setSelectedSlot(null);
                 setStep('slot');
               }}
               className={`w-full text-left rounded-xl border p-4 flex items-center justify-between gap-3 transition-colors hover:border-[var(--color-primary)]/50 ${
@@ -182,35 +237,43 @@ export function PlayFlowPage() {
         </motion.div>
       )}
 
-      {step === 'slot' && selectedVenue && (
+      {step === 'slot' && slotStepReady && (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
           <h2 className="font-semibold flex items-center gap-2">
-            <Clock className="h-4 w-4" /> Choose slot at {selectedVenue.name}
+            <Clock className="h-4 w-4" />
+            {selectedVenue ? `Choose slot at ${selectedVenue.name}` : 'Choose your play slot'}
           </h2>
 
           <SlotPicker
             selectedDate={selectedDate}
-            onDateChange={setSelectedDate}
-            slots={bookableSlots}
+            onDateChange={(date) => {
+              setSelectedDate(date);
+              setSelectedSlot(null);
+            }}
+            slots={slots}
             isLoading={slotsLoading}
+            ignoreCapacity={hasVr}
             selectedSlotId={selectedSlot?.id}
             onSlotSelect={(slot) => {
-              setSelectedSlot(slot);
+              setSelectedSlot(slot as SlotOption);
               setShowConfirm(true);
             }}
-            emptyMessage={
-              activeRound && slots.length > 0 && bookableSlots.length === 0
-                ? 'No slots on this date fall within the current tournament round. Try another day.'
-                : undefined
-            }
+            emptyMessage={emptySlotMessage}
           />
+
+          {selectedSlot && !showConfirm && (
+            <Button className="w-full" onClick={() => setShowConfirm(true)}>
+              Continue with selected slot
+            </Button>
+          )}
         </motion.div>
       )}
 
       <SlotConfirmModal
-        open={showConfirm && !!selectedSlot && !!selectedVenue}
+        open={showConfirm && !!selectedSlot}
         tournamentName={tournament.name}
-        venueName={selectedVenue?.name ?? ''}
+        venueName={selectedVenue?.name ?? selectedSlot?.venue.name ?? ''}
+        showVenue={needsVenue}
         slotStart={selectedSlot?.startTime ?? ''}
         slotEnd={selectedSlot?.endTime ?? ''}
         onConfirm={() => enterMutation.mutate()}

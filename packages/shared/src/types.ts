@@ -170,20 +170,21 @@ export interface TournamentParticipant {
 
 export interface MetaCurrentMatchResponse {
   inQueue: boolean;
-  queueSize: number | null;
+  /** Tournament the player is queued for / playing in — required by `POST /solo-target`. */
+  tournamentId: string | null;
   canSubmitSoloTarget: boolean;
-  soloTarget: number | null;
   match: {
     id: string;
-    status: MatchStatus;
-    opponent: { id: string; username: string; skillTier: number };
-    venue: { id: string; name: string; city: string } | null;
-    slot: { id: string; startTime: string; endTime: string } | null;
+    opponent: string;
+    venue: string | null;
+    startTime: string | null;
+    endTime: string | null;
     chaseTarget: number | null;
     amChasing: boolean;
+    /** No target set yet and this player bats first — their score becomes the target. */
+    amSettingTarget: boolean;
     myScore: number | null;
     opponentScore: number | null;
-    scheduledAt: string | null;
   } | null;
 }
 
@@ -218,6 +219,29 @@ export interface TournamentRegistration {
   userId: string;
   bookingId: string | null;
   registeredAt: string;
+}
+
+/**
+ * The play window a player picked for one round. Non-VR players also hold a
+ * venue booking for it; VR players play from home so `bookingId`/`venueId` stay
+ * null, but they still own a slot so their match has a playable window.
+ */
+export interface TournamentRoundSlot {
+  tournamentId: string;
+  userId: string;
+  roundNumber: number;
+  timeSlotId: string;
+  venueId: string | null;
+  bookingId: string | null;
+  slot?: TimeSlot;
+  venue?: Pick<Venue, 'id' | 'name' | 'city' | 'address'>;
+}
+
+export interface EnterTournamentResult {
+  registration: TournamentRegistration;
+  booking: Booking | null;
+  roundSlot: TournamentRoundSlot | null;
+  searching: boolean;
 }
 
 export type MatchScoreSource = 'meta' | 'manual';

@@ -143,6 +143,7 @@ export class AdminTournamentsService {
       before: before as unknown as Record<string, unknown>,
       after: tournament as unknown as Record<string, unknown>,
     });
+    await this.tournaments.broadcastTournamentUpdate(id, 'status_changed');
     return tournament;
   }
 
@@ -278,6 +279,8 @@ export class AdminTournamentsService {
 
   async createRegistration(actorId: string, tournamentId: string, input: AdminCreateRegistrationInput) {
     const tournament = await this.getById(tournamentId);
+    // Same one-live-tournament rule as self-service registration.
+    await this.tournaments.assertNoOtherLiveTournament(input.userId, tournamentId);
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
@@ -303,6 +306,7 @@ export class AdminTournamentsService {
         entityId: tournamentId,
         after: { userId: input.userId },
       });
+      await this.tournaments.broadcastTournamentUpdate(tournamentId, 'registered');
       return reg;
     } catch (err) {
       await client.query('ROLLBACK');

@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import type { RedisClient } from './lib/redis.js';
 import type { Env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { publicRateLimit, authRateLimit } from './middleware/rateLimit.js';
+import { publicRateLimit, scopedRateLimit } from './middleware/rateLimit.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { createPlayersRouter } from './modules/players/players.routes.js';
 import { createVenuesRouter } from './modules/venues/venues.routes.js';
@@ -45,20 +45,37 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   });
 
   const v1 = express.Router();
+
+  // Mounted ahead of publicRateLimit: VR headsets poll far above any per-IP
+  // public budget and share a venue's public IP. The Meta router applies its own
+  // per-player limits instead.
+  v1.use('/integrations/meta', createMetaIntegrationRouter(pool, redis, env));
+
+  // Anonymous browsing only — signed-in traffic is metered per user, per feature
+  // by scopedRateLimit below so that doing several things at once (polling
+  // matches while booking a slot while searching for an opponent) never spends
+  // one feature's budget on another.
   v1.use(publicRateLimit(env));
 
   v1.use('/geo', createGeoRouter());
   v1.use('/auth', createAuthRouter(pool, redis, env));
-  v1.use('/players', authRateLimit(env), createPlayersRouter(pool, env));
-  v1.use('/venues', createVenuesRouter(pool, redis, env));
-  v1.use('/venues/:id/slots', createSlotsRouter(pool, env));
-  v1.use('/bookings', authRateLimit(env), createBookingsRouter(pool, redis, env));
-  v1.use('/tournaments', createTournamentsRouter(pool, redis, env));
-  v1.use('/matchmaking', authRateLimit(env), createMatchmakingRouter(pool, redis, env));
-  v1.use('/matches', authRateLimit(env), createMatchesRouter(pool, redis, env));
-  v1.use('/notifications', authRateLimit(env), createNotificationsRouter(pool, env));
-  v1.use('/integrations/meta', createMetaIntegrationRouter(pool, redis, env));
-  v1.use('/admin', authRateLimit(env), createAdminRouter(pool, redis, env));
+  v1.use('/players', scopedRateLimit(env, 'players'), createPlayersRouter(pool, env));
+  v1.use('/venues', scopedRateLimit(env, 'venues', { read: 600 }), createVenuesRouter(pool, redis, env));
+  v1.use('/venues/:id/slots', scopedRateLimit(env, 'slots', { read: 600 }), createSlotsRouter(pool, env));
+  v1.use('/bookings', scopedRateLimit(env, 'bookings'), createBookingsRouter(pool, redis, env));
+  v1.use(
+    '/tournaments',
+    scopedRateLimit(env, 'tournaments', { read: 600 }),
+    createTournamentsRouter(pool, redis, env)
+  );
+  v1.use('/matchmaking', scopedRateLimit(env, 'matchmaking'), createMatchmakingRouter(pool, redis, env));
+  v1.use('/matches', scopedRateLimit(env, 'matches', { read: 600 }), createMatchesRouter(pool, redis, env));
+  v1.use(
+    '/notifications',
+    scopedRateLimit(env, 'notifications', { read: 600 }),
+    createNotificationsRouter(pool, env)
+  );
+  v1.use('/admin', scopedRateLimit(env, 'admin', { read: 900, write: 300 }), createAdminRouter(pool, redis, env));
 
   app.use('/api/v1', v1);
   app.use(errorHandler);

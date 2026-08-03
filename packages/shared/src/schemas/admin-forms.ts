@@ -208,7 +208,24 @@ export function toVenueApiBody(form: AdminVenueFormInput) {
   });
 }
 
-export const adminBookingFormSchema = adminCreateBookingSchema;
+/**
+ * Booking composer. Uses its own field messages instead of the API schema's bare
+ * `.uuid()` so an empty form says "Select a player", not "Invalid uuid".
+ */
+export const adminBookingFormSchema = z.object({
+  userId: z.string().uuid('Select a player'),
+  venueId: z.string().uuid('Select a venue'),
+  timeSlotId: z.string().uuid('Select a time slot'),
+});
+
+export type AdminBookingFormInput = z.infer<typeof adminBookingFormSchema>;
+
+export function toAdminBookingInput(form: AdminBookingFormInput) {
+  return adminCreateBookingSchema.parse({
+    userId: form.userId,
+    timeSlotId: form.timeSlotId,
+  });
+}
 
 export const adminMatchFormSchema = z
   .object({
@@ -295,9 +312,178 @@ export const adminRatingFormSchema = z.object({
     .refine((v: string) => {
       const n = parseInt(v, 10);
       return Number.isInteger(n) && n >= 0;
-    }, 'Rating must be a non-negative whole number'),
+    }, 'Rating must be a non-negative whole number')
+    .refine((v: string) => parseInt(v, 10) <= 5000, 'Rating cannot exceed 5000'),
 });
 
 export type AdminRatingFormInput = z.infer<typeof adminRatingFormSchema>;
 
 export const adminPasswordFormSchema = adminResetPasswordSchema;
+
+/* -------------------------------------------------------------------------- */
+/* Inline admin forms                                                          */
+/* -------------------------------------------------------------------------- */
+
+const scoreString = (label: string) =>
+  z
+    .string()
+    .min(1, `${label} score is required`)
+    .refine((v: string) => {
+      const n = parseInt(v, 10);
+      return Number.isInteger(n) && n >= 0;
+    }, `${label} score must be 0 or greater`)
+    .refine((v: string) => parseInt(v, 10) <= 9999, `${label} score is unrealistically high`);
+
+/** Manual score override on the admin match detail screen. */
+export const adminScoreOverrideSchema = z.object({
+  player1Score: scoreString('Player 1'),
+  player2Score: scoreString('Player 2'),
+});
+
+export type AdminScoreOverrideInput = z.infer<typeof adminScoreOverrideSchema>;
+
+/**
+ * Types an admin may author in the broadcast composer. Deliberately narrow —
+ * system events below are emitted by the backend, never hand-sent.
+ */
+export const NOTIFICATION_TYPE_OPTIONS = [
+  { value: 'announcement', label: 'Announcement' },
+  { value: 'tournament_update', label: 'Tournament update' },
+  { value: 'match_reminder', label: 'Match reminder' },
+  { value: 'system_maintenance', label: 'System maintenance' },
+] as const;
+
+export const notificationTypeSchema = z.enum([
+  'announcement',
+  'tournament_update',
+  'match_reminder',
+  'system_maintenance',
+]);
+
+/**
+ * Types the notifications list can actually contain: the admin-authored ones
+ * above plus every type the API/worker emits. Filtering by a type the system
+ * never produces would silently return an empty table.
+ */
+export const NOTIFICATION_FILTER_TYPE_OPTIONS = [
+  ...NOTIFICATION_TYPE_OPTIONS,
+  { value: 'match_found', label: 'Match found' },
+  { value: 'match_confirmed', label: 'Match confirmed' },
+  { value: 'match_declined', label: 'Match declined' },
+  { value: 'match_expired', label: 'Match expired' },
+  { value: 'match_won', label: 'Match won' },
+  { value: 'match_lost', label: 'Match lost' },
+  { value: 'opponent_withdrew_requeued', label: 'Opponent withdrew' },
+  { value: 'tournament_registered', label: 'Tournament registered' },
+  { value: 'buyback_completed', label: 'Buyback completed' },
+  { value: 'admin_test', label: 'Admin test' },
+] as const;
+
+/** Broadcast composer on the admin notifications screen. */
+export const adminBroadcastFormSchema = z.object({
+  type: notificationTypeSchema,
+  message: z
+    .string()
+    .trim()
+    .min(3, 'Message must be at least 3 characters')
+    .max(500, 'Message must be 500 characters or fewer'),
+});
+
+export type AdminBroadcastFormInput = z.infer<typeof adminBroadcastFormSchema>;
+
+/** Max span a single slot-generation run may cover, to avoid runaway inserts. */
+export const MAX_SLOT_GENERATION_DAYS = 31;
+
+function parseDateOnly(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** Slot generation on the admin venue detail screen. */
+export const adminSlotGenerationFormSchema = z
+  .object({
+    startDate: z.string().min(1, 'Start date is required'),
+    endDate: z.string().min(1, 'End date is required'),
+  })
+  .superRefine((data, ctx) => {
+    const start = parseDateOnly(data.startDate);
+    const end = parseDateOnly(data.endDate);
+
+    if (!start) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['startDate'], message: 'Invalid start date' });
+    }
+    if (!end) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['endDate'], message: 'Invalid end date' });
+    }
+    if (!start || !end) return;
+
+    if (end < start) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: 'End date must be on or after the start date',
+      });
+      return;
+    }
+
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1;
+    if (days > MAX_SLOT_GENERATION_DAYS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: `Generate at most ${MAX_SLOT_GENERATION_DAYS} days at a time (selected ${days})`,
+      });
+    }
+  });
+
+export type AdminSlotGenerationFormInput = z.infer<typeof adminSlotGenerationFormSchema>;
+
+export const PARTICIPANT_STATUS_OPTIONS = [
+  {
+    value: 'active',
+    label: 'Active',
+    help: 'Still in the tournament and eligible for pairing in the current round.',
+  },
+  {
+    value: 'advanced',
+    label: 'Advanced',
+    help: 'Won their round and is waiting to be paired in the next round.',
+  },
+  {
+    value: 'eliminated',
+    label: 'Eliminated',
+    help: 'Knocked out of the normal rounds. Can still buy back while the round is open.',
+  },
+  {
+    value: 'knockout',
+    label: 'Knockout',
+    help: 'Promoted into the knockout bracket. Only set this during the knockout phase.',
+  },
+  {
+    value: 'out',
+    label: 'Out',
+    help: 'Permanently removed from the bracket. Cannot buy back or be paired again.',
+  },
+] as const;
+
+export const participantStatusSchema = z.enum([
+  'active',
+  'eliminated',
+  'advanced',
+  'knockout',
+  'out',
+]);
+
+export const adminParticipantFormSchema = z.object({
+  status: participantStatusSchema,
+  roundNumber: z
+    .string()
+    .min(1, 'Round is required')
+    .refine((v: string) => {
+      const n = parseInt(v, 10);
+      return Number.isInteger(n) && n >= 1;
+    }, 'Round must be a whole number of at least 1'),
+});
+
+export type AdminParticipantFormInput = z.infer<typeof adminParticipantFormSchema>;

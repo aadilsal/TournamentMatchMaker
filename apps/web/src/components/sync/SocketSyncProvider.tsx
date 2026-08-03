@@ -7,11 +7,13 @@ import type {
   QueuePairFailedEvent,
   QueueUpdatedEvent,
   SlotUpdatedEvent,
+  TournamentUpdatedEvent,
 } from '@vr-tournament/shared';
 import { getAccessToken } from '@/lib/api';
 import {
   invalidateLiveQueries,
   invalidateSlotQueries,
+  invalidateTournamentQueries,
   LIVE_QUERY_KEYS,
 } from '@/lib/query-keys';
 import { connectSocket, disconnectSocket } from '@/hooks/useSocket';
@@ -56,9 +58,16 @@ export function SocketSyncProvider({ children }: SocketSyncProviderProps) {
       queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.notifications });
     };
 
-    const onMatchUpdated = (_data: MatchUpdatedEvent) => {
+    const onMatchUpdated = (data: MatchUpdatedEvent) => {
       queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches });
       queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.buybackOptions });
+      if (data.tournamentId) {
+        invalidateTournamentQueries(queryClient, data.tournamentId);
+      }
+    };
+
+    const onTournamentUpdated = (data: TournamentUpdatedEvent) => {
+      invalidateTournamentQueries(queryClient, data.tournamentId);
     };
 
     const onQueueUpdated = (_data: QueueUpdatedEvent) => {
@@ -94,6 +103,7 @@ export function SocketSyncProvider({ children }: SocketSyncProviderProps) {
     socket.on('notification:new', onNotificationNew);
     socket.on('slot:updated', onSlotUpdated);
     socket.on('booking:updated', onBookingUpdated);
+    socket.on('tournament:updated', onTournamentUpdated);
 
     if (socket.connected) onConnect();
 
@@ -107,6 +117,7 @@ export function SocketSyncProvider({ children }: SocketSyncProviderProps) {
       socket.off('notification:new', onNotificationNew);
       socket.off('slot:updated', onSlotUpdated);
       socket.off('booking:updated', onBookingUpdated);
+      socket.off('tournament:updated', onTournamentUpdated);
     };
   }, [isLoggedIn, queryClient]);
 

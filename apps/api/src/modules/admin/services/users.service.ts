@@ -208,16 +208,37 @@ export class AdminUsersService {
   }
 
   async delete(actorId: string, id: string) {
+    // Deleting yourself used to commit the DELETE and then fail writing the
+    // audit row (its actor_id FK pointed at the row just removed), returning a
+    // 500 for an operation that had already destroyed the account — and
+    // ON DELETE SET NULL wiped the actor from every entry they had ever logged.
+    if (actorId === id) {
+      throw new AppError('CONFLICT', 'You cannot delete your own account', 409);
+    }
+
     const before = await this.getById(id);
-    await this.pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
-    await this.pool.query('DELETE FROM users WHERE id = $1', [id]);
-    await writeAudit(this.pool, {
-      actorId,
-      action: 'user.delete',
-      entityType: 'user',
-      entityId: id,
-      before: before as unknown as Record<string, unknown>,
-    });
+
+    // Audit first, then delete, both in one transaction: the trail can never be
+    // lost to a partial failure, and a rollback takes the audit row with it.
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await writeAudit(client, {
+        actorId,
+        action: 'user.delete',
+        entityType: 'user',
+        entityId: id,
+        before: before as unknown as Record<string, unknown>,
+      });
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM users WHERE id = $1', [id]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async resetPassword(actorId: string, id: string, input: AdminResetPasswordInput) {

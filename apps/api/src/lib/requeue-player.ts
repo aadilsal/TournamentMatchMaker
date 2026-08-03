@@ -22,6 +22,9 @@ export interface RequeueOptions {
   hasPlayedSolo?: boolean;
   soloTarget?: number | null;
   soloPlayedAt?: number | null;
+  /** Chosen play window — set for VR players too, who hold a slot without a booking. */
+  slotId?: string | null;
+  slotStartAt?: number | null;
   slotEndAt?: number | null;
   /** Update queue metadata even when already in queue */
   refreshIfQueued?: boolean;
@@ -104,10 +107,36 @@ export async function requeuePlayer(
     bookingId = reg.rows[0]?.booking_id ?? null;
   }
 
+  let slotId = options.slotId ?? null;
+  let slotStartAt = options.slotStartAt ?? null;
   let slotEndAt = options.slotEndAt ?? null;
+  let preferredVenueId = options.preferredVenueId ?? null;
   let hasPlayedSolo = options.hasPlayedSolo ?? false;
   let soloTarget = options.soloTarget ?? null;
   let soloPlayedAt = options.soloPlayedAt ?? null;
+
+  // Every tournament entry owns a play window. Recover it from the round the
+  // player is in so requeues after a win/rematch keep a playable slot instead of
+  // producing a match with no time slot at all.
+  if (tournamentId && !slotId) {
+    const roundSlot = await pool.query(
+      `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
+       FROM tournament_round_slots rs
+       JOIN time_slots ts ON ts.id = rs.time_slot_id
+       WHERE rs.tournament_id = $1 AND rs.user_id = $2
+       ORDER BY (rs.round_number = $3) DESC, rs.round_number DESC
+       LIMIT 1`,
+      [tournamentId, userId, roundNumber]
+    );
+    const rs = roundSlot.rows[0];
+    if (rs) {
+      slotId = rs.time_slot_id;
+      slotStartAt = new Date(rs.start_time).getTime();
+      slotEndAt = new Date(rs.end_time).getTime();
+      preferredVenueId = preferredVenueId ?? rs.venue_id ?? null;
+      bookingId = bookingId ?? rs.booking_id ?? null;
+    }
+  }
 
   if (tournamentId) {
     const pRow = await pool.query(
@@ -124,15 +153,19 @@ export async function requeuePlayer(
     }
   }
 
-  if (bookingId && slotEndAt == null) {
+  if (bookingId && slotId == null) {
     const slotRow = await pool.query(
-      `SELECT ts.end_time FROM bookings b
+      `SELECT ts.id, ts.venue_id, ts.start_time, ts.end_time FROM bookings b
        JOIN time_slots ts ON ts.id = b.time_slot_id
        WHERE b.id = $1 AND b.status = 'confirmed'`,
       [bookingId]
     );
-    if (slotRow.rows[0]?.end_time) {
-      slotEndAt = new Date(slotRow.rows[0].end_time).getTime();
+    const row = slotRow.rows[0];
+    if (row) {
+      slotId = row.id;
+      slotStartAt = slotStartAt ?? new Date(row.start_time).getTime();
+      slotEndAt = slotEndAt ?? new Date(row.end_time).getTime();
+      preferredVenueId = preferredVenueId ?? row.venue_id ?? null;
     }
   }
 
@@ -149,12 +182,14 @@ export async function requeuePlayer(
     longitude: user.longitude,
     joinedAt,
     tournamentId,
-    preferredVenueId: options.preferredVenueId ?? null,
+    preferredVenueId,
     roundNumber,
     bookingId,
     hasPlayedSolo,
     soloTarget,
     soloPlayedAt,
+    slotId,
+    slotStartAt,
     slotEndAt,
   });
 

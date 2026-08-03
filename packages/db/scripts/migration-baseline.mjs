@@ -5,7 +5,15 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const migrationsDir = join(__dirname, '../migrations');
 
-/** Schema markers used to detect migrations already applied outside pgmigrations. */
+/**
+ * Schema markers used to detect migrations already applied outside pgmigrations.
+ *
+ * EVERY migration file needs an entry. A migration with no marker here can never
+ * be recognised as already-applied, so baselining silently skips it and
+ * `migrate:up` then re-runs its DDL against a schema that already has it —
+ * failing with "column ... already exists". `assertMarkersCoverMigrations`
+ * below turns that into a loud error instead of a confusing migration crash.
+ */
 const MIGRATION_MARKERS = {
   '1738000000001_extensions-and-users': { table: 'users' },
   '1738000000002_venues': { table: 'venues' },
@@ -17,6 +25,14 @@ const MIGRATION_MARKERS = {
     column: { table: 'users', name: 'profile_picture' },
   },
   '1738000000008_user-rating': { column: { table: 'users', name: 'rating_points' } },
+  '1738000000009_meta-stripe-solo': {
+    column: { table: 'buybacks', name: 'stripe_payment_intent_id' },
+  },
+  '1738000000010_admin-support': { table: 'audit_logs' },
+  '1738000000011_tournament-flow': {
+    column: { table: 'tournaments', name: 'round_duration_minutes' },
+  },
+  '1738000000012_round-slots-and-live-participation': { table: 'tournament_round_slots' },
 };
 
 async function tableExists(client, table) {
@@ -49,6 +65,25 @@ async function migrationAlreadyApplied(client, name) {
   return false;
 }
 
+/**
+ * Fails fast when a migration has been added without a marker, rather than
+ * letting baselining skip it and `migrate:up` die on duplicate DDL later.
+ */
+function assertMarkersCoverMigrations(files) {
+  const missing = files
+    .map((file) => file.replace(/\.sql$/, ''))
+    .filter((name) => !MIGRATION_MARKERS[name]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing MIGRATION_MARKERS entries for:\n  ${missing.join('\n  ')}\n` +
+        'Add a table/column marker for each in scripts/migration-baseline.mjs — ' +
+        'without one, an existing database cannot be baselined and migrate:up ' +
+        'will try to re-apply the migration.'
+    );
+  }
+}
+
 export async function baselineExistingSchema(client) {
   const usersExists = await tableExists(client, 'users');
   if (!usersExists) {
@@ -66,6 +101,8 @@ export async function baselineExistingSchema(client) {
   const files = readdirSync(migrationsDir)
     .filter((file) => file.endsWith('.sql'))
     .sort();
+
+  assertMarkersCoverMigrations(files);
 
   let baselined = 0;
 

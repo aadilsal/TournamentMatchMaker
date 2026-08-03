@@ -9,7 +9,10 @@ export interface AuditParams {
   after?: Record<string, unknown> | null;
 }
 
-export async function writeAudit(pool: Pool, params: AuditParams): Promise<void> {
+/** Pool or checked-out client, so audit writes can join a caller's transaction. */
+type Queryable = Pick<Pool, 'query'>;
+
+export async function writeAudit(pool: Queryable, params: AuditParams): Promise<void> {
   await pool.query(
     `INSERT INTO audit_logs (actor_id, action, entity_type, entity_id, before_data, after_data)
      VALUES ($1, $2, $3, $4, $5, $6)`,

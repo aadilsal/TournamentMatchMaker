@@ -28,6 +28,9 @@ export interface QueuePlayerHash {
   hasPlayedSolo: string;
   soloTarget: string;
   soloPlayedAt: string;
+  /** Chosen play window — set for VR players too, who pick a slot without booking a venue seat. */
+  slotId: string;
+  slotStartAt: string;
   slotEndAt: string;
 }
 
@@ -47,6 +50,8 @@ export interface QueuePlayerMeta {
   hasPlayedSolo: boolean;
   soloTarget: number | null;
   soloPlayedAt: number | null;
+  slotId: string | null;
+  slotStartAt: number | null;
   slotEndAt: number | null;
 }
 
@@ -66,6 +71,8 @@ export interface BuildQueuePlayerHashInput {
   hasPlayedSolo?: boolean;
   soloTarget?: number | null;
   soloPlayedAt?: number | null;
+  slotId?: string | null;
+  slotStartAt?: number | null;
   slotEndAt?: number | null;
 }
 
@@ -88,6 +95,8 @@ export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePla
     hasPlayedSolo: input.hasPlayedSolo ? '1' : '0',
     soloTarget: input.soloTarget != null ? String(input.soloTarget) : '',
     soloPlayedAt: input.soloPlayedAt != null ? String(input.soloPlayedAt) : '',
+    slotId: input.slotId ?? '',
+    slotStartAt: input.slotStartAt != null ? String(input.slotStartAt) : '',
     slotEndAt: input.slotEndAt != null ? String(input.slotEndAt) : '',
   };
 }
@@ -110,6 +119,8 @@ export function parseQueuePlayerMeta(hash: Record<string, string>): QueuePlayerM
     hasPlayedSolo: hash.hasPlayedSolo === '1',
     soloTarget: hash.soloTarget ? parseInt(hash.soloTarget, 10) : null,
     soloPlayedAt: hash.soloPlayedAt ? parseInt(hash.soloPlayedAt, 10) : null,
+    slotId: hash.slotId || null,
+    slotStartAt: hash.slotStartAt ? parseInt(hash.slotStartAt, 10) : null,
     slotEndAt: hash.slotEndAt ? parseInt(hash.slotEndAt, 10) : null,
   };
 }

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import pg from 'pg';
 import { Redis } from 'ioredis';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -13,10 +13,54 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 dotenv.config({ path: resolve(__dirname, '../../../../.env'), override: true });
 
+/**
+ * These tests DROP every table before running, so they must never touch the
+ * database a developer is working in. Point them at a dedicated database —
+ * TEST_DATABASE_URL if provided, otherwise `<dbname>_test` derived from
+ * DATABASE_URL — and refuse to run anywhere whose name does not end in `_test`.
+ * `pnpm test` used to wipe the seeded dev database on every run.
+ */
+function resolveTestDatabaseUrl(): URL {
+  const raw = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!raw) throw new Error('DATABASE_URL (or TEST_DATABASE_URL) must be set for integration tests');
+
+  const url = new URL(raw);
+  if (!process.env.TEST_DATABASE_URL) {
+    const name = url.pathname.replace(/^\//, '');
+    url.pathname = `/${name}${name.endsWith('_test') ? '' : '_test'}`;
+  }
+  if (!url.pathname.replace(/^\//, '').endsWith('_test')) {
+    throw new Error(
+      `Refusing to run destructive integration tests against "${url.pathname.slice(1)}" — ` +
+        'the database name must end in `_test`.'
+    );
+  }
+  return url;
+}
+
+const TEST_DB_URL = resolveTestDatabaseUrl();
+
+/** Creates the test database if it does not exist yet. */
+async function ensureTestDatabase(url: URL) {
+  const dbName = url.pathname.replace(/^\//, '');
+  const adminUrl = new URL(url.toString());
+  adminUrl.pathname = '/postgres';
+
+  const admin = new pg.Pool({ connectionString: adminUrl.toString() });
+  try {
+    const { rows } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
+    if (rows.length === 0) {
+      await admin.query(`CREATE DATABASE "${dbName}"`);
+    }
+  } finally {
+    await admin.end();
+  }
+}
+
 const mockEnv = {
   NODE_ENV: 'test' as const,
   PORT: 3000,
-  DATABASE_URL: process.env.DATABASE_URL!,
+  DATABASE_URL: TEST_DB_URL.toString(),
   REDIS_URL: process.env.REDIS_URL!,
   JWT_ACCESS_SECRET: 'test-access-secret-minimum-32-characters-long',
   JWT_REFRESH_SECRET: 'test-refresh-secret-minimum-32-characters-long',
@@ -31,14 +75,20 @@ const mockEnv = {
 async function runMigrations(connectionString: string) {
   const pool = new pg.Pool({ connectionString });
   const migrationsDir = join(__dirname, '../../../../packages/db/migrations');
-  const files = [
-    '1738000000001_extensions-and-users.sql',
-    '1738000000002_venues.sql',
-    '1738000000003_time-slots-and-bookings.sql',
-    '1738000000004_tournaments-and-matches.sql',
-    '1738000000005_notifications.sql',
-  ];
+  // Read the directory rather than listing files by hand: a hand-maintained list
+  // silently omits every migration added after it was last touched, and the app
+  // then fails on any request touching the missing columns.
+  const files = readdirSync(migrationsDir)
+    .filter((file) => file.endsWith('.sql'))
+    .sort();
 
+  await pool.query('DROP TABLE IF EXISTS audit_logs CASCADE');
+  await pool.query('DROP TABLE IF EXISTS venue_admins CASCADE');
+  await pool.query('DROP TABLE IF EXISTS tournament_admins CASCADE');
+  await pool.query('DROP TABLE IF EXISTS tournament_round_slots CASCADE');
+  await pool.query('DROP TABLE IF EXISTS buybacks CASCADE');
+  await pool.query('DROP TABLE IF EXISTS tournament_participants CASCADE');
+  await pool.query('DROP TABLE IF EXISTS tournament_rounds CASCADE');
   await pool.query('DROP TABLE IF EXISTS notifications CASCADE');
   await pool.query('DROP TYPE IF EXISTS notification_status CASCADE');
   await pool.query('DROP TYPE IF EXISTS notification_channel CASCADE');
@@ -59,7 +109,11 @@ async function runMigrations(connectionString: string) {
 
   for (const file of files) {
     const sql = readFileSync(join(migrationsDir, file), 'utf-8');
-    const upSection = sql.split('-- Down Migration')[0].replace('-- Up Migration', '').trim();
+    // Migration files mark the reverse section with either marker.
+    const upSection = sql
+      .split(/^-- (?:Down Migration|migrate:down)/m)[0]
+      .replace('-- Up Migration', '')
+      .trim();
     await pool.query(upSection);
   }
 
@@ -76,6 +130,7 @@ describe('API Integration', () => {
       throw new Error('DATABASE_URL and REDIS_URL must be set for integration tests');
     }
 
+    await ensureTestDatabase(TEST_DB_URL);
     await runMigrations(mockEnv.DATABASE_URL);
 
     pool = new pg.Pool({ connectionString: mockEnv.DATABASE_URL });

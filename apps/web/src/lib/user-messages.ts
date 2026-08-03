@@ -36,6 +36,7 @@ const BY_MESSAGE: Record<string, string> = {
   'time slot is currently locked': 'That time slot is no longer available.',
   'you already have a booking for this slot': 'You already booked this time slot.',
   'tournament is not open for registration': 'Registration for this tournament is closed.',
+  'tournament is not accepting entries': 'This tournament is no longer accepting entries.',
   'tournament is full': 'This tournament is full.',
   'match is not awaiting confirmation': 'This match can no longer be confirmed.',
   'not a participant': 'You are not part of this match.',

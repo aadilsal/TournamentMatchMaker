@@ -42,7 +42,9 @@ await matchmakingQueue.add(
 );
 await matchmakingQueue.add('expire-repeat', {}, { repeat: { every: 30000 }, jobId: 'matchmaking-expire-repeat' });
 await matchmakingQueue.add('expire-unplayed-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-expire-unplayed-repeat' });
-await matchmakingQueue.add('close-round-repeat', {}, { repeat: { every: 3600000 }, jobId: 'matchmaking-close-round-repeat' });
+// Polled every minute, not hourly: round duration can be set as low as 15
+// minutes, so an hourly sweep could leave a finished round open ~4x its length.
+await matchmakingQueue.add('close-round-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-close-round-repeat' });
 
 const matchmakingWorker = new Worker(
   BULLMQ_MATCHMAKING_QUEUE,

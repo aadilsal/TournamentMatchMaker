@@ -19,9 +19,13 @@ export function formatSlotTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function getSlotMeta(slot: TimeSlot) {
+/**
+ * `ignoreCapacity` is for VR players: they pick a play window rather than a
+ * venue seat, so a sold-out venue must not grey the time out for them.
+ */
+function getSlotMeta(slot: TimeSlot, ignoreCapacity = false) {
   const available = Math.max(0, slot.maxCapacity - slot.bookedCount);
-  const isFull = slot.status === 'full' || available <= 0;
+  const isFull = !ignoreCapacity && (slot.status === 'full' || available <= 0);
   const isPast = new Date(slot.startTime).getTime() <= Date.now();
   const fillPercent = slot.maxCapacity > 0 ? (slot.bookedCount / slot.maxCapacity) * 100 : 100;
   return { available, isFull, isPast, fillPercent };
@@ -93,6 +97,8 @@ interface TimeSlotGridProps {
   selectedSlotId?: string | null;
   onSlotSelect?: (slot: TimeSlot) => void;
   renderSlotAction?: (slot: TimeSlot, meta: ReturnType<typeof getSlotMeta>) => React.ReactNode;
+  /** VR players book a play window, not a seat — hide and ignore venue capacity. */
+  ignoreCapacity?: boolean;
 }
 
 export function TimeSlotGrid({
@@ -102,6 +108,7 @@ export function TimeSlotGrid({
   selectedSlotId,
   onSlotSelect,
   renderSlotAction,
+  ignoreCapacity = false,
 }: TimeSlotGridProps) {
   if (isLoading) {
     return <ListSkeleton count={4} />;
@@ -119,7 +126,7 @@ export function TimeSlotGrid({
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {slots.map((slot) => {
-        const meta = getSlotMeta(slot);
+        const meta = getSlotMeta(slot, ignoreCapacity);
         const { available, isFull, isPast, fillPercent } = meta;
         const unavailable = isFull || isPast;
         const isSelected = selectedSlotId === slot.id;
@@ -134,17 +141,19 @@ export function TimeSlotGrid({
                   <span className="mx-1.5 font-normal text-[var(--color-muted-foreground)]">–</span>
                   {formatSlotTime(slot.endTime)}
                 </p>
-                <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
-                  <Users className="h-3.5 w-3.5 shrink-0" />
-                  {isFull ? (
-                    <span className="font-medium text-[var(--color-muted-foreground)]">Sold out</span>
-                  ) : (
-                    <span>
-                      <span className="font-semibold text-[var(--color-foreground)]">{available}</span>
-                      {' '}of {slot.maxCapacity} spots left
-                    </span>
-                  )}
-                </div>
+                {!ignoreCapacity && (
+                  <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--color-muted-foreground)]">
+                    <Users className="h-3.5 w-3.5 shrink-0" />
+                    {isFull ? (
+                      <span className="font-medium text-[var(--color-muted-foreground)]">Sold out</span>
+                    ) : (
+                      <span>
+                        <span className="font-semibold text-[var(--color-foreground)]">{available}</span>
+                        {' '}of {slot.maxCapacity} spots left
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {renderSlotAction ? (
@@ -159,7 +168,12 @@ export function TimeSlotGrid({
               ) : null}
             </div>
 
-            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]">
+            <div
+              className={cn(
+                'mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-muted)]',
+                ignoreCapacity && 'hidden'
+              )}
+            >
               <div
                 className={cn(
                   'h-full rounded-full transition-all duration-500',
@@ -224,6 +238,8 @@ interface SlotPickerProps {
   selectedSlotId?: string | null;
   onSlotSelect?: (slot: TimeSlot) => void;
   renderSlotAction?: (slot: TimeSlot, meta: ReturnType<typeof getSlotMeta>) => React.ReactNode;
+  /** VR players book a play window, not a seat — hide and ignore venue capacity. */
+  ignoreCapacity?: boolean;
 }
 
 export function SlotPicker({
@@ -236,6 +252,7 @@ export function SlotPicker({
   selectedSlotId,
   onSlotSelect,
   renderSlotAction,
+  ignoreCapacity,
 }: SlotPickerProps) {
   return (
     <div className="space-y-5">
@@ -247,6 +264,7 @@ export function SlotPicker({
         selectedSlotId={selectedSlotId}
         onSlotSelect={onSlotSelect}
         renderSlotAction={renderSlotAction}
+        ignoreCapacity={ignoreCapacity}
       />
     </div>
   );

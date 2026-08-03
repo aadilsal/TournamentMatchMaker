@@ -1,9 +1,14 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { RoundDurationUnit, Tournament, TournamentStatus } from '@vr-tournament/shared';
 import {
   minutesToRoundDurationParts,
   ROUND_DURATION_UNIT_OPTIONS,
+  TOURNAMENT_STATUS_LABELS,
+  TOURNAMENT_STATUS_TRANSITIONS,
+  allowedTournamentStatuses,
+  isValidTournamentTransition,
+  type TournamentStatusValue,
 } from '@vr-tournament/shared';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import {
@@ -17,7 +22,9 @@ import { TournamentFlowGuide } from '@/components/admin/TournamentFlowGuide';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { useState, useEffect } from 'react';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 const defaultForm: {
   name: string;
@@ -42,9 +49,6 @@ const defaultForm: {
   roundDurationValue: '2',
   roundDurationUnit: 'days',
 };
-
-const selectClass =
-  'w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm';
 
 export function AdminTournamentFormPage() {
   const { id } = useParams<{ id: string }>();
@@ -77,13 +81,22 @@ export function AdminTournamentFormPage() {
     }
   }, [tournament]);
 
-  const save = useMutation({
+  const save = useAdminMutation({
     mutationFn: async (body: ReturnType<typeof toTournamentApiBody>) => {
       if (isEdit) return apiPatch<Tournament>(`/admin/tournaments/${id}`, body);
       return apiPost<Tournament>('/admin/tournaments', body);
     },
+    successMessage: isEdit ? 'Tournament updated.' : 'Tournament created.',
+    invalidate: [['admin', 'tournaments'], ['admin', 'tournament', id]],
     onSuccess: (t) => navigate(`/admin/tournaments/${t.id}`),
   });
+
+  // The saved status is the transition source; without a loaded tournament (create
+  // flow) a new tournament can only start as a draft.
+  const currentStatus = (tournament?.status ?? 'draft') as TournamentStatusValue;
+  const statusOptions: TournamentStatusValue[] = isEdit
+    ? allowedTournamentStatuses(currentStatus)
+    : ['draft'];
 
   const set = (key: keyof typeof form, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -100,6 +113,16 @@ export function AdminTournamentFormPage() {
     const result = validateAdminForm(adminTournamentFormSchema, form);
     if (!result.ok) {
       setErrors(result.errors);
+      return;
+    }
+    // Defence in depth: the dropdown only offers legal moves, but a stale form
+    // (tournament advanced in another tab) must not push an illegal transition.
+    if (isEdit && !isValidTournamentTransition(currentStatus, result.data.status as TournamentStatusValue)) {
+      setErrors({
+        status: `Cannot move from ${TOURNAMENT_STATUS_LABELS[currentStatus]} to ${
+          TOURNAMENT_STATUS_LABELS[result.data.status as TournamentStatusValue]
+        }. Reload the page and use the tournament action bar.`,
+      });
       return;
     }
     setErrors({});
@@ -158,8 +181,8 @@ export function AdminTournamentFormPage() {
                 value={form.roundDurationValue}
                 onChange={(e) => set('roundDurationValue', e.target.value)}
               />
-              <select
-                className={selectClass}
+              <Select
+                aria-label="Round duration unit"
                 value={form.roundDurationUnit}
                 onChange={(e) => set('roundDurationUnit', e.target.value)}
               >
@@ -168,7 +191,7 @@ export function AdminTournamentFormPage() {
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
               How long each normal round runs before it closes and winners advance (e.g. 2 days).
@@ -204,22 +227,31 @@ export function AdminTournamentFormPage() {
             <AdminFieldError message={errors.buybackPriceCents} />
           </div>
           <div>
-            <Label>Status</Label>
-            <select
-              className={selectClass}
+            <Label htmlFor="tournament-status">Status</Label>
+            <Select
+              id="tournament-status"
               value={form.status}
               onChange={(e) => set('status', e.target.value as TournamentStatus)}
+              disabled={statusOptions.length <= 1}
             >
-              <option value="draft">Draft</option>
-              <option value="open">Open</option>
-              <option value="closed">Closed</option>
-              <option value="in_progress">In progress</option>
-              <option value="completed">Completed</option>
-            </select>
+              {statusOptions.map((s) => (
+                <option key={s} value={s}>
+                  {TOURNAMENT_STATUS_LABELS[s]}
+                </option>
+              ))}
+            </Select>
+            <p className="mt-1.5 text-xs leading-relaxed text-[var(--color-muted-foreground)]">
+              {isEdit
+                ? currentStatus === 'completed'
+                  ? 'This tournament is completed — its status can no longer change.'
+                  : `Only the next step in the lifecycle is offered here. Use the action bar on the tournament page to ${TOURNAMENT_STATUS_TRANSITIONS[currentStatus].length ? 'advance it with the full explanation and confirmation' : 'manage it'}.`
+                : 'New tournaments start as a draft and are published from the tournament page.'}
+            </p>
             <AdminFieldError message={errors.status} />
           </div>
+          <AdminFieldError message={errors._form} />
           <Button onClick={handleSubmit} disabled={save.isPending}>
-            {isEdit ? 'Save changes' : 'Create tournament'}
+            {save.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Create tournament'}
           </Button>
         </AdminCard>
 

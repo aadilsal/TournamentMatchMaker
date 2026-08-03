@@ -1,27 +1,36 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { AdminQueueOverview } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPost } from '@/lib/api';
 import { AdminPageHeader, AdminCard, DataTable } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminQueuePage() {
-  const queryClient = useQueryClient();
-
   const { data, isLoading } = useQuery({
     queryKey: ['admin', 'queue'],
     queryFn: () => apiGet<AdminQueueOverview>('/admin/queue'),
     refetchInterval: 5000,
   });
 
-  const triggerPair = useMutation({
-    mutationFn: () => apiPost('/admin/queue/trigger-pair'),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] }),
+  const invalidate = [['admin', 'queue']];
+
+  const triggerPair = useAdminMutation({
+    mutationFn: () => apiPost<{ paired?: number }>('/admin/queue/trigger-pair'),
+    successMessage: (result) =>
+      typeof result?.paired === 'number'
+        ? result.paired === 0
+          ? 'Pairing run finished — no eligible pairs found.'
+          : `Pairing run created ${result.paired} match${result.paired === 1 ? '' : 'es'}.`
+        : 'Pairing run triggered.',
+    invalidate,
   });
 
-  const kick = useMutation({
-    mutationFn: (userId: string) => apiDelete(`/admin/queue/players/${userId}`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'queue'] }),
+  const kick = useAdminMutation({
+    mutationFn: (player: { userId: string; username: string }) =>
+      apiDelete(`/admin/queue/players/${player.userId}`),
+    successMessage: (_data, player) => `Removed ${player.username} from the queue.`,
+    invalidate,
   });
 
   if (isLoading) return <GridSkeleton count={3} />;
@@ -33,7 +42,7 @@ export function AdminQueuePage() {
         description="Live queue state (refreshes every 5s)"
         actions={
           <Button size="sm" onClick={() => triggerPair.mutate()} disabled={triggerPair.isPending}>
-            Trigger pairing
+            {triggerPair.isPending ? 'Pairing…' : 'Trigger pairing'}
           </Button>
         }
       />
@@ -72,8 +81,9 @@ export function AdminQueuePage() {
             <Button
               size="sm"
               variant="ghost"
-              className="text-destructive"
-              onClick={() => kick.mutate(e.userId)}
+              className="text-[var(--color-destructive)]"
+              onClick={() => kick.mutate({ userId: e.userId, username: e.username })}
+              disabled={kick.isPending}
             >
               Kick
             </Button>

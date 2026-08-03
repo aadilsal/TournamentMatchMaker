@@ -6,6 +6,7 @@ import {
   registerTournamentSchema,
   tournamentListQuerySchema,
   tournamentMatchesQuerySchema,
+  tournamentSlotOptionsQuerySchema,
 } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
@@ -50,6 +51,35 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
     try {
       const participant = await service.getParticipant(req.params.id as string, req.user!.sub);
       sendSuccess(res, participant);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /** Slots the player may pick for their current round (VR: any venue, venue players: their venue). */
+  router.get(
+    '/:id/slot-options',
+    authenticate(env),
+    validate(tournamentSlotOptionsQuerySchema, 'query'),
+    async (req, res, next) => {
+      try {
+        const options = await service.getSlotOptions(
+          req.params.id as string,
+          req.user!.sub,
+          req.query as never
+        );
+        sendSuccess(res, options);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  /** The slot the player already holds — used to preselect it on the next round. */
+  router.get('/:id/my-slot', authenticate(env), async (req, res, next) => {
+    try {
+      const roundSlot = await service.getLatestRoundSlot(req.params.id as string, req.user!.sub);
+      sendSuccess(res, roundSlot);
     } catch (err) {
       next(err);
     }

@@ -62,3 +62,57 @@ export function bookingStatusBadge(status: string) {
   };
   return map[status] ?? { label: status, variant: 'neutral' as BadgeVariant };
 }
+
+/**
+ * Single source of truth for status colours across player-facing and admin UI.
+ * Covers every status/phase enum in @vr-tournament/shared; unknown values fall
+ * back to a neutral badge with the raw value humanised.
+ */
+const STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
+  // Tournament status
+  draft: { label: 'Draft', variant: 'warning' },
+  open: { label: 'Open', variant: 'success' },
+  closed: { label: 'Closed', variant: 'neutral' },
+  in_progress: { label: 'Live', variant: 'info' },
+  completed: { label: 'Completed', variant: 'neutral' },
+  // Tournament / round phase
+  normal: { label: 'Normal', variant: 'info' },
+  knockout: { label: 'Knockout', variant: 'warning' },
+  // Match status
+  pending_confirmation: { label: 'Pending', variant: 'warning' },
+  confirmed: { label: 'Confirmed', variant: 'success' },
+  cancelled: { label: 'Cancelled', variant: 'danger' },
+  expired: { label: 'Expired', variant: 'neutral' },
+  // Participant status
+  active: { label: 'Active', variant: 'success' },
+  eliminated: { label: 'Eliminated', variant: 'danger' },
+  advanced: { label: 'Advanced', variant: 'success' },
+  out: { label: 'Out', variant: 'danger' },
+  // Slot status
+  available: { label: 'Available', variant: 'success' },
+  full: { label: 'Full', variant: 'warning' },
+  locked: { label: 'Locked', variant: 'danger' },
+  // Buyback / notification status
+  pending: { label: 'Pending', variant: 'warning' },
+  failed: { label: 'Failed', variant: 'danger' },
+  sent: { label: 'Sent', variant: 'success' },
+};
+
+export function statusBadge(status: string) {
+  const key = status.replace(/\s+/g, '_').toLowerCase();
+  return (
+    STATUS_MAP[key] ?? {
+      label: status.replace(/_/g, ' '),
+      variant: 'neutral' as BadgeVariant,
+    }
+  );
+}
+
+export function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const { label, variant } = statusBadge(status);
+  return (
+    <Badge variant={variant} className={cn('capitalize', className)}>
+      {label}
+    </Badge>
+  );
+}

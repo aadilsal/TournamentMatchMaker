@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Tournament } from '@vr-tournament/shared';
 import {
+  AdminQueryError,
   AdminFilterBar,
   AdminFilterField,
   AdminFilterSearch,
@@ -9,7 +10,7 @@ import {
   AdminPageHeader,
   AdminTableFooter,
   DataTable,
-  StatusPill,
+  StatusBadge,
 } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
@@ -72,7 +73,9 @@ export function AdminTournamentsPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="tournaments" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>
@@ -90,8 +93,8 @@ export function AdminTournamentsPage() {
                   {t.name}
                 </Link>
               ),
-              status: <StatusPill status={t.status} />,
-              phase: <StatusPill status={t.phase} />,
+              status: <StatusBadge status={t.status} />,
+              phase: <StatusBadge status={t.phase} />,
               players: `${t.registrationCount ?? 0}${t.maxPlayers ? ` / ${t.maxPlayers}` : ''}`,
               dates: `${new Date(t.startDate).toLocaleDateString()} – ${new Date(t.endDate).toLocaleDateString()}`,
             }))}

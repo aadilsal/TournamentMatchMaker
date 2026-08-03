@@ -1,32 +1,57 @@
 import { Link, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { Buyback } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
-import { AdminPageHeader, AdminCard, StatusPill } from '@/components/admin/AdminUi';
+import { AdminQueryError, AdminPageHeader, AdminCard, StatusBadge } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAuthUser } from '@/hooks/useAuthUser';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 type BuybackRow = Buyback & { username?: string; tournamentName?: string };
 
 export function AdminBuybackDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const queryClient = useQueryClient();
   const { user } = useAuthUser();
+  const askConfirm = useConfirm();
 
-  const { data: buyback, isLoading } = useQuery({
+  const { data: buyback, isLoading, error, refetch } = useQuery({
     queryKey: ['admin', 'buyback', id],
     queryFn: () => apiGet<BuybackRow>(`/admin/buybacks/${id}`),
     enabled: !!id,
   });
 
-  const refund = useMutation({
+  const refund = useAdminMutation({
     mutationFn: () => apiPost(`/admin/buybacks/${id}/refund`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin', 'buyback', id] }),
+    successMessage: 'Refund issued via Stripe.',
+    invalidate: [
+      ['admin', 'buyback', id],
+      ['admin', 'buybacks'],
+    ],
   });
 
   if (isLoading) return <GridSkeleton count={2} />;
-  if (!buyback) return <p>Buyback not found</p>;
+  if (error || !buyback)
+    return <AdminQueryError error={error} resource="buyback" onRetry={() => refetch()} />;
+
+  const amount = `$${(buyback.amountCents / 100).toFixed(2)}`;
+
+  const handleRefund = async () => {
+    const ok = await askConfirm({
+      title: 'Refund this buyback via Stripe?',
+      description: (
+        <>
+          This immediately refunds <strong>{amount}</strong> to {buyback.username ?? 'the player'} through
+          Stripe. Money movement cannot be reversed from this panel — you would have to take a new payment.
+          The player&apos;s buyback for round {buyback.roundNumber} will be marked refunded.
+        </>
+      ),
+      confirmLabel: `Refund ${amount}`,
+      confirmText: 'REFUND',
+    });
+    if (ok) refund.mutate();
+  };
 
   return (
     <div>
@@ -41,7 +66,7 @@ export function AdminBuybackDetailPage() {
 
       <AdminCard className="p-5 space-y-3 text-sm max-w-lg">
         <div className="flex items-center gap-2">
-          <StatusPill status={buyback.status} />
+          <StatusBadge status={buyback.status} />
         </div>
         <p><span className="text-[var(--color-muted-foreground)]">Player:</span> {buyback.username}</p>
         <p><span className="text-[var(--color-muted-foreground)]">Tournament:</span> {buyback.tournamentName}</p>
@@ -54,10 +79,10 @@ export function AdminBuybackDetailPage() {
           <Button
             size="sm"
             variant="destructive"
-            onClick={() => refund.mutate()}
+            onClick={handleRefund}
             disabled={refund.isPending}
           >
-            Refund via Stripe
+            {refund.isPending ? 'Refunding…' : 'Refund via Stripe'}
           </Button>
         )}
       </AdminCard>

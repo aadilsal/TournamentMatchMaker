@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Buyback, Tournament } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import {
+  AdminQueryError,
   AdminCard,
   AdminFilterBar,
   AdminFilterField,
@@ -11,7 +12,7 @@ import {
   AdminPageHeader,
   AdminTableFooter,
   DataTable,
-  StatusPill,
+  StatusBadge,
 } from '@/components/admin/AdminUi';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
@@ -70,7 +71,9 @@ export function AdminBuybacksPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="buybacks" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>
@@ -90,7 +93,7 @@ export function AdminBuybacksPage() {
               ),
               tournament: b.tournamentName ?? '—',
               amount: `$${(b.amountCents / 100).toFixed(2)}`,
-              status: <StatusPill status={b.status} />,
+              status: <StatusBadge status={b.status} />,
               round: b.roundNumber,
             }))}
             emptyMessage="No buybacks match your filters"

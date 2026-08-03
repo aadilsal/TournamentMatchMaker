@@ -7,6 +7,7 @@ export const LIVE_QUERY_KEYS = {
   matchmakingStatus: ['matchmaking-status'] as const,
   bookings: ['bookings'] as const,
   notifications: ['notifications'] as const,
+  tournaments: ['tournaments'] as const,
 };
 
 export function invalidateLiveQueries(queryClient: QueryClient) {
@@ -15,6 +16,48 @@ export function invalidateLiveQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matchmakingStatus });
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.bookings });
   queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.notifications });
+  invalidateTournamentQueries(queryClient);
+}
+
+/**
+ * Registration counts, brackets, rounds and participants are spread across the
+ * public list, the detail page and the admin panel — a change to any one of them
+ * has to refresh all of them, so they are invalidated as a group.
+ */
+export function invalidateTournamentQueries(queryClient: QueryClient, tournamentId?: string) {
+  queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.tournaments });
+  queryClient.invalidateQueries({ queryKey: ['admin', 'tournaments'] });
+
+  if (tournamentId) {
+    for (const key of [
+      ['tournament', tournamentId],
+      ['tournament-bracket', tournamentId],
+      ['tournament-rounds', tournamentId],
+      ['tournament-participants', tournamentId],
+      ['tournament-registration', tournamentId],
+      ['tournament-participant', tournamentId],
+      ['tournament-slot-options', tournamentId],
+      ['tournament-my-slot', tournamentId],
+      ['admin', 'tournament', tournamentId],
+    ]) {
+      queryClient.invalidateQueries({ queryKey: key });
+    }
+    return;
+  }
+
+  for (const key of [
+    ['tournament'],
+    ['tournament-bracket'],
+    ['tournament-rounds'],
+    ['tournament-participants'],
+    ['tournament-registration'],
+    ['tournament-participant'],
+    ['tournament-slot-options'],
+    ['tournament-my-slot'],
+    ['admin', 'tournament'],
+  ]) {
+    queryClient.invalidateQueries({ queryKey: key });
+  }
 }
 
 export function invalidateSlotQueries(

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet, apiPatch, apiPost } from '@/lib/api';
 import {
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useState, useEffect } from 'react';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminVenueFormPage() {
   const { id } = useParams<{ id: string }>();
@@ -52,11 +53,13 @@ export function AdminVenueFormPage() {
     }
   }, [venue]);
 
-  const save = useMutation({
+  const save = useAdminMutation({
     mutationFn: async (body: ReturnType<typeof toVenueApiBody>) => {
       if (isEdit) return apiPatch<Venue>(`/admin/venues/${id}`, body);
       return apiPost<Venue>('/admin/venues', body);
     },
+    successMessage: isEdit ? 'Venue updated.' : 'Venue created.',
+    invalidate: [['admin', 'venues'], ['admin', 'venue', id]],
     onSuccess: (v) => navigate(`/admin/venues/${v.id}`),
   });
 
@@ -131,8 +134,9 @@ export function AdminVenueFormPage() {
           />
           Active
         </label>
+        <AdminFieldError message={errors._form} />
         <Button onClick={handleSubmit} disabled={save.isPending}>
-          {isEdit ? 'Save' : 'Create venue'}
+          {save.isPending ? 'Saving…' : isEdit ? 'Save' : 'Create venue'}
         </Button>
       </AdminCard>
     </div>

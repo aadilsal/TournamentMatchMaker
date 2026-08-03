@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { Tournament, Venue } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import {
@@ -12,7 +12,9 @@ import { AdminPageHeader, AdminCard, AdminFieldError } from '@/components/admin/
 import { UserPicker } from '@/components/admin/UserPicker';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminMatchFormPage() {
   const navigate = useNavigate();
@@ -32,8 +34,10 @@ export function AdminMatchFormPage() {
     queryFn: () => apiGet<Venue[]>('/admin/venues'),
   });
 
-  const create = useMutation({
+  const create = useAdminMutation({
     mutationFn: (body: ReturnType<typeof toAdminMatchInput>) => apiPost<{ id: string }>('/admin/matches', body),
+    successMessage: 'Match created.',
+    invalidate: [['admin', 'matches']],
     onSuccess: (match) => navigate(`/admin/matches/${match.id}`),
   });
 
@@ -56,6 +60,7 @@ export function AdminMatchFormPage() {
         <div>
           <UserPicker
             label="Player 1"
+            error={errors.player1Id}
             value={player1Id}
             onChange={(id) => {
               setPlayer1Id(id);
@@ -71,6 +76,7 @@ export function AdminMatchFormPage() {
         <div>
           <UserPicker
             label="Player 2"
+            error={errors.player2Id}
             value={player2Id}
             onChange={(id) => {
               setPlayer2Id(id);
@@ -85,8 +91,8 @@ export function AdminMatchFormPage() {
         </div>
         <div>
           <Label className="text-xs">Tournament (optional)</Label>
-          <select
-            className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm mt-1"
+          <Select
+            className="mt-1"
             value={tournamentId}
             onChange={(e) => setTournamentId(e.target.value)}
           >
@@ -94,12 +100,12 @@ export function AdminMatchFormPage() {
             {tournaments.map((t) => (
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
-          </select>
+          </Select>
         </div>
         <div>
           <Label className="text-xs">Venue (optional)</Label>
-          <select
-            className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm mt-1"
+          <Select
+            className="mt-1"
             value={venueId}
             onChange={(e) => setVenueId(e.target.value)}
           >
@@ -107,10 +113,11 @@ export function AdminMatchFormPage() {
             {venues.map((v) => (
               <option key={v.id} value={v.id}>{v.name}</option>
             ))}
-          </select>
+          </Select>
         </div>
+        <AdminFieldError message={errors._form} />
         <Button onClick={handleSubmit} disabled={create.isPending}>
-          Create match
+          {create.isPending ? 'Creating…' : 'Create match'}
         </Button>
       </AdminCard>
     </div>

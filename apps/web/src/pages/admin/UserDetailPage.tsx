@@ -1,8 +1,8 @@
 import { Link, useParams } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { AdminUserDetail, UserRole } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
-import { AdminPageHeader, AdminCard, DataTable, StatusPill, AdminFieldError } from '@/components/admin/AdminUi';
+import { AdminQueryError, AdminPageHeader, AdminCard, DataTable, StatusBadge, AdminFieldError } from '@/components/admin/AdminUi';
 import {
   adminPasswordFormSchema,
   adminRatingFormSchema,
@@ -11,17 +11,28 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAuthUser } from '@/hooks/useAuthUser';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { toast } from '@/components/ui/toast';
+
+const ROLE_LABELS: Record<UserRole, string> = {
+  player: 'Player',
+  venue_admin: 'Venue admin',
+  tournament_admin: 'Tournament admin',
+  superadmin: 'Superadmin',
+};
 
 export function AdminUserDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const queryClient = useQueryClient();
   const { user: currentUser } = useAuthUser();
   const isSuperAdmin = currentUser?.role === 'superadmin';
+  const askConfirm = useConfirm();
 
-  const { data: user, isLoading } = useQuery({
+  const { data: user, isLoading, error, refetch } = useQuery({
     queryKey: ['admin', 'user', id],
     queryFn: () => apiGet<AdminUserDetail>(`/admin/users/${id}?detail=true`),
     enabled: !!id,
@@ -33,31 +44,130 @@ export function AdminUserDetailPage() {
   const [ratingError, setRatingError] = useState<string>();
   const [passwordError, setPasswordError] = useState<string>();
 
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['admin', 'user', id] });
+  const invalidate = [['admin', 'user', id], ['admin', 'users']];
 
-  const update = useMutation({
+  const update = useAdminMutation({
     mutationFn: (body: Record<string, unknown>) => apiPatch(`/admin/users/${id}`, body),
-    onSuccess: invalidate,
+    invalidate,
   });
 
-  const resetPassword = useMutation({
-    mutationFn: () => apiPost(`/admin/users/${id}/reset-password`, { password: newPassword }),
+  const resetPassword = useAdminMutation({
+    mutationFn: (password: string) =>
+      apiPost(`/admin/users/${id}/reset-password`, { password }),
+    successMessage: 'Password reset. The user must sign in with the new password.',
     onSuccess: () => setNewPassword(''),
   });
 
-  const revokeSessions = useMutation({
+  const revokeSessions = useAdminMutation({
     mutationFn: () => apiDelete(`/admin/users/${id}/sessions`),
+    successMessage: 'All sessions revoked. The user has been signed out everywhere.',
   });
 
-  const syncTier = useMutation({
+  const syncTier = useAdminMutation({
     mutationFn: () => apiPost(`/admin/users/${id}/sync-tier`),
-    onSuccess: invalidate,
+    successMessage: 'Skill tier resynced from rating.',
+    invalidate,
   });
 
   if (isLoading) return <GridSkeleton count={3} />;
-  if (!user) return <p>User not found</p>;
+  if (error || !user)
+    return <AdminQueryError error={error} resource="user" onRetry={() => refetch()} />;
 
   const displayRole = role || user.role;
+  const isSelf = currentUser?.id === user.id;
+
+  const handleSaveRole = async () => {
+    const promotingToSuper = displayRole === 'superadmin' && user.role !== 'superadmin';
+    const ok = await askConfirm({
+      title: `Change role to ${ROLE_LABELS[displayRole as UserRole]}?`,
+      description: promotingToSuper ? (
+        <>
+          Superadmins have unrestricted access: they can issue Stripe refunds, change any user&apos;s role
+          (including demoting you), suspend accounts, and run destructive system maintenance. Only grant
+          this to people you fully trust.
+        </>
+      ) : (
+        <>
+          {user.username} will move from <strong>{ROLE_LABELS[user.role]}</strong> to{' '}
+          <strong>{ROLE_LABELS[displayRole as UserRole]}</strong>. Their access to admin pages changes
+          immediately on their next page load.
+        </>
+      ),
+      confirmLabel: 'Change role',
+      confirmText: promotingToSuper ? 'SUPERADMIN' : undefined,
+    });
+    if (ok) {
+      update.mutate(
+        { role: displayRole },
+        {
+          onSuccess: () => {
+            setRole('');
+            toast.success(`${user.username} is now a ${ROLE_LABELS[displayRole as UserRole]}.`);
+          },
+        }
+      );
+    }
+  };
+
+  const handleToggleSuspend = async () => {
+    const suspending = !user.suspendedAt;
+    const ok = await askConfirm({
+      title: suspending ? `Suspend ${user.username}?` : `Unsuspend ${user.username}?`,
+      description: suspending
+        ? 'They will be signed out and blocked from logging in, entering tournaments, and booking slots until you unsuspend them.'
+        : 'They will be able to sign in and take part in tournaments again.',
+      confirmLabel: suspending ? 'Suspend account' : 'Unsuspend account',
+      tone: suspending ? 'danger' : 'default',
+    });
+    if (ok) {
+      update.mutate(
+        { suspended: suspending },
+        {
+          onSuccess: () =>
+            toast.success(suspending ? 'Account suspended.' : 'Account unsuspended.'),
+        }
+      );
+    }
+  };
+
+  const handleRevokeSessions = async () => {
+    const ok = await askConfirm({
+      title: 'Revoke all sessions?',
+      description: `${user.username} will be signed out on every device immediately and must log in again.`,
+      confirmLabel: 'Revoke sessions',
+    });
+    if (ok) revokeSessions.mutate();
+  };
+
+  const handleUpdateRating = () => {
+    const value = rating || String(user.ratingPoints ?? 650);
+    const result = validateAdminForm(adminRatingFormSchema, { ratingPoints: value });
+    if (!result.ok) {
+      setRatingError(result.errors.ratingPoints);
+      return;
+    }
+    setRatingError(undefined);
+    update.mutate(
+      { ratingPoints: parseInt(result.data.ratingPoints, 10) },
+      { onSuccess: () => toast.success('Rating updated.') }
+    );
+  };
+
+  const handleResetPassword = async () => {
+    const result = validateAdminForm(adminPasswordFormSchema, { password: newPassword });
+    if (!result.ok) {
+      setPasswordError(result.errors.password);
+      return;
+    }
+    setPasswordError(undefined);
+    const ok = await askConfirm({
+      title: `Reset password for ${user.username}?`,
+      description:
+        'Their current password stops working immediately. Make sure you have a secure way to give them the new one.',
+      confirmLabel: 'Reset password',
+    });
+    if (ok) resetPassword.mutate(newPassword);
+  };
 
   return (
     <div>
@@ -80,65 +190,73 @@ export function AdminUserDetailPage() {
           <p><span className="text-[var(--color-muted-foreground)]">VR:</span> {user.hasVrHeadset ? 'Yes' : 'No'}</p>
           <p><span className="text-[var(--color-muted-foreground)]">Matches:</span> {user.totalMatches}</p>
           <p><span className="text-[var(--color-muted-foreground)]">Bookings:</span> {user.confirmedBookings}</p>
-          {user.suspendedAt && <StatusPill status="cancelled" />}
+          {user.suspendedAt && <StatusBadge status="cancelled" />}
         </AdminCard>
 
         {isSuperAdmin && (
           <AdminCard className="p-5 space-y-4">
             <h3 className="font-semibold text-sm">Admin controls</h3>
             <div>
-              <Label className="text-xs">Role</Label>
-              <select
-                className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm mt-1"
+              <Label className="text-xs" htmlFor="user-role">Role</Label>
+              <Select
+                id="user-role"
+                className="mt-1"
                 value={displayRole}
                 onChange={(e) => setRole(e.target.value as UserRole)}
+                disabled={isSelf}
               >
-                <option value="player">Player</option>
-                <option value="venue_admin">Venue admin</option>
-                <option value="tournament_admin">Tournament admin</option>
-                <option value="superadmin">Superadmin</option>
-              </select>
+                {(Object.keys(ROLE_LABELS) as UserRole[]).map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </Select>
+              {isSelf && (
+                <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
+                  You cannot change your own role.
+                </p>
+              )}
               <Button
                 size="sm"
                 className="mt-2"
                 variant="outline"
-                onClick={() => update.mutate({ role: displayRole })}
-                disabled={displayRole === user.role}
+                onClick={handleSaveRole}
+                disabled={displayRole === user.role || isSelf || update.isPending}
               >
-                Save role
+                {update.isPending ? 'Saving…' : 'Save role'}
               </Button>
             </div>
             <div>
-              <Label className="text-xs">Rating points</Label>
+              <Label className="text-xs" htmlFor="user-rating">Rating points</Label>
               <Input
+                id="user-rating"
                 type="number"
                 min={0}
+                max={5000}
                 value={rating || String(user.ratingPoints ?? 650)}
                 onChange={(e) => {
                   setRating(e.target.value);
                   setRatingError(undefined);
                 }}
+                aria-invalid={Boolean(ratingError)}
               />
               <AdminFieldError message={ratingError} />
               <div className="flex gap-2 mt-2">
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    const value = rating || String(user.ratingPoints ?? 650);
-                    const result = validateAdminForm(adminRatingFormSchema, { ratingPoints: value });
-                    if (!result.ok) {
-                      setRatingError(result.errors.ratingPoints);
-                      return;
-                    }
-                    setRatingError(undefined);
-                    update.mutate({ ratingPoints: parseInt(result.data.ratingPoints, 10) });
-                  }}
+                  onClick={handleUpdateRating}
+                  disabled={update.isPending}
                 >
                   Update rating
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => syncTier.mutate()}>
-                  Sync tier
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => syncTier.mutate()}
+                  disabled={syncTier.isPending}
+                >
+                  {syncTier.isPending ? 'Syncing…' : 'Sync tier'}
                 </Button>
               </div>
             </div>
@@ -146,17 +264,24 @@ export function AdminUserDetailPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => update.mutate({ suspended: !user.suspendedAt })}
+                onClick={handleToggleSuspend}
+                disabled={update.isPending || isSelf}
               >
                 {user.suspendedAt ? 'Unsuspend' : 'Suspend'}
               </Button>
-              <Button size="sm" variant="outline" onClick={() => revokeSessions.mutate()}>
-                Revoke sessions
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRevokeSessions}
+                disabled={revokeSessions.isPending}
+              >
+                {revokeSessions.isPending ? 'Revoking…' : 'Revoke sessions'}
               </Button>
             </div>
             <div>
-              <Label className="text-xs">Reset password</Label>
+              <Label className="text-xs" htmlFor="user-new-password">Reset password</Label>
               <Input
+                id="user-new-password"
                 type="password"
                 value={newPassword}
                 onChange={(e) => {
@@ -164,24 +289,18 @@ export function AdminUserDetailPage() {
                   setPasswordError(undefined);
                 }}
                 placeholder="New password"
+                autoComplete="new-password"
+                aria-invalid={Boolean(passwordError)}
               />
               <AdminFieldError message={passwordError} />
               <Button
                 size="sm"
                 className="mt-2"
                 variant="outline"
-                onClick={() => {
-                  const result = validateAdminForm(adminPasswordFormSchema, { password: newPassword });
-                  if (!result.ok) {
-                    setPasswordError(result.errors.password);
-                    return;
-                  }
-                  setPasswordError(undefined);
-                  resetPassword.mutate();
-                }}
-                disabled={resetPassword.isPending}
+                onClick={handleResetPassword}
+                disabled={resetPassword.isPending || !newPassword}
               >
-                Reset password
+                {resetPassword.isPending ? 'Resetting…' : 'Reset password'}
               </Button>
             </div>
           </AdminCard>
@@ -201,7 +320,7 @@ export function AdminUserDetailPage() {
               {t.name}
             </Link>
           ),
-          status: <StatusPill status={t.status} />,
+          status: <StatusBadge status={t.status} />,
           record: `${t.wins}–${t.losses}`,
         }))}
         emptyMessage="No tournaments"

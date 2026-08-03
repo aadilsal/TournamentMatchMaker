@@ -8,6 +8,8 @@ import type {
   TournamentRegistration,
 } from '@vr-tournament/shared';
 import { apiDelete, apiGet, getAccessToken } from '@/lib/api';
+import { invalidateTournamentQueries } from '@/lib/query-keys';
+import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
@@ -59,11 +61,7 @@ export function TournamentDetailPage() {
 
   const withdrawMutation = useMutation({
     mutationFn: () => apiDelete(`/tournaments/${id}/register`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tournament', id] });
-      queryClient.invalidateQueries({ queryKey: ['tournament-bracket', id] });
-      queryClient.invalidateQueries({ queryKey: ['tournament-registration', id] });
-    },
+    onSuccess: () => invalidateTournamentQueries(queryClient, id),
   });
 
   const handleJoin = () => {
@@ -119,7 +117,7 @@ export function TournamentDetailPage() {
         {myRegistration && (
           <>
             <Button variant="secondary" onClick={handleJoin}>
-              Find next match
+              Pick slot & find next match
             </Button>
             <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
               {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
@@ -130,6 +128,18 @@ export function TournamentDetailPage() {
           <BuybackButton tournamentId={tournament.id} tournament={tournament} />
         )}
       </div>
+
+      {/* Registration closes when the tournament leaves the open phase. */}
+      {tournament.status !== 'open' && !myRegistration && (
+        <p className="text-sm text-[var(--color-muted-foreground)]">
+          Registration is closed for this tournament — new players can no longer join.
+        </p>
+      )}
+      {withdrawMutation.isError && (
+        <p className="text-sm text-[var(--color-destructive)]">
+          {getUserErrorMessage(withdrawMutation.error)}
+        </p>
+      )}
 
       {bracket && tabs.length > 0 && (
         <Card>

@@ -22,6 +22,7 @@ import { apiPost, setAccessToken } from '@/lib/api';
 import { disconnectSocket } from '@/hooks/useSocket';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import type { UserRole } from '@vr-tournament/shared';
+import { canAccessAdminPath } from '@/lib/admin-routes';
 import { cn } from '@/lib/utils';
 
 const allNav = [
@@ -39,27 +40,7 @@ const allNav = [
 ];
 
 function navForRole(role?: UserRole) {
-  if (!role || role === 'superadmin') return allNav;
-  if (role === 'venue_admin') {
-    return allNav.filter((n) =>
-      ['/admin', '/admin/venues', '/admin/bookings'].some(
-        (p) => n.href === p || (p !== '/admin' && n.href.startsWith(p))
-      )
-    );
-  }
-  if (role === 'tournament_admin') {
-    return allNav.filter((n) =>
-      [
-        '/admin',
-        '/admin/matches',
-        '/admin/tournaments',
-        '/admin/queue',
-        '/admin/buybacks',
-        '/admin/notifications',
-      ].includes(n.href)
-    );
-  }
-  return allNav;
+  return allNav.filter((n) => canAccessAdminPath(n.href, role));
 }
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {

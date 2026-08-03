@@ -106,10 +106,17 @@ export class AuthService {
 
   async refresh(refreshToken: string) {
     const tokenHash = this.hashToken(refreshToken);
+    // Delete-and-return: rotating in a single statement means a replayed token
+    // finds no row, so concurrent reuse can never mint a second pair.
+    // `rt.id` must be aliased — `SELECT rt.*, u.*` lets u.id overwrite it, which
+    // previously made this DELETE target the user id and match nothing.
     const result = await this.pool.query(
-      `SELECT rt.*, u.* FROM refresh_tokens rt
-       JOIN users u ON u.id = rt.user_id
-       WHERE rt.token_hash = $1 AND rt.expires_at > NOW()`,
+      `DELETE FROM refresh_tokens rt
+       USING users u
+       WHERE u.id = rt.user_id
+         AND rt.token_hash = $1
+         AND rt.expires_at > NOW()
+       RETURNING u.*`,
       [tokenHash]
     );
 
@@ -117,8 +124,6 @@ export class AuthService {
     if (!row) {
       throw new AppError('UNAUTHORIZED', 'Invalid or expired refresh token', 401);
     }
-
-    await this.pool.query('DELETE FROM refresh_tokens WHERE id = $1', [row.id]);
 
     const user = mapUser(row);
     const tokens = await this.issueTokens(user.id, user.email, user.role as UserRole);

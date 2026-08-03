@@ -1,3 +1,13 @@
+/**
+ * MANUAL ESCAPE HATCH — not part of `pnpm seed` any more.
+ *
+ * This script adds columns directly without recording anything in the
+ * `pgmigrations` ledger, so afterwards `migrate:up` re-runs DDL that is already
+ * applied and dies on a duplicate-column error. `pnpm seed` used to invoke it
+ * on every run, which meant every seed left the ledger out of sync with the
+ * schema. Reach for `pnpm migrate:up` first; only use this to rescue a database
+ * that has already drifted, and run `pnpm migrate:baseline` afterwards.
+ */
 import dotenv from 'dotenv';
 import pg from 'pg';
 import { resolve, dirname } from 'path';

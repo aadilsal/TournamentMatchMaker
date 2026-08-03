@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Venue } from '@vr-tournament/shared';
 import {
+  AdminQueryError,
   AdminFilterBar,
   AdminFilterField,
   AdminFilterSearch,
@@ -9,7 +10,7 @@ import {
   AdminPageHeader,
   AdminTableFooter,
   DataTable,
-  StatusPill,
+  StatusBadge,
 } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
@@ -56,7 +57,9 @@ export function AdminVenuesPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {list.isLoading ? (
+      {list.error ? (
+        <AdminQueryError error={list.error} resource="venues" onRetry={() => list.refetch()} />
+      ) : list.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>
@@ -76,7 +79,7 @@ export function AdminVenuesPage() {
               city: `${v.city}, ${v.country}`,
               capacity: v.capacity,
               active: v.active ? (
-                <StatusPill status="active" />
+                <StatusBadge status="active" />
               ) : (
                 <span className="text-xs text-[var(--color-muted-foreground)]">Inactive</span>
               ),

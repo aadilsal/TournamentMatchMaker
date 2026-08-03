@@ -5,12 +5,14 @@ import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
 import { validate } from '../../middleware/validate.js';
 import { authenticate } from '../../middleware/auth.js';
+import { credentialRateLimit } from '../../middleware/rateLimit.js';
 import { sendSuccess } from '../../lib/response.js';
 import { AuthService } from './auth.service.js';
 
 export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
   const authService = new AuthService(pool, redis, env);
+  const credentialLimit = credentialRateLimit(env);
 
   router.get('/check-availability', async (req, res, next) => {
     try {
@@ -28,7 +30,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
     }
   });
 
-  router.post('/register', validate(registerSchema), async (req, res, next) => {
+  router.post('/register', credentialLimit, validate(registerSchema), async (req, res, next) => {
     try {
       const result = await authService.register(req.body);
       res.cookie(
@@ -42,7 +44,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
     }
   });
 
-  router.post('/login', validate(loginSchema), async (req, res, next) => {
+  router.post('/login', credentialLimit, validate(loginSchema), async (req, res, next) => {
     try {
       const result = await authService.login(req.body.email, req.body.password);
       res.cookie(
@@ -56,7 +58,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
     }
   });
 
-  router.post('/refresh', async (req, res, next) => {
+  router.post('/refresh', credentialLimit, async (req, res, next) => {
     try {
       const refreshToken = req.cookies?.refresh_token;
       if (!refreshToken) {

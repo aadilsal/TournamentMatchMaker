@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type { QueuePairFailedEvent, QueueStatus, Tournament } from '@vr-tournament/shared';
@@ -12,21 +12,36 @@ import {
 import { useSocketEvent } from '@/hooks/useSocket';
 import { Button } from '@/components/ui/button';
 import { Badge, tournamentStatusBadge } from '@/components/ui/badge';
+import { Tabs } from '@/components/ui/tabs';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { CricketBallLoader } from '@/components/ui/cricket-loader';
 import { Trophy, Calendar, Users } from 'lucide-react';
 import { motion } from 'motion/react';
 
+type TournamentView = 'active' | 'completed';
+
 export function TournamentsPage() {
   const navigate = useNavigate();
   const isLoggedIn = !!getAccessToken();
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
+  // Finished seasons are noise on the default view — they stay one click away.
+  const [view, setView] = useState<TournamentView>('active');
 
   const { data: tournaments = [], isLoading } = useQuery({
     queryKey: ['tournaments'],
     queryFn: () => apiGet<Tournament[]>('/tournaments'),
   });
+
+  const { active, completed } = useMemo(
+    () => ({
+      active: tournaments.filter((t) => t.status !== 'completed'),
+      completed: tournaments.filter((t) => t.status === 'completed'),
+    }),
+    [tournaments]
+  );
+
+  const visible = view === 'completed' ? completed : active;
 
   const { data: queueStatus } = useQuery({
     queryKey: LIVE_QUERY_KEYS.matchmakingStatus,
@@ -87,17 +102,32 @@ export function TournamentsPage() {
         </motion.div>
       )}
 
+      {!isLoading && tournaments.length > 0 && (
+        <Tabs
+          active={view}
+          onChange={(id) => setView(id as TournamentView)}
+          tabs={[
+            { id: 'active', label: `Live & upcoming (${active.length})` },
+            { id: 'completed', label: `Completed (${completed.length})` },
+          ]}
+        />
+      )}
+
       {isLoading ? (
         <GridSkeleton cols={2} count={4} />
-      ) : tournaments.length === 0 ? (
+      ) : visible.length === 0 ? (
         <EmptyState
           icon={<Trophy className="h-12 w-12" />}
-          title="No open tournaments"
-          description="Check back soon for new seasons."
+          title={view === 'completed' ? 'No completed tournaments' : 'No live or upcoming tournaments'}
+          description={
+            view === 'completed'
+              ? 'Finished seasons will show up here.'
+              : 'Check back soon for new seasons.'
+          }
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {tournaments.map((t, i) => {
+          {visible.map((t, i) => {
             const { label, variant } = tournamentStatusBadge(t.status);
             return (
               <motion.div

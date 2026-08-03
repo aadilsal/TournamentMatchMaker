@@ -395,11 +395,19 @@ function inProgressResult(p1Score: number, p2Score: number) {
 }
 
 /** Seeds RO16 → QF → SF (+ optional Final) for a 16-player knockout bracket demo. */
+/**
+ * @param finished  Resolve every round through to a champion. A tournament with
+ *   status 'completed' must not be left holding playable matches — the Meta API
+ *   surfaces any confirmed/in_progress match as the player's current match, so
+ *   an unfinished bracket in a finished tournament hands the VR client a match
+ *   it can still submit scores to.
+ */
 async function seedKnockoutBracket(
   client: PoolClient,
   tournamentId: string,
   koPlayers: string[],
-  scheduledAt?: Date
+  scheduledAt?: Date,
+  { finished = false }: { finished?: boolean } = {}
 ) {
   const players = koPlayers.slice(0, 16);
   if (players.length < 16) {
@@ -429,9 +437,8 @@ async function seedKnockoutBracket(
   for (let slot = 0; slot < 4; slot++) {
     const p1 = ro16Winners[slot * 2];
     const p2 = ro16Winners[slot * 2 + 1];
-    const completed = slot < 2;
-    const winner = completed ? p1 : null;
-    if (winner) qfWinners.push(winner);
+    const completed = finished || slot < 2;
+    if (completed) qfWinners.push(p1);
     await insertMatch(client, {
       tournamentId,
       player1Id: p1,
@@ -444,37 +451,93 @@ async function seedKnockoutBracket(
     });
   }
 
-  await insertMatch(client, {
-    tournamentId,
-    player1Id: ro16Winners[0],
-    player2Id: ro16Winners[2],
-    status: 'confirmed',
-    roundNumber: KNOCKOUT.sf,
-    phase: 'knockout',
-    bracketSlot: 0,
-    scheduledAt,
-  });
-  await insertMatch(client, {
-    tournamentId,
-    player1Id: ro16Winners[4],
-    player2Id: ro16Winners[6],
-    status: 'pending_confirmation',
-    roundNumber: KNOCKOUT.sf,
-    phase: 'knockout',
-    bracketSlot: 1,
-    scheduledAt,
-  });
+  const sfPairs = finished
+    ? [
+        [qfWinners[0], qfWinners[1]],
+        [qfWinners[2], qfWinners[3]],
+      ]
+    : [
+        [ro16Winners[0], ro16Winners[2]],
+        [ro16Winners[4], ro16Winners[6]],
+      ];
 
+  for (let slot = 0; slot < 2; slot++) {
+    const [p1, p2] = sfPairs[slot];
+    await insertMatch(client, {
+      tournamentId,
+      player1Id: p1,
+      player2Id: p2,
+      status: finished ? 'completed' : slot === 0 ? 'confirmed' : 'pending_confirmation',
+      roundNumber: KNOCKOUT.sf,
+      phase: 'knockout',
+      bracketSlot: slot,
+      scheduledAt,
+      result: finished ? completedResult(p1, p2, 26, 22) : null,
+    });
+  }
+
+  const finalP1 = finished ? sfPairs[0][0] : ro16Winners[0];
+  const finalP2 = finished ? sfPairs[1][0] : ro16Winners[4];
   await insertMatch(client, {
     tournamentId,
-    player1Id: ro16Winners[0],
-    player2Id: ro16Winners[4],
-    status: 'pending_confirmation',
+    player1Id: finalP1,
+    player2Id: finalP2,
+    status: finished ? 'completed' : 'pending_confirmation',
     roundNumber: KNOCKOUT.final,
     phase: 'knockout',
     bracketSlot: 0,
     scheduledAt,
+    result: finished ? completedResult(finalP1, finalP2, 30, 27) : null,
   });
+}
+
+/**
+ * Runs inside the seed transaction, so a violation rolls the whole thing back
+ * rather than leaving a database that looks fine but breaks the app.
+ */
+async function assertSeedInvariants(client: PoolClient) {
+  const problems: string[] = [];
+
+  // Enforced by idx_one_live_tournament_per_user (migration 12). Checked here
+  // too so the failure names the players instead of surfacing as a raw 23505.
+  const multiLive = await client.query(
+    `SELECT u.username, count(*)::int AS n
+     FROM tournament_participants tp JOIN users u ON u.id = tp.user_id
+     WHERE tp.status IN ('active','advanced','knockout')
+     GROUP BY u.username HAVING count(*) > 1`
+  );
+  for (const r of multiLive.rows) {
+    problems.push(`${r.username} is live in ${r.n} tournaments (max 1)`);
+  }
+
+  // A finished tournament must not hold playable matches: the Meta API returns
+  // any confirmed/in_progress match as the player's current match.
+  const zombie = await client.query(
+    `SELECT t.name, count(*)::int AS n
+     FROM matches m JOIN tournaments t ON t.id = m.tournament_id
+     WHERE t.status = 'completed'
+       AND m.status IN ('pending_confirmation','confirmed','in_progress')
+     GROUP BY t.name`
+  );
+  for (const r of zombie.rows) {
+    problems.push(`"${r.name}" is finished but has ${r.n} playable match(es)`);
+  }
+
+  const liveInFinished = await client.query(
+    `SELECT t.name, count(*)::int AS n
+     FROM tournament_participants tp JOIN tournaments t ON t.id = tp.tournament_id
+     WHERE t.status = 'completed'
+       AND tp.status IN ('active','advanced','knockout')
+     GROUP BY t.name`
+  );
+  for (const r of liveInFinished.rows) {
+    problems.push(`"${r.name}" is finished but has ${r.n} live participant(s)`);
+  }
+
+  if (problems.length > 0) {
+    throw new Error(`Seed invariants violated:\n  - ${problems.join('\n  - ')}`);
+  }
+  console.log('Seed invariants OK (one live tournament per player, no zombie matches)');
 }
 
 async function seedMatchmakingQueue(opts: {
@@ -541,11 +604,13 @@ function printSeedGuide(tournamentIds: {
   const pw = 'password123';
   console.log('\n=== Test accounts (password: password123) ===');
   console.log('  admin@vrtournament.com     superadmin');
-  console.log('  player@vrtournament.com    non-VR Lahore — in Lahore Cup R2, bookings, matches');
+  console.log('  player@vrtournament.com    non-VR Lahore — NOT in any tournament (casual matches + bookings)');
   console.log('  player2@vrtournament.com   VR Lahore — in Lahore Cup, use "Find my match" flow');
   console.log('  player3@vrtournament.com   non-VR Karachi — in Karachi Open');
   console.log('  player4@vrtournament.com   NOT in any tournament — test enter/register flow');
   console.log('  player5@vrtournament.com   VR Karachi — in queue ("Finding opponent…")');
+  console.log('\n  NOTE: a player may be live in only one tournament at a time, so');
+  console.log('  player1 and player4 are the two accounts free to enter a new one.');
   console.log('\n=== Feature checklist ===');
   console.log('  Tournaments hub (/)          → /tournaments — 5 tournaments (open, in-progress, knockout, completed)');
   console.log('  Guest view                   → log out, browse tournaments');
@@ -558,7 +623,7 @@ function printSeedGuide(tournamentIds: {
   console.log('  Profile tier + points        → /profile (private view)');
   console.log('  Venues geo search            → home page uses Lahore/Karachi coords');
   console.log('  Buyback                      → login imam_lefty / password123 → /matches');
-  console.log('  Knockout bracket             → Lahore VR Championship → Knockout tab (also Punjab Knockout Cup)');
+  console.log('  Knockout bracket             → Lahore VR Championship → Knockout tab (live); Punjab Knockout Cup (finished)');
   console.log('  Notifications                → bell icon for player1/player2/player3');
   console.log('\nTournament IDs (for API/debug):');
   console.log('  Lahore VR Championship:', tournamentIds.lahoreCupId);
@@ -750,7 +815,18 @@ async function seed() {
     await upsertRound(client, lahoreCupId, 1, inDays(-3), inDays(-1), 'closed');
     await upsertRound(client, lahoreCupId, 2, inDays(0), inDays(2), 'active');
 
-    const lahorePlayers = [playerIds[0], playerIds[1], ...playerIds.slice(6, 14)];
+    // Migration 12 (idx_one_live_tournament_per_user) allows a player to hold a
+    // live status — active/advanced/knockout — in exactly one tournament. The
+    // rosters below are therefore disjoint, and only tournaments that are still
+    // running keep players live; completed ones leave everyone in a terminal
+    // status so those players are free to enter something else.
+    //
+    //   playerIds[0] (player1) and playerIds[3] (player4) are deliberately left
+    //   out of every roster so the enter/register flows have a clean account.
+    //   playerIds[1] (player2_vr)  → Lahore VR Championship
+    //   playerIds[2] (player3_khi) → Karachi Open
+    //   playerIds[4] (player5_queued) → Karachi Open, sitting in the queue
+    const lahorePlayers = [playerIds[1], ...playerIds.slice(5, 20)]; // 16 → knockout bracket
     for (let i = 0; i < lahorePlayers.length; i++) {
       await registerParticipant(client, lahoreCupId, lahorePlayers[i]);
     }
@@ -807,12 +883,11 @@ async function seed() {
 
     await syncParticipantStatsFromMatches(client, lahoreCupId, lahorePlayers);
 
-    // Knockout phase — normal rounds 1–2 stay visible; Knockout tab shows bracket
-    const koQualifiers = playerIds.slice(0, 16);
+    // Knockout phase — normal rounds 1–2 stay visible; Knockout tab shows bracket.
+    // The qualifiers are the Lahore roster itself; pulling in outside players
+    // here would make them live in a second tournament.
+    const koQualifiers = lahorePlayers.slice(0, 16);
     for (const pid of koQualifiers) {
-      if (!lahorePlayers.includes(pid)) {
-        await registerParticipant(client, lahoreCupId, pid);
-      }
       await client.query(
         `UPDATE tournament_participants
          SET status = 'knockout', round_number = $3, wins = GREATEST(wins, 2), updated_at = NOW()
@@ -851,7 +926,7 @@ async function seed() {
 
     await upsertRound(client, karachiOpenId, 1, inDays(13), inDays(15), 'active');
 
-    const karachiPlayers = [playerIds[2], playerIds[4], ...playerIds.slice(14, 20)];
+    const karachiPlayers = [playerIds[2], playerIds[4], ...playerIds.slice(20, 25)];
     for (const pid of karachiPlayers) {
       await registerParticipant(client, karachiOpenId, pid);
     }
@@ -883,32 +958,37 @@ async function seed() {
       });
     }
 
-    // --- Tournament 3: Punjab Knockout Cup (knockout phase in progress) ---
+    // --- Tournament 3: Punjab Knockout Cup (finished bracket) ---
+    // Two 16-player knockouts cannot both be live: that would need 32 distinct
+    // players out of 25, and every one of them would be live in two tournaments
+    // at once. Lahore VR Championship is the *running* knockout demo, so this
+    // one is seeded as a finished bracket — the Knockout tab still renders it,
+    // and its players stay free to enter something else.
     const knockoutCupId = await upsertTournament(client, {
       name: 'Punjab Knockout Cup',
       game: 'VR Cricket',
       startDate: inDays(-7),
-      endDate: inDays(3),
-      status: 'in_progress',
+      endDate: inDays(-1),
+      status: 'completed',
       maxPlayers: 64,
       skillTier: 4,
       buybackPriceCents: 750,
-      phase: 'knockout',
-      currentRoundNumber: KNOCKOUT.qf,
+      phase: 'completed',
+      currentRoundNumber: KNOCKOUT.final,
     });
 
     const koPlayers = playerIds.slice(0, 16);
     for (const pid of koPlayers) {
       await registerParticipant(client, knockoutCupId, pid, {
-        status: 'knockout',
-        roundNumber: KNOCKOUT.qf,
+        status: 'out',
+        roundNumber: KNOCKOUT.final,
         wins: 2,
-        losses: 0,
+        losses: 1,
       });
     }
 
     await clearTournamentMatches(client, knockoutCupId);
-    await seedKnockoutBracket(client, knockoutCupId, koPlayers, inDays(1));
+    await seedKnockoutBracket(client, knockoutCupId, koPlayers, inDays(-1), { finished: true });
 
     // --- Tournament 4: Winter VR Cup (completed) ---
     const winterCupId = await upsertTournament(client, {
@@ -928,8 +1008,10 @@ async function seed() {
     for (const pid of winterPlayers) {
       await registerParticipant(client, winterCupId, pid, { status: 'out', wins: 1, losses: 1 });
     }
+    // The champion keeps the winning record but stays terminal — a finished
+    // tournament must not hold anyone in a live status.
     await client.query(
-      `UPDATE tournament_participants SET status = 'advanced', wins = 4, losses = 0
+      `UPDATE tournament_participants SET wins = 4, losses = 0
        WHERE tournament_id = $1 AND user_id = $2`,
       [winterCupId, winterPlayers[0]]
     );
@@ -1065,6 +1147,8 @@ async function seed() {
         [lahoreCupId, buybackDemoPlayer]
       );
     }
+
+    await assertSeedInvariants(client);
 
     await client.query('COMMIT');
 

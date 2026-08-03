@@ -1,4 +1,5 @@
 import { isSameCity } from './locations.js';
+import { slotsOverlap } from './slot-utils.js';
 
 export interface QueueEntry {
   userId: string;
@@ -8,6 +9,7 @@ export interface QueueEntry {
   roundNumber: number;
   hasPlayedSolo?: boolean;
   soloPlayedAt?: number;
+  slotStartAt?: number | null;
   slotEndAt?: number | null;
 }
 
@@ -38,9 +40,22 @@ function minTierDistanceInRound(entries: QueueEntry[], roundNumber: number): num
   return minDist;
 }
 
+/**
+ * A match carries one time slot, so two players who both hold a play window can
+ * only be paired if those windows overlap — otherwise one of them could never
+ * play or submit a score. A player without a window (open queue) pairs freely.
+ */
+function slotsCompatible(a: QueueEntry, b: QueueEntry): boolean {
+  const aHasWindow = a.slotStartAt != null && a.slotEndAt != null;
+  const bHasWindow = b.slotStartAt != null && b.slotEndAt != null;
+  if (!aHasWindow || !bHasWindow) return true;
+  return slotsOverlap(a.slotStartAt, a.slotEndAt, b.slotStartAt, b.slotEndAt);
+}
+
 function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number): number | null {
   if (a.userId === b.userId) return null;
   if (a.roundNumber !== b.roundNumber) return null;
+  if (!slotsCompatible(a, b)) return null;
 
   const dist = tierDistance(a.skillTier, b.skillTier);
   const maxWait = Math.max(waitSeconds(a, now), waitSeconds(b, now));

@@ -21,3 +21,38 @@ export const TOURNAMENT_FLOW_GUIDE = {
     },
   ],
 } as const;
+
+export type TournamentStatusValue = 'draft' | 'open' | 'closed' | 'in_progress' | 'completed';
+
+export const TOURNAMENT_STATUS_LABELS: Record<TournamentStatusValue, string> = {
+  draft: 'Draft',
+  open: 'Open',
+  closed: 'Closed',
+  in_progress: 'In progress',
+  completed: 'Completed',
+};
+
+/**
+ * The only status moves the guided lifecycle bar offers. The edit form uses the
+ * same map so an admin cannot bypass the guardrails by jumping straight to an
+ * arbitrary status from the raw dropdown.
+ */
+export const TOURNAMENT_STATUS_TRANSITIONS: Record<TournamentStatusValue, TournamentStatusValue[]> = {
+  draft: ['open'],
+  open: ['closed'],
+  closed: ['in_progress'],
+  in_progress: ['completed'],
+  completed: [],
+};
+
+/** Statuses selectable from `current`, always including `current` itself (no change). */
+export function allowedTournamentStatuses(current: TournamentStatusValue): TournamentStatusValue[] {
+  return [current, ...TOURNAMENT_STATUS_TRANSITIONS[current]];
+}
+
+export function isValidTournamentTransition(
+  from: TournamentStatusValue,
+  to: TournamentStatusValue
+): boolean {
+  return from === to || TOURNAMENT_STATUS_TRANSITIONS[from].includes(to);
+}

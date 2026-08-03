@@ -4,37 +4,96 @@ import { SKILL_TIER_OPTIONS } from '@vr-tournament/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { Select } from '@/components/ui/select';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ArrowUpRight,
+  ShieldOff,
+  SearchX,
+  AlertCircle,
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ApiClientError, getUserErrorMessage } from '@/lib/api';
 
 export function AdminFieldError({ message }: { message?: string }) {
   if (!message) return null;
-  return <p className="text-xs text-[var(--color-destructive)] mt-1">{message}</p>;
+  return (
+    <p className="text-xs text-[var(--color-destructive)] mt-1" role="alert">
+      {message}
+    </p>
+  );
 }
 
-const adminSelectClass =
-  'w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm';
+/**
+ * Distinguishes "you can't see this", "it doesn't exist", and "the request
+ * failed". Previously all three rendered as an empty table or bare
+ * "not found" text, which read as "there is no data".
+ */
+export function AdminQueryError({
+  error,
+  resource = 'data',
+  onRetry,
+}: {
+  error: unknown;
+  resource?: string;
+  onRetry?: () => void;
+}) {
+  const status = error instanceof ApiClientError ? error.status : undefined;
+  const forbidden = status === 403;
+  const notFound = status === 404;
+
+  const title = forbidden
+    ? 'You don’t have permission to view this'
+    : notFound
+      ? `This ${resource} no longer exists`
+      : `Couldn’t load ${resource}`;
+
+  const detail = forbidden
+    ? 'Your admin role doesn’t cover this data. Ask a superadmin if you need access.'
+    : notFound
+      ? 'It may have been deleted since this link was created.'
+      : getUserErrorMessage(error);
+
+  const Icon = forbidden ? ShieldOff : notFound ? SearchX : AlertCircle;
+
+  return (
+    <AdminCard className="p-8 text-center">
+      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-destructive)]/15 text-[var(--color-destructive)]">
+        <Icon className="h-5 w-5" />
+      </div>
+      <p className="font-semibold">{title}</p>
+      <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-[var(--color-muted-foreground)]">
+        {detail}
+      </p>
+      {onRetry && !forbidden && !notFound && (
+        <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
+          Try again
+        </Button>
+      )}
+    </AdminCard>
+  );
+}
 
 export function AdminSkillTierSelect({
   value,
   onChange,
   className,
+  id,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  id?: string;
 }) {
   return (
-    <select
-      className={cn(adminSelectClass, className)}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
+    <Select id={id} className={className} value={value} onChange={(e) => onChange(e.target.value)}>
       {SKILL_TIER_OPTIONS.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -88,11 +147,8 @@ export function AdminFilterSelect({
   className?: string;
 }) {
   return (
-    <select
-      className={cn(
-        'w-full h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 text-sm',
-        className
-      )}
+    <Select
+      className={cn('h-9 px-2.5', className)}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
@@ -102,7 +158,7 @@ export function AdminFilterSelect({
           {o.label}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 
@@ -160,8 +216,9 @@ export function AdminTableFooter({
       <div className="flex flex-wrap items-end justify-end gap-2 ml-auto">
         {onLimitChange && (
           <AdminFilterField label="Per page" className="min-w-[88px] mb-0">
-            <select
-              className="w-full h-9 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-2.5 text-sm"
+            <Select
+              className="h-9 px-2.5"
+              aria-label="Rows per page"
               value={String(limit)}
               onChange={(e) => onLimitChange(Number(e.target.value))}
             >
@@ -169,7 +226,7 @@ export function AdminTableFooter({
               <option value="20">20</option>
               <option value="50">50</option>
               <option value="100">100</option>
-            </select>
+            </Select>
           </AdminFilterField>
         )}
         <Button
@@ -272,19 +329,35 @@ export function StatCard({
   label,
   value,
   sub,
+  to,
 }: {
   label: string;
   value: string | number;
   sub?: string;
+  /** When set, the whole card links to the matching filtered list view. */
+  to?: string;
 }) {
-  return (
-    <AdminCard className="p-4">
+  const body = (
+    <>
       <p className="text-xs font-medium text-[var(--color-muted-foreground)] uppercase tracking-wide">
         {label}
       </p>
       <p className="text-2xl font-bold mt-1">{value}</p>
       {sub && <p className="text-xs text-[var(--color-muted-foreground)] mt-1">{sub}</p>}
-    </AdminCard>
+    </>
+  );
+
+  if (!to) return <AdminCard className="p-4">{body}</AdminCard>;
+
+  return (
+    <Link to={to} className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-ring)]">
+      <AdminCard className="h-full p-4 transition-colors group-hover:border-[var(--color-primary)]/50 group-hover:bg-[var(--color-muted)]/30">
+        <span className="flex items-start justify-between gap-2">
+          <span className="min-w-0">{body}</span>
+          <ArrowUpRight className="h-4 w-4 shrink-0 text-[var(--color-muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100" />
+        </span>
+      </AdminCard>
+    </Link>
   );
 }
 
@@ -381,30 +454,8 @@ export function DataTable({
   );
 }
 
-export function StatusPill({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    open: 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]',
-    draft: 'bg-zinc-500/15 text-zinc-400',
-    closed: 'bg-white/10 text-white/70',
-    in_progress: 'bg-[var(--color-primary)]/20 text-white',
-    completed: 'bg-white/10 text-white/80',
-    pending_confirmation: 'bg-white/10 text-white/70',
-    confirmed: 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]',
-    cancelled: 'bg-red-500/15 text-red-400',
-    expired: 'bg-zinc-500/15 text-zinc-400',
-    active: 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]',
-    eliminated: 'bg-red-500/15 text-red-400',
-    confirmed_booking: 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]',
-  };
-  const key = status.replace(/\s/g, '_');
-  return (
-    <span
-      className={cn(
-        'inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize',
-        colors[key] ?? 'bg-[var(--color-muted)] text-[var(--color-muted-foreground)]'
-      )}
-    >
-      {status.replace(/_/g, ' ')}
-    </span>
-  );
-}
+/**
+ * Admin status colours now come from the shared StatusBadge so admin and
+ * player-facing surfaces cannot drift apart again.
+ */
+export { StatusBadge } from '@/components/ui/badge';

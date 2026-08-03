@@ -169,9 +169,8 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
   "success": true,
   "data": {
     "inQueue": true,
-    "queueSize": 3,
+    "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
     "canSubmitSoloTarget": true,
-    "soloTarget": null,
     "match": null
   },
   "error": null,
@@ -186,32 +185,19 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
   "success": true,
   "data": {
     "inQueue": false,
-    "queueSize": null,
+    "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
     "canSubmitSoloTarget": false,
-    "soloTarget": 87,
     "match": {
       "id": "1a911c21-85fb-435b-84d2-3f7a9c4e12ab",
-      "status": "confirmed",
-      "opponent": {
-        "id": "b2cb72e1-d9b7-479c-b70b-80eb552a83cd",
-        "username": "player5_queued",
-        "skillTier": 3
-      },
-      "venue": {
-        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-        "name": "VR Arena Karachi",
-        "city": "Karachi"
-      },
-      "slot": {
-        "id": "f9e8d7c6-b5a4-3210-fedc-ba9876543210",
-        "startTime": "2026-06-22T14:00:00.000Z",
-        "endTime": "2026-06-22T15:00:00.000Z"
-      },
+      "opponent": "player5_queued",
+      "venue": "VR Arena Karachi",
+      "startTime": "2026-06-22T14:00:00.000Z",
+      "endTime": "2026-06-22T15:00:00.000Z",
       "chaseTarget": 87,
       "amChasing": true,
+      "amSettingTarget": false,
       "myScore": null,
-      "opponentScore": null,
-      "scheduledAt": "2026-06-22T14:00:00.000Z"
+      "opponentScore": null
     }
   },
   "error": null,
@@ -224,9 +210,8 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
 | Field | Type | Description |
 |-------|------|-------------|
 | `inQueue` | boolean | `true` if player is waiting for an opponent |
-| `queueSize` | number \| null | Players in the same tournament queue (null if not queued) |
+| `tournamentId` | UUID \| null | Tournament the player is queued for / playing in. **Pass this to `POST /solo-target`** — do not hard-code or cache it. `null` when the player is neither queued nor in a match. |
 | `canSubmitSoloTarget` | boolean | `true` if player may call `POST /solo-target` now |
-| `soloTarget` | number \| null | Target already submitted from a solo round |
 | `match` | object \| null | Active match details, or `null` if none |
 
 #### `match` object (when present)
@@ -234,32 +219,48 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | UUID | Match ID — use in `POST /matches/:id/scores` |
-| `status` | string | `confirmed` or `in_progress` (playable states) |
-| `opponent` | object | `{ id, username, skillTier }` |
-| `venue` | object \| null | Venue name/city for display or routing |
-| `slot` | object \| null | Booked time window (`startTime`, `endTime` ISO 8601) |
+| `opponent` | string | Opponent’s username (display only) |
+| `venue` | string \| null | Venue name for display |
+| `startTime` | string \| null | Booked slot start (ISO 8601) |
+| `endTime` | string \| null | Booked slot end (ISO 8601) — scores must be submitted before this |
 | `chaseTarget` | number \| null | Runs to chase (null = standard highest-score-wins) |
 | `amChasing` | boolean | `true` if **this player** must beat `chaseTarget` to win |
-| `myScore` | number \| null | Score already submitted by this player |
+| `amSettingTarget` | boolean | `true` if nothing is on the board yet and this player bats first — their score becomes the total the opponent must beat. Mutually exclusive with `amChasing`. |
+| `myScore` | number \| null | Score already submitted by this player (null = not yet submitted) |
 | `opponentScore` | number \| null | Opponent’s submitted score |
-| `scheduledAt` | string \| null | Scheduled start (ISO 8601) |
 
-#### Match status values (reference)
+`match` is non-null **only** while the match is playable. Once it completes, is cancelled
+(rematch), or expires, `match` becomes `null` again — there is no status field to inspect.
 
-| Status | Playable via Meta? | Meaning |
-|--------|-------------------|---------|
-| `confirmed` | Yes | Match ready — tournament matches are auto-confirmed |
-| `in_progress` | Yes | One score submitted; waiting for the other |
-| `pending_confirmation` | No | Legacy/manual confirm flow (not used for tournament VR) |
-| `completed` | No | Match finished |
-| `cancelled` | No | Match cancelled (e.g. rematch scheduled) |
-| `expired` | No | Slot ended without scores |
+#### Which innings am I playing?
+
+The three fields below are enough to pick the UI; you never need to infer state from scores.
+
+| `chaseTarget` | `amChasing` | `amSettingTarget` | Show |
+|---|---|---|---|
+| number | `true` | `false` | **Chase** — beat `chaseTarget` to win |
+| number | `false` | `false` | **Defend** — opponent is chasing your target |
+| `null` | `false` | `true` | **Bat first** — your score sets the total |
+| `null` | `false` | `false` | **Standard** — highest score wins; check `opponentScore` |
 
 #### Polling recommendation
 
 - Poll every **2–5 seconds** while in queue or in an active match.
-- Stop aggressive polling once `match.status` is `completed` or `cancelled`.
+- `match !== null` → play head-to-head. `match === null` → back to queue / idle.
+- Use `myScore !== null` to know this player’s score is already recorded.
 - Use `canSubmitSoloTarget` to decide whether to show the solo innings UI.
+
+#### Two states that surprise integrators
+
+**A player can hold more than one playable match.** This endpoint returns the most
+recent one. Always re-read `match.id` from the latest poll before submitting a score —
+never cache it across polls. After a match completes, the next poll may immediately
+return a *different* match rather than `null`.
+
+**`inQueue: true` with `canSubmitSoloTarget: false` is normal.** It means the player is
+queued but may not play a solo innings right now — they already recorded a target this
+round, the round has closed, or they are holding a match that is not yet playable. Show
+a neutral “waiting for opponent” state; do not retry `POST /solo-target` to find out.
 
 ---
 
@@ -363,9 +364,9 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 
 | HTTP | Code | Message | When |
 |------|------|---------|------|
-| `400` | `VALIDATION_ERROR` | Various | Invalid UUID, score out of range, malformed JSON |
+| `400` | `VALIDATION_ERROR` | `Invalid request data` | `matchId` or `userId` not a UUID, `score` not an integer `0`–`999`, malformed JSON |
 | `403` | `FORBIDDEN` | `User is not a participant in this match` | Wrong `userId` for this match |
-| `404` | `NOT_FOUND` | `Match not found` | Invalid `matchId` |
+| `404` | `NOT_FOUND` | `Match not found` | Well-formed `matchId` that does not exist (e.g. cached across a rematch) |
 | `409` | `CONFLICT` | `Match is not currently playable` | Status not `confirmed`/`in_progress` |
 | `409` | `CONFLICT` | `Player 1 score already submitted` / `Player 2 score already submitted` | Duplicate submit |
 | `409` | `CONFLICT` | `Match slot has ended — scores cannot be submitted` | Past slot `endTime` |
@@ -393,7 +394,7 @@ POST /solo-target
 | Field | Type | Required | Constraints |
 |-------|------|----------|-------------|
 | `userId` | UUID | Yes | Player submitting the solo score |
-| `tournamentId` | UUID | Yes | Tournament they are queued for |
+| `tournamentId` | UUID | Yes | Tournament they are queued for — take it from `GET /matches/current` → `data.tournamentId` |
 | `target` | integer | Yes | Solo innings score, `0` – `999` |
 
 #### Example request
@@ -426,6 +427,7 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/solo-t
 |------|-------------------|
 | Player is in matchmaking queue | `409` — `Player must be in queue to submit a solo target` |
 | No active match (`pending_confirmation`, `confirmed`, `in_progress`) | `409` — `Cannot submit solo target while in an active match` |
+| *(all of the above are already reflected in `canSubmitSoloTarget` — if it is `true`, this call will not fail on a precondition)* | |
 | Active tournament participant | `403` — `Not an active tournament participant` |
 | Participant status `active` or `advanced` | `403` — `Participant is not active in this round` |
 | Round still open | `409` — `Round has ended` |
@@ -444,13 +446,13 @@ Call `GET /matches/current` and check:
 ```json
 {
   "inQueue": true,
+  "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
   "canSubmitSoloTarget": true,
-  "soloTarget": null,
   "match": null
 }
 ```
 
-If `canSubmitSoloTarget` is `true` and `soloTarget` is `null`, prompt the player to play solo and then call `POST /solo-target`.
+If `canSubmitSoloTarget` is `true`, prompt the player to play solo and then call `POST /solo-target`, passing the **`tournamentId` from this same response**. `canSubmitSoloTarget` flips to `false` once a target has been recorded, so no separate check is needed.
 
 ---
 
@@ -566,15 +568,15 @@ When `chaseTarget` is `null`:
 
 ### 6.3 Rematch
 
-On rematch (`status: cancelled`, `result.outcome: rematch`):
+On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`):
 
-- Poll `GET /matches/current` again — players return to queue.
+- Poll `GET /matches/current` again — `match` returns to `null` and `inQueue` becomes `true`.
 - A new match will be created when the pairing worker runs.
 - Submit scores only to the **new** `match.id`.
 
 ### 6.4 Time windows
 
-- Scores can only be submitted while the match’s booked slot `endTime` is in the future.
+- Scores can only be submitted while the match’s `endTime` is in the future.
 - Players should complete VR play within their venue slot window.
 
 ---
@@ -602,16 +604,17 @@ On rematch (`status: cancelled`, `result.outcome: rematch`):
               └──────────────┬────────────────┘
                              ▼
               Poll GET /matches/current until
-              match completed / cancelled / back in queue
+              match == null (finished / rematch / back in queue)
 ```
 
 ### Score submission checklist
 
-- [ ] Use `match.id` from current-match response (do not cache stale IDs after rematch).
+- [ ] Use `match.id` from the **latest** current-match response (a player can hold more than one match; never cache the id).
 - [ ] Submit each player’s score **once**.
-- [ ] Display chase UI when `chaseTarget != null` (show target, show `amChasing`).
+- [ ] Pick the innings UI from `chaseTarget` / `amChasing` / `amSettingTarget` (see §5.1).
 - [ ] Handle `409` duplicate gracefully (score already recorded).
 - [ ] Handle slot-ended `409` with a user-visible message.
+- [ ] Handle `400 VALIDATION_ERROR` on a stale `match.id` by re-polling instead of retrying.
 
 ---
 
@@ -635,12 +638,27 @@ On rematch (`status: cancelled`, `result.outcome: rematch`):
 | 2 | Queue poll | Login on web, join tournament queue, GET current | `inQueue: true` |
 | 3 | Solo target | While queued, POST solo-target | `201`, `canSubmitSoloTarget` becomes false |
 | 4 | Pairing | Second test user joins queue | GET current returns `match` with `chaseTarget` |
-| 5 | Partial score | Player A POST score | `in_progress`, one score set |
-| 6 | Complete match | Player B POST score | `completed`, `winnerId` set |
+| 5 | Partial score | Player A POST score | `200`; A's next poll shows `myScore` set, `opponentScore` null |
+| 6 | Complete match | Player B POST score | `completed`, `winnerId` set; `match` no longer returned |
 | 7 | Duplicate score | Same player POST again | `409` |
 | 8 | Wrong user | POST score with non-participant userId | `403` |
 | 9 | Chase win | Chaser score > chaseTarget | Chaser in `winnerId` |
 | 10 | Chase tie | Chaser score == setter score | `cancelled`, rematch / re-queue |
+| 11 | Stale match id | POST score to a malformed / unknown id | `400` then `404` — never `500` |
+| 12 | Multi-headset venue | 3 userIds × 30 polls/min from one IP | No `429` |
+| 13 | Link code replay | Verify the same code twice | `200` then `400 CODE_INVALID` |
+
+### Conformance suite
+
+Every scenario above is automated against a running API. From the repo root:
+
+```bash
+node scripts/qa-vr-api.mjs
+```
+
+It covers auth, payload shape, queue + solo target, active match and slot data, score
+submission through to completion, link codes, the response envelope and rate limits —
+96 assertions. Point it at another environment with `API_URL` and `META_API_KEY`.
 
 ### Health check (optional)
 
@@ -653,12 +671,20 @@ curl -s https://api.pixelpaddle.example/health
 
 ## 9. Rate limits & reliability
 
-| Limit | Value (production) |
-|-------|-------------------|
-| General API (per IP) | ~20 requests / minute |
-| Recommendation | Poll current match at most every 2–5s; batch score submits once per player |
+| Endpoint | Limit (production) | Bucket |
+|----------|--------------------|--------|
+| `GET /matches/current`, `POST /matches/:id/scores`, `POST /solo-target` | 240 requests / minute | **Per `userId`**, not per IP |
+| `POST /identity/verify-link-code` | 10 requests / minute | Per IP |
 
-On `429 RATE_LIMITED`, back off exponentially and retry.
+Meta endpoints are metered **per player**, so several headsets at one venue sharing a
+public IP do not compete for the same budget. A 2-second poll cadence costs 30 req/min
+against a 240 budget, leaving ample headroom for score submits and retries.
+
+The link-code endpoint is deliberately tight — it guards a 4-digit keyspace. Enter codes
+on user action only; never probe it in a loop.
+
+On `429 RATE_LIMITED`, back off exponentially and retry. The response carries a
+`Retry-After` header (seconds) — honour it rather than guessing.
 
 **Idempotency:** Score submit is idempotent in the sense that a duplicate returns `409` rather than double-counting. Do not retry `409` duplicate errors with a new score.
 
@@ -670,6 +696,7 @@ On `429 RATE_LIMITED`, back off exponentially and retry.
 |---------|------|---------|
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |
 | 1.1 | July 2026 | Replaced email OTP with 4-digit profile code (`/identity/verify-link-code`) for linking headsets. |
+| 2.0 | August 2026 | **Breaking:** slimmed down `GET /matches/current`. Removed `queueSize`, `soloTarget`, `match.status`, `match.scheduledAt`, and all internal IDs (`opponent.id`, `opponent.skillTier`, `venue.id`, `venue.city`, `slot.id`). `opponent` and `venue` are now plain strings; `slot` is flattened to `startTime` / `endTime`. `match` is non-null only while playable. **Added** top-level `tournamentId` so the Quest app can supply it to `POST /solo-target` without a second lookup, and `match.amSettingTarget` so the innings UI needs no inference. **Fixed:** `canSubmitSoloTarget` no longer returns `true` when an unplayable match would make `POST /solo-target` fail; a malformed `matchId` now returns `400` instead of `500`; Meta endpoints are metered per player rather than per IP so multiple headsets at one venue are not throttled. |
 
 ---
 

@@ -36,9 +36,20 @@ export const registerTournamentSchema = z.object({
   bookingId: z.string().uuid().optional(),
 });
 
+/**
+ * `timeSlotId` is optional at the schema level only so a returning player can
+ * re-enter a later round on their previous slot; the service rejects an entry
+ * that resolves to no slot at all. VR players omit `venueId` — they pick a play
+ * window, not a seat.
+ */
 export const enterTournamentSchema = z.object({
   venueId: z.string().uuid().optional(),
   timeSlotId: z.string().uuid().optional(),
+});
+
+export const tournamentSlotOptionsQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  venueId: z.string().uuid().optional(),
 });
 
 export type CreateTournamentInput = z.infer<typeof createTournamentSchema>;
@@ -46,3 +57,4 @@ export type TournamentListQuery = z.infer<typeof tournamentListQuerySchema>;
 export type TournamentMatchesQuery = z.infer<typeof tournamentMatchesQuerySchema>;
 export type RegisterTournamentInput = z.infer<typeof registerTournamentSchema>;
 export type EnterTournamentInput = z.infer<typeof enterTournamentSchema>;
+export type TournamentSlotOptionsQuery = z.infer<typeof tournamentSlotOptionsQuerySchema>;

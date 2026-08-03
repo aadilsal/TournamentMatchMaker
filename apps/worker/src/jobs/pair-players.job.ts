@@ -12,12 +12,13 @@ import {
   queueTournamentKey,
   pickEarlierSlot,
   resolveChaseOnPair,
+  slotsOverlap,
 } from '@vr-tournament/shared';
 import type { WorkerEnv } from '../config/env.js';
 import { MATCHMAKING_PAIR_LOCK } from '../lib/queue-keys.js';
 import { acquireLock, releaseLock } from '../lib/redlock.js';
 import { lockSlot, finalizeMatchSlotBookings, SLOT_LOCK_TTL_SEC } from '../lib/slot-lock.js';
-import { emitToUser } from '../lib/socket-bridge.js';
+import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
 
 interface SlotSearchHint {
   lat?: number;
@@ -174,6 +175,33 @@ async function resolveBookingSlot(
   return slotWithinRound(slot, round) ? slot : null;
 }
 
+/**
+ * The play window the player chose for this round. VR players hold one of these
+ * without a booking, so it is the only way to give a VR-vs-VR match a slot.
+ */
+async function resolveChosenSlot(
+  client: import('pg').PoolClient,
+  slotId: string | null | undefined,
+  round: { startsAt: Date; endsAt: Date } | null = null
+): Promise<BookingSlot | null> {
+  if (!slotId) return null;
+  const result = await client.query(
+    `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
+     FROM time_slots ts
+     WHERE ts.id = $1 AND ts.end_time > NOW()`,
+    [slotId]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  const slot = {
+    slotId: row.slot_id,
+    venueId: row.venue_id,
+    startTime: row.start_time,
+    endTime: row.end_time,
+  };
+  return slotWithinRound(slot, round) ? slot : null;
+}
+
 function soloInfoFromMeta(
   userId: string,
   meta: Record<string, string>
@@ -216,6 +244,7 @@ async function pairInQueue(
       roundNumber: parseInt(meta.roundNumber || '1', 10),
       hasPlayedSolo: meta.hasPlayedSolo === '1',
       soloPlayedAt: meta.soloPlayedAt ? parseInt(meta.soloPlayedAt, 10) : undefined,
+      slotStartAt: meta.slotStartAt ? parseInt(meta.slotStartAt, 10) : null,
       slotEndAt: meta.slotEndAt ? parseInt(meta.slotEndAt, 10) : null,
     });
   }
@@ -259,57 +288,96 @@ async function pairInQueue(
       }
     }
 
-    if (needsVenue) {
-      const p1Booking = await resolveBookingSlot(client, p1Meta.bookingId, roundWindow);
-      const p2Booking = await resolveBookingSlot(client, p2Meta.bookingId, roundWindow);
-      const bookedSlot = pickEarlierSlot(p1Booking, p2Booking);
+    // Every tournament entry — VR included — carries the play window the player
+    // chose for this round. A confirmed booking is the fallback for entries made
+    // before slots were recorded per round; only those already hold venue
+    // capacity, which decides whether the slot still needs locking below.
+    const p1Booking = await resolveBookingSlot(client, p1Meta.bookingId, roundWindow);
+    const p2Booking = await resolveBookingSlot(client, p2Meta.bookingId, roundWindow);
+    const p1Slot = (await resolveChosenSlot(client, p1Meta.slotId, roundWindow)) ?? p1Booking;
+    const p2Slot = (await resolveChosenSlot(client, p2Meta.slotId, roundWindow)) ?? p2Booking;
 
-      if (bookedSlot) {
-        venueId = bookedSlot.venueId;
-        slotId = bookedSlot.slotId;
-        scheduledAt = bookedSlot.startTime;
-        usedExistingBooking = true;
-      } else {
-        const matchPoint = resolveMatchPoint(
-          parseCoord(p1Meta.latitude),
-          parseCoord(p1Meta.longitude),
-          parseCoord(p2Meta.latitude),
-          parseCoord(p2Meta.longitude)
-        );
-        const city = p1Meta.city || p2Meta.city;
-        if (!matchPoint && !city && !preferredVenueId) {
-          await client.query('ROLLBACK');
-          await notifyPairFailed(
-            redis,
-            [candidate.userId, partner.userId],
-            'venue_required',
-            'Venue location is required to find a slot. Update your city or book a venue first.'
-          );
-          return false;
-        }
-        const slot = await findAvailableSlot(client, {
-          lat: matchPoint?.lat,
-          lng: matchPoint?.lng,
-          city: city || undefined,
-          venueId: preferredVenueId,
-          roundStartsAt: roundWindow?.startsAt,
-          roundEndsAt: roundWindow?.endsAt,
-        });
-        if (!slot) {
-          await client.query('ROLLBACK');
-          await notifyPairFailed(
-            redis,
-            [candidate.userId, partner.userId],
-            'no_slots',
-            'No venue slots available nearby. Try a different time or venue.'
-          );
-          return false;
-        }
-        venueId = slot.venueId;
-        slotId = slot.slotId;
-        scheduledAt = slot.startTime;
-      }
+    // A player who is physically attending must play at their own venue, so
+    // their slot wins. When both attend, or neither does, take the earlier one.
+    let chosenSlot: BookingSlot | null;
+    if (p1HasVr === p2HasVr) {
+      chosenSlot = pickEarlierSlot(p1Slot, p2Slot);
+    } else if (!p1HasVr) {
+      chosenSlot = p1Slot ?? p2Slot;
+    } else {
+      chosenSlot = p2Slot ?? p1Slot;
     }
+
+    if (!chosenSlot && needsVenue) {
+      const matchPoint = resolveMatchPoint(
+        parseCoord(p1Meta.latitude),
+        parseCoord(p1Meta.longitude),
+        parseCoord(p2Meta.latitude),
+        parseCoord(p2Meta.longitude)
+      );
+      const city = p1Meta.city || p2Meta.city;
+      if (!matchPoint && !city && !preferredVenueId) {
+        await client.query('ROLLBACK');
+        await notifyPairFailed(
+          redis,
+          [candidate.userId, partner.userId],
+          'venue_required',
+          'Venue location is required to find a slot. Update your city or book a venue first.'
+        );
+        return false;
+      }
+      chosenSlot = await findAvailableSlot(client, {
+        lat: matchPoint?.lat,
+        lng: matchPoint?.lng,
+        city: city || undefined,
+        venueId: preferredVenueId,
+        roundStartsAt: roundWindow?.startsAt,
+        roundEndsAt: roundWindow?.endsAt,
+      });
+      if (!chosenSlot) {
+        await client.query('ROLLBACK');
+        await notifyPairFailed(
+          redis,
+          [candidate.userId, partner.userId],
+          'no_slots',
+          'No venue slots available nearby. Try a different time or venue.'
+        );
+        return false;
+      }
+    } else if (chosenSlot) {
+      // Capacity is already accounted for only when the chosen slot is one an
+      // attending player holds a confirmed booking for. A VR player's chosen
+      // window carries no booking, so it still has to be locked if the other
+      // player is turning up in person.
+      usedExistingBooking =
+        chosenSlot.slotId === p1Booking?.slotId || chosenSlot.slotId === p2Booking?.slotId;
+    }
+
+    // A tournament match with no window is unplayable — neither player could
+    // ever submit a score against it.
+    if (!chosenSlot && tournamentId) {
+      await client.query('ROLLBACK');
+      await notifyPairFailed(
+        redis,
+        [candidate.userId, partner.userId],
+        'no_slots',
+        'Pick a time slot for this round so we can schedule your match.'
+      );
+      return false;
+    }
+
+    if (chosenSlot) {
+      slotId = chosenSlot.slotId;
+      scheduledAt = chosenSlot.startTime;
+      // Two VR players play from home — they share the window, not the venue.
+      venueId = needsVenue ? chosenSlot.venueId : null;
+    }
+
+    // Only players who physically attend consume a seat at the venue.
+    const attendingPlayerIds = [
+      ...(p1HasVr ? [] : [candidate.userId]),
+      ...(p2HasVr ? [] : [partner.userId]),
+    ];
 
     const roundNumber = parseInt(p1Meta.roundNumber || p2Meta.roundNumber || '1', 10);
     let phase = 'normal';
@@ -360,7 +428,9 @@ async function pairInQueue(
     );
     const matchId = matchResult.rows[0].id;
 
-    if (slotId && !usedExistingBooking) {
+    // Only reserve venue capacity when the slot was picked for this match and
+    // someone is actually attending it in person.
+    if (slotId && !usedExistingBooking && needsVenue) {
       const locked = await lockSlot(client, redis, slotId, matchId);
       if (!locked) {
         await client.query('ROLLBACK');
@@ -374,11 +444,8 @@ async function pairInQueue(
       }
     }
 
-    if (slotId && autoConfirm) {
-      await finalizeMatchSlotBookings(client, redis, slotId, [
-        candidate.userId,
-        partner.userId,
-      ]);
+    if (slotId && autoConfirm && attendingPlayerIds.length > 0) {
+      await finalizeMatchSlotBookings(client, redis, slotId, attendingPlayerIds);
     }
 
     if (tournamentId) {
@@ -418,14 +485,18 @@ async function pairInQueue(
 
     let venueInfo: { id: string; name: string; city: string } | undefined;
     let slotInfo: { id: string; startTime: string; endTime: string } | undefined;
-    if (venueId && slotId) {
+    // VR-vs-VR matches have no venue but still have a play window, so the slot
+    // is looked up whenever one exists.
+    if (slotId) {
       const v = await pool.query(
         `SELECT v.id, v.name, v.city, ts.start_time, ts.end_time
-         FROM venues v JOIN time_slots ts ON ts.venue_id = v.id WHERE ts.id = $1`,
+         FROM time_slots ts JOIN venues v ON v.id = ts.venue_id WHERE ts.id = $1`,
         [slotId]
       );
       if (v.rows[0]) {
-        venueInfo = { id: v.rows[0].id, name: v.rows[0].name, city: v.rows[0].city };
+        if (venueId) {
+          venueInfo = { id: v.rows[0].id, name: v.rows[0].name, city: v.rows[0].city };
+        }
         slotInfo = {
           id: slotId,
           startTime: v.rows[0].start_time.toISOString(),
@@ -469,6 +540,15 @@ async function pairInQueue(
         },
         { jobId: `match-found:${matchId}:${playerId}` }
       );
+    }
+
+    // Brackets, participant lists and match tables are on screen for other
+    // players and admins right now — refresh them without waiting for a poll.
+    if (tournamentId) {
+      await emitBroadcast(redis, 'tournament:updated', {
+        tournamentId,
+        reason: 'match_created',
+      });
     }
 
     console.log(`Paired ${candidate.userId} vs ${partner.userId} → match ${matchId} (${matchStatus})`);

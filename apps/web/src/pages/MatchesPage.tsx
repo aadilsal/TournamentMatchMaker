@@ -145,6 +145,12 @@ export function MatchesPage() {
                   (myScore == null || opponentScore == null);
                 const chaseTarget = match.result?.chaseTarget;
                 const amChasing = chaseTarget != null && match.result?.chasePlayerId === me?.id;
+                // Nothing on the board yet: whoever bats first sets the target
+                // their opponent will have to chase.
+                const amSettingTarget =
+                  chaseTarget == null && myScore == null && opponentScore == null;
+                const opponent = isP1 ? match.player2 : match.player1;
+                const targetSetter = amChasing ? opponent : isP1 ? match.player1 : match.player2;
                 const youConfirmed =
                   !!me &&
                   !!match.confirmations &&
@@ -203,6 +209,61 @@ export function MatchesPage() {
                         </p>
                       )}
 
+                      {/* Match briefing — shown before the player joins so they
+                          know whether they are batting first or chasing. */}
+                      {me && (
+                        <div
+                          className={`rounded-lg border px-3 py-2.5 ${
+                            amSettingTarget
+                              ? 'border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5'
+                              : 'border-[var(--color-border)] bg-[var(--color-background)]/50'
+                          }`}
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
+                            {amSettingTarget ? 'You bat first' : amChasing ? 'You are chasing' : 'Your target is set'}
+                          </p>
+                          {amSettingTarget ? (
+                            <p className="mt-1 text-sm">
+                              No target yet — you are the first player. The score you post becomes
+                              the target{' '}
+                              <span className="font-semibold">{opponent?.username ?? 'your opponent'}</span>{' '}
+                              has to beat.
+                            </p>
+                          ) : chaseTarget != null ? (
+                            <p className="mt-1 text-sm">
+                              {amChasing ? (
+                                <>
+                                  <span className="font-semibold text-[var(--color-primary)]">
+                                    {chaseTarget} runs
+                                  </span>{' '}
+                                  to beat, set by{' '}
+                                  <span className="font-semibold">
+                                    {targetSetter?.username ?? 'your opponent'}
+                                  </span>
+                                  . Match a tied score and you replay.
+                                </>
+                              ) : (
+                                <>
+                                  You posted{' '}
+                                  <span className="font-semibold text-[var(--color-primary)]">
+                                    {chaseTarget} runs
+                                  </span>
+                                  .{' '}
+                                  <span className="font-semibold">
+                                    {opponent?.username ?? 'Your opponent'}
+                                  </span>{' '}
+                                  has to beat it.
+                                </>
+                              )}
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
+                              Waiting on the first innings before a target is set.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
                       {match.status === 'pending_confirmation' && (
                         <div className="space-y-2 pt-1">
                           {youConfirmed && !opponentConfirmed && (
@@ -245,13 +306,6 @@ export function MatchesPage() {
                       {/* Score state for confirmed / in_progress */}
                       {(match.status === 'confirmed' || match.status === 'in_progress') && me && (
                         <div className="pt-1 space-y-2">
-                          {chaseTarget != null && (
-                            <p className="text-sm text-[var(--color-primary)]">
-                              {amChasing
-                                ? `Beat ${chaseTarget} runs to win`
-                                : `Your target on the line: ${chaseTarget} runs`}
-                            </p>
-                          )}
                           {awaitingScores && (
                             <p className="text-sm text-[var(--color-muted-foreground)]">
                               Play in your Meta Quest headset — your score will appear here automatically.

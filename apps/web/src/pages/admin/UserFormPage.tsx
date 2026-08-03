@@ -1,5 +1,4 @@
 import { useNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
 import type { UserRole } from '@vr-tournament/shared';
 import { apiPost } from '@/lib/api';
 import {
@@ -12,7 +11,9 @@ import { AdminPageHeader, AdminCard, AdminFieldError, AdminSkillTierSelect } fro
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { useState } from 'react';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminUserFormPage() {
   const navigate = useNavigate();
@@ -28,8 +29,10 @@ export function AdminUserFormPage() {
     hasVrHeadset: false,
   });
 
-  const create = useMutation({
+  const create = useAdminMutation({
     mutationFn: (body: ReturnType<typeof toAdminCreateUserInput>) => apiPost<{ id: string }>('/admin/users', body),
+    successMessage: 'User created.',
+    invalidate: [['admin', 'users']],
     onSuccess: (user) => navigate(`/admin/users/${user.id}`),
   });
 
@@ -87,8 +90,7 @@ export function AdminUserFormPage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label>Role</Label>
-            <select
-              className="w-full h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-background)] px-3 text-sm"
+            <Select
               value={form.role}
               onChange={(e) => set('role', e.target.value)}
             >
@@ -96,7 +98,7 @@ export function AdminUserFormPage() {
               <option value="venue_admin">Venue admin</option>
               <option value="tournament_admin">Tournament admin</option>
               <option value="superadmin">Superadmin</option>
-            </select>
+            </Select>
             <AdminFieldError message={errors.role} />
           </div>
           <div>
@@ -115,7 +117,7 @@ export function AdminUserFormPage() {
         </label>
         <AdminFieldError message={errors._form} />
         <Button onClick={handleSubmit} disabled={create.isPending}>
-          Create user
+          {create.isPending ? 'Creating…' : 'Create user'}
         </Button>
       </AdminCard>
     </div>

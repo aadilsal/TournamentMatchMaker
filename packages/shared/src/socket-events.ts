@@ -45,6 +45,8 @@ export type MatchUpdatedStatus =
 export interface MatchUpdatedEvent {
   matchId: string;
   status: MatchUpdatedStatus;
+  /** Set for tournament matches so listeners can refresh that tournament's views. */
+  tournamentId?: string | null;
 }
 
 export interface MatchConfirmedClientEvent {
@@ -71,6 +73,28 @@ export interface BookingUpdatedEvent {
   action: 'created' | 'cancelled';
 }
 
+export type TournamentUpdatedReason =
+  | 'registered'
+  | 'withdrawn'
+  | 'entered'
+  | 'slot_changed'
+  | 'match_created'
+  | 'match_updated'
+  | 'round_closed'
+  | 'status_changed';
+
+/**
+ * Broadcast whenever anything that is visible on a tournament page changes —
+ * registration counts, brackets, rounds, participants. Broadcast rather than
+ * per-user because these numbers are public on the tournament list, the
+ * tournament detail page and the admin panel at the same time.
+ */
+export interface TournamentUpdatedEvent {
+  tournamentId: string;
+  reason: TournamentUpdatedReason;
+  registrationCount?: number;
+}
+
 export interface ServerToClientEvents {
   'queue:joined': (data: QueueJoinedEvent) => void;
   'queue:position': (data: QueuePositionEvent) => void;
@@ -81,6 +105,7 @@ export interface ServerToClientEvents {
   'notification:new': (data: NotificationNewEvent) => void;
   'slot:updated': (data: SlotUpdatedEvent) => void;
   'booking:updated': (data: BookingUpdatedEvent) => void;
+  'tournament:updated': (data: TournamentUpdatedEvent) => void;
 }
 
 export interface ClientToServerEvents {

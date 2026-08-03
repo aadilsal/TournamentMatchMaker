@@ -3,16 +3,22 @@ import type {
   BuybackInput,
   CreateTournamentInput,
   EnterTournamentInput,
+  EnterTournamentResult,
   RegisterTournamentInput,
   Tournament,
   TournamentListQuery,
   TournamentMatchesQuery,
+  TournamentRoundSlot,
+  TournamentSlotOptionsQuery,
+  TournamentUpdatedReason,
 } from '@vr-tournament/shared';
 import {
+  mapBooking,
   mapBuyback,
   mapMatch,
   mapParticipant,
   mapRegistration,
+  mapSlot,
   mapTournament,
   mapTournamentRound,
 } from '../../lib/mappers.js';
@@ -30,10 +36,12 @@ import {
   playersToAdvance,
   resolveFieldSize,
   shouldStartKnockout,
+  isSlotEnded,
   isSlotStartPast,
   isSlotWithinWindow,
 } from '@vr-tournament/shared';
 import { createBuybackPaymentIntent } from '../../lib/stripe.js';
+import { emitTournamentUpdated } from '../../socket/sync-events.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -47,6 +55,70 @@ const MATCH_SELECT = `
   LEFT JOIN venues v ON v.id = m.venue_id
   LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
 `;
+
+const ROUND_SLOT_SELECT = `
+  SELECT rs.*,
+         ts.venue_id AS slot_venue_id, ts.start_time, ts.end_time,
+         ts.max_capacity, ts.booked_count, ts.status AS slot_status,
+         ts.created_at AS slot_created_at,
+         v.name AS venue_name, v.city AS venue_city, v.address AS venue_address
+  FROM tournament_round_slots rs
+  JOIN time_slots ts ON ts.id = rs.time_slot_id
+  LEFT JOIN venues v ON v.id = rs.venue_id
+`;
+
+interface RoundSlotRow {
+  tournament_id: string;
+  user_id: string;
+  round_number: number;
+  time_slot_id: string;
+  venue_id: string | null;
+  booking_id: string | null;
+  slot_venue_id?: string;
+  start_time?: Date;
+  end_time?: Date;
+  max_capacity?: number;
+  booked_count?: number;
+  slot_status?: string;
+  slot_created_at?: Date;
+  venue_name?: string | null;
+  venue_city?: string | null;
+  venue_address?: string | null;
+}
+
+function mapRoundSlotRow(row: RoundSlotRow): TournamentRoundSlot {
+  const roundSlot: TournamentRoundSlot = {
+    tournamentId: row.tournament_id,
+    userId: row.user_id,
+    roundNumber: row.round_number,
+    timeSlotId: row.time_slot_id,
+    venueId: row.venue_id,
+    bookingId: row.booking_id,
+  };
+
+  if (row.start_time && row.end_time) {
+    roundSlot.slot = mapSlot({
+      id: row.time_slot_id,
+      venue_id: row.slot_venue_id ?? row.venue_id ?? '',
+      start_time: row.start_time,
+      end_time: row.end_time,
+      max_capacity: row.max_capacity ?? 0,
+      booked_count: row.booked_count ?? 0,
+      status: row.slot_status ?? 'available',
+      created_at: row.slot_created_at ?? row.start_time,
+    });
+  }
+  if (row.venue_id && row.venue_name) {
+    roundSlot.venue = {
+      id: row.venue_id,
+      name: row.venue_name,
+      city: row.venue_city ?? '',
+      address: row.venue_address ?? '',
+    };
+  }
+
+  return roundSlot;
+}
 
 export class TournamentsService {
   constructor(
@@ -148,6 +220,53 @@ export class TournamentsService {
     }
   }
 
+  /** Push the fresh registration count to every connected client. */
+  async broadcastTournamentUpdate(tournamentId: string, reason: TournamentUpdatedReason) {
+    try {
+      const countResult = await this.pool.query(
+        `SELECT COUNT(*)::int AS count FROM tournament_registrations WHERE tournament_id = $1`,
+        [tournamentId]
+      );
+      emitTournamentUpdated({
+        tournamentId,
+        reason,
+        registrationCount: countResult.rows[0]?.count ?? 0,
+      });
+    } catch (err) {
+      console.error('Failed to broadcast tournament update:', err);
+    }
+  }
+
+  /**
+   * A player may only be live in one tournament at a time. "Live" means they
+   * still hold a place in a tournament that has not finished — including an
+   * eliminated player who could still buy back into it.
+   */
+  async assertNoOtherLiveTournament(userId: string, tournamentId: string) {
+    // The status list must stay in step with idx_one_live_tournament_per_user
+    // (migration 12). It used to also require the tournament itself to be
+    // open/closed/in_progress, so a player left 'active' in a completed
+    // tournament passed this check and then tripped the index as a raw 23505.
+    const result = await this.pool.query(
+      `SELECT t.id, t.name
+       FROM tournament_participants tp
+       JOIN tournaments t ON t.id = tp.tournament_id
+       WHERE tp.user_id = $1
+         AND tp.tournament_id <> $2
+         AND tp.status IN ('active', 'advanced', 'knockout')
+       LIMIT 1`,
+      [userId, tournamentId]
+    );
+    const other = result.rows[0];
+    if (other) {
+      throw new AppError(
+        'CONFLICT',
+        `You are already playing in "${other.name}" — finish or withdraw from it before joining another tournament`,
+        409
+      );
+    }
+  }
+
   async register(tournamentId: string, userId: string, input: RegisterTournamentInput) {
     const tournament = await this.getById(tournamentId);
     if (tournament.status !== 'open') {
@@ -163,6 +282,8 @@ export class TournamentsService {
     if (tournament.maxPlayers && (tournament.registrationCount ?? 0) >= tournament.maxPlayers) {
       throw new AppError('CONFLICT', 'Tournament is full', 409);
     }
+
+    await this.assertNoOtherLiveTournament(userId, tournamentId);
 
     if (input.bookingId) {
       const booking = await this.pool.query(
@@ -195,6 +316,8 @@ export class TournamentsService {
 
       await client.query('COMMIT');
 
+      await this.broadcastTournamentUpdate(tournamentId, 'registered');
+
       if (this.env) {
         enqueueNotification(this.env, {
           userId,
@@ -220,7 +343,99 @@ export class TournamentsService {
     }
   }
 
-  async enter(tournamentId: string, userId: string, input: EnterTournamentInput) {
+  /**
+   * Every entry — VR or venue — resolves to exactly one time slot. Without it a
+   * VR-vs-VR match was created with no time_slot_id and therefore no window in
+   * which either player could play or submit a score.
+   */
+  private async resolveEntrySlot(
+    tournamentId: string,
+    userId: string,
+    hasVr: boolean,
+    roundNumber: number,
+    input: EnterTournamentInput
+  ) {
+    // Fall back to the slot the player used last round so re-entering a new
+    // round is one click; an explicit choice always wins.
+    let timeSlotId = input.timeSlotId ?? null;
+    if (!timeSlotId) {
+      const previous = await this.getLatestRoundSlot(tournamentId, userId);
+      timeSlotId = previous?.timeSlotId ?? null;
+    }
+    if (!timeSlotId) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Pick a time slot for this round before entering',
+        400
+      );
+    }
+
+    const slotResult = await this.pool.query(
+      `SELECT ts.*, v.active AS venue_active
+       FROM time_slots ts
+       JOIN venues v ON v.id = ts.venue_id
+       WHERE ts.id = $1`,
+      [timeSlotId]
+    );
+    const slot = slotResult.rows[0];
+    if (!slot || !slot.venue_active) {
+      throw new AppError('BAD_REQUEST', 'Invalid time slot', 400);
+    }
+
+    if (isSlotEnded(slot.end_time)) {
+      throw new AppError('BAD_REQUEST', 'That time slot has already ended — pick another', 400);
+    }
+    // Venue players occupy a physical seat, so they can only take a slot that
+    // has not started. VR players may join a slot that is already running.
+    if (!hasVr && isSlotStartPast(slot.start_time)) {
+      throw new AppError('BAD_REQUEST', 'Cannot book a time slot that has already started', 400);
+    }
+
+    const roundWindow = await this.pool.query(
+      `SELECT tr.starts_at, tr.ends_at
+       FROM tournament_rounds tr
+       WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
+      [tournamentId, roundNumber]
+    );
+    const round = roundWindow.rows[0];
+    if (round && !isSlotWithinWindow(slot.start_time, slot.end_time, round.starts_at, round.ends_at)) {
+      throw new AppError(
+        'BAD_REQUEST',
+        'Time slot must fall within the current tournament round window',
+        400
+      );
+    }
+
+    if (!hasVr && input.venueId && input.venueId !== slot.venue_id) {
+      throw new AppError('BAD_REQUEST', 'Slot does not belong to the selected venue', 400);
+    }
+
+    return {
+      slotId: slot.id as string,
+      venueId: slot.venue_id as string,
+      startTime: slot.start_time as Date,
+      endTime: slot.end_time as Date,
+    };
+  }
+
+  /** Reuse an existing confirmed booking rather than failing on re-entry. */
+  private async ensureBooking(userId: string, timeSlotId: string) {
+    const existing = await this.pool.query(
+      `SELECT * FROM bookings
+       WHERE user_id = $1 AND time_slot_id = $2 AND status = 'confirmed'`,
+      [userId, timeSlotId]
+    );
+    if (existing.rows[0]) return mapBooking(existing.rows[0]);
+
+    const bookingsService = new BookingsService(this.pool, this.redis!);
+    return bookingsService.create(userId, timeSlotId);
+  }
+
+  async enter(
+    tournamentId: string,
+    userId: string,
+    input: EnterTournamentInput
+  ): Promise<EnterTournamentResult> {
     if (!this.redis) throw new AppError('INTERNAL', 'Redis not configured', 500);
 
     const tournament = await this.getById(tournamentId);
@@ -234,89 +449,56 @@ export class TournamentsService {
     );
     const user = userResult.rows[0];
     if (!user) throw new AppError('NOT_FOUND', 'User not found', 404);
+    const hasVr: boolean = user.has_vr_headset;
 
     const existingReg = await this.getRegistration(tournamentId, userId);
-    let bookingId = existingReg?.bookingId ?? null;
-    let booking = null;
-    let preferredVenueId: string | null = null;
 
-    if (!user.has_vr_headset) {
-      if (!existingReg) {
-        if (!input.timeSlotId) {
-          throw new AppError('BAD_REQUEST', 'timeSlotId is required for venue players', 400);
-        }
-
-        const slotCheck = await this.pool.query(
-          `SELECT ts.id, ts.venue_id FROM time_slots ts
-           JOIN venues v ON v.id = ts.venue_id
-           WHERE ts.id = $1 AND v.active = TRUE`,
-          [input.timeSlotId]
+    // New entrants may only join while registration is open; already-registered
+    // players keep entering later rounds after the tournament has started.
+    if (!existingReg) {
+      if (tournament.status !== 'open') {
+        throw new AppError(
+          'CONFLICT',
+          'Registration for this tournament has closed — you can no longer join',
+          409
         );
-        if (!slotCheck.rows[0]) {
-          throw new AppError('BAD_REQUEST', 'Invalid time slot', 400);
-        }
-
-        const slotTime = await this.pool.query(
-          `SELECT start_time, end_time FROM time_slots WHERE id = $1`,
-          [input.timeSlotId]
-        );
-        if (slotTime.rows[0] && isSlotStartPast(slotTime.rows[0].start_time)) {
-          throw new AppError('BAD_REQUEST', 'Cannot book a time slot that has already started', 400);
-        }
-
-        const roundWindow = await this.pool.query(
-          `SELECT tr.starts_at, tr.ends_at
-           FROM tournaments t
-           JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number
-           WHERE t.id = $1 AND tr.status = 'active'`,
-          [tournamentId]
-        );
-        const round = roundWindow.rows[0];
-        if (round && slotTime.rows[0]) {
-          if (
-            !isSlotWithinWindow(
-              slotTime.rows[0].start_time,
-              slotTime.rows[0].end_time,
-              round.starts_at,
-              round.ends_at
-            )
-          ) {
-            throw new AppError(
-              'BAD_REQUEST',
-              'Time slot must fall within the current tournament round window',
-              400
-            );
-          }
-        }
-
-        if (input.venueId && input.venueId !== slotCheck.rows[0].venue_id) {
-          throw new AppError('BAD_REQUEST', 'Slot does not belong to the selected venue', 400);
-        }
-
-        preferredVenueId = slotCheck.rows[0].venue_id;
-        const bookingsService = new BookingsService(this.pool, this.redis);
-        booking = await bookingsService.create(userId, input.timeSlotId);
-        bookingId = booking.id;
-      } else if (bookingId) {
-        const venueRow = await this.pool.query(
-          `SELECT ts.venue_id FROM bookings b
-           JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
-          [bookingId]
-        );
-        preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
       }
+      await this.assertNoOtherLiveTournament(userId, tournamentId);
     }
+
+    const existingParticipant = await this.getParticipant(tournamentId, userId);
+    if (existingParticipant && !['active', 'advanced'].includes(existingParticipant.status)) {
+      throw new AppError('FORBIDDEN', 'You are eliminated from this tournament', 403);
+    }
+
+    const roundNumber = existingParticipant?.roundNumber ?? tournament.currentRoundNumber ?? 1;
+    const slot = await this.resolveEntrySlot(tournamentId, userId, hasVr, roundNumber, input);
+
+    // VR players play from home: they own the play window but take no venue seat.
+    const booking = hasVr ? null : await this.ensureBooking(userId, slot.slotId);
+    const bookingId = booking?.id ?? null;
+    const preferredVenueId = hasVr ? null : slot.venueId;
 
     const registration = existingReg
       ? existingReg
       : await this.register(tournamentId, userId, { bookingId: bookingId ?? undefined });
 
-    const participant = await this.getParticipant(tournamentId, userId);
-    if (participant && !['active', 'advanced'].includes(participant.status)) {
-      throw new AppError('FORBIDDEN', 'You are eliminated from this tournament', 403);
+    if (existingReg && bookingId && existingReg.bookingId !== bookingId) {
+      await this.pool.query(
+        `UPDATE tournament_registrations SET booking_id = $1
+         WHERE tournament_id = $2 AND user_id = $3`,
+        [bookingId, tournamentId, userId]
+      );
     }
 
-    const roundNumber = participant?.roundNumber ?? 1;
+    const roundSlot = await this.saveRoundSlot({
+      tournamentId,
+      userId,
+      roundNumber,
+      timeSlotId: slot.slotId,
+      venueId: preferredVenueId,
+      bookingId,
+    });
 
     await removeFromQueue(this.redis, userId);
     await requeuePlayer(this.pool, this.redis, userId, {
@@ -324,12 +506,170 @@ export class TournamentsService {
       preferredVenueId,
       roundNumber,
       bookingId,
+      slotId: slot.slotId,
+      slotStartAt: new Date(slot.startTime).getTime(),
+      slotEndAt: new Date(slot.endTime).getTime(),
     }, this.env);
+
+    await this.broadcastTournamentUpdate(tournamentId, existingReg ? 'entered' : 'registered');
 
     return {
       registration,
       booking,
+      roundSlot,
       searching: true,
+    };
+  }
+
+  private async saveRoundSlot(input: {
+    tournamentId: string;
+    userId: string;
+    roundNumber: number;
+    timeSlotId: string;
+    venueId: string | null;
+    bookingId: string | null;
+  }): Promise<TournamentRoundSlot> {
+    const result = await this.pool.query(
+      `INSERT INTO tournament_round_slots
+         (tournament_id, user_id, round_number, time_slot_id, venue_id, booking_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (tournament_id, user_id, round_number) DO UPDATE
+         SET time_slot_id = EXCLUDED.time_slot_id,
+             venue_id = EXCLUDED.venue_id,
+             booking_id = EXCLUDED.booking_id,
+             updated_at = NOW()
+       RETURNING *`,
+      [
+        input.tournamentId,
+        input.userId,
+        input.roundNumber,
+        input.timeSlotId,
+        input.venueId,
+        input.bookingId,
+      ]
+    );
+    return mapRoundSlotRow(result.rows[0]);
+  }
+
+  /** The slot chosen for a specific round, or null when none was chosen yet. */
+  async getRoundSlot(
+    tournamentId: string,
+    userId: string,
+    roundNumber: number
+  ): Promise<TournamentRoundSlot | null> {
+    const result = await this.pool.query(
+      `${ROUND_SLOT_SELECT}
+       WHERE rs.tournament_id = $1 AND rs.user_id = $2 AND rs.round_number = $3`,
+      [tournamentId, userId, roundNumber]
+    );
+    return result.rows[0] ? mapRoundSlotRow(result.rows[0]) : null;
+  }
+
+  /** Most recent slot the player picked in this tournament — the default for the next round. */
+  async getLatestRoundSlot(
+    tournamentId: string,
+    userId: string
+  ): Promise<TournamentRoundSlot | null> {
+    const result = await this.pool.query(
+      `${ROUND_SLOT_SELECT}
+       WHERE rs.tournament_id = $1 AND rs.user_id = $2
+       ORDER BY rs.round_number DESC
+       LIMIT 1`,
+      [tournamentId, userId]
+    );
+    return result.rows[0] ? mapRoundSlotRow(result.rows[0]) : null;
+  }
+
+  /**
+   * What the player sees on the slot step. VR players get every slot in the
+   * round window across active venues (they only need a time); venue players
+   * get the slots of the venue they picked.
+   */
+  async getSlotOptions(tournamentId: string, userId: string, query: TournamentSlotOptionsQuery) {
+    const tournament = await this.getById(tournamentId);
+
+    const userResult = await this.pool.query(
+      `SELECT has_vr_headset FROM users WHERE id = $1`,
+      [userId]
+    );
+    if (!userResult.rows[0]) throw new AppError('NOT_FOUND', 'User not found', 404);
+    const hasVr: boolean = userResult.rows[0].has_vr_headset;
+
+    const participant = await this.getParticipant(tournamentId, userId);
+    const roundNumber = participant?.roundNumber ?? tournament.currentRoundNumber ?? 1;
+
+    const roundResult = await this.pool.query(
+      `SELECT starts_at, ends_at FROM tournament_rounds
+       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active'`,
+      [tournamentId, roundNumber]
+    );
+    const round = roundResult.rows[0] ?? null;
+
+    const params: unknown[] = [query.date];
+    let where = `v.active = TRUE
+      AND ts.start_time >= $1::date
+      AND ts.start_time < ($1::date + INTERVAL '1 day')
+      AND ts.end_time > NOW()`;
+
+    if (!hasVr) {
+      // Venue players need a seat, so only slots that have not started yet.
+      where += ` AND ts.start_time > NOW()`;
+      if (query.venueId) {
+        params.push(query.venueId);
+        where += ` AND ts.venue_id = $${params.length}`;
+      }
+    }
+
+    if (round) {
+      params.push(round.starts_at, round.ends_at);
+      where += ` AND ts.start_time >= $${params.length - 1} AND ts.end_time <= $${params.length}`;
+    }
+
+    const result = await this.pool.query(
+      `SELECT ts.*, v.name AS venue_name, v.city AS venue_city, v.address AS venue_address
+       FROM time_slots ts
+       JOIN venues v ON v.id = ts.venue_id
+       WHERE ${where}
+       ORDER BY ts.start_time ASC, v.name ASC`,
+      params
+    );
+
+    const previous = await this.getLatestRoundSlot(tournamentId, userId);
+
+    let rows = result.rows;
+    if (hasVr) {
+      // A VR player picks a time, not a seat, so identical windows offered by
+      // several venues would just be duplicate rows. Keep one per window, and
+      // prefer the one they already hold so it stays selectable.
+      const byWindow = new Map<string, (typeof rows)[number]>();
+      for (const row of rows) {
+        const key = `${new Date(row.start_time).getTime()}-${new Date(row.end_time).getTime()}`;
+        if (!byWindow.has(key) || row.id === previous?.timeSlotId) {
+          byWindow.set(key, row);
+        }
+      }
+      rows = [...byWindow.values()].sort(
+        (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+    }
+
+    return {
+      roundNumber,
+      requiresVenue: !hasVr,
+      round: round
+        ? { startsAt: round.starts_at.toISOString(), endsAt: round.ends_at.toISOString() }
+        : null,
+      defaultTimeSlotId: previous?.timeSlotId ?? null,
+      previousSlot: previous,
+      slots: rows.map((row) => ({
+        ...mapSlot(row),
+        venue: {
+          id: row.venue_id,
+          name: row.venue_name,
+          city: row.venue_city,
+          address: row.venue_address,
+        },
+      })),
     };
   }
 
@@ -464,15 +804,8 @@ export class TournamentsService {
     const userId = buyback.user_id;
 
     const reg = await this.getRegistration(tournamentId, userId);
-    let preferredVenueId: string | null = null;
-    if (reg?.bookingId) {
-      const venueRow = await this.pool.query(
-        `SELECT ts.venue_id FROM bookings b
-         JOIN time_slots ts ON ts.id = b.time_slot_id WHERE b.id = $1`,
-        [reg.bookingId]
-      );
-      preferredVenueId = venueRow.rows[0]?.venue_id ?? null;
-    }
+    const roundSlot = await this.getLatestRoundSlot(tournamentId, userId);
+    const preferredVenueId = roundSlot?.venueId ?? null;
 
     const client = await this.pool.connect();
     try {
@@ -496,8 +829,13 @@ export class TournamentsService {
         tournamentId,
         roundNumber: buyback.round_number,
         preferredVenueId,
-        bookingId: reg?.bookingId ?? null,
+        bookingId: roundSlot?.bookingId ?? reg?.bookingId ?? null,
+        slotId: roundSlot?.timeSlotId ?? null,
+        slotStartAt: roundSlot?.slot ? new Date(roundSlot.slot.startTime).getTime() : null,
+        slotEndAt: roundSlot?.slot ? new Date(roundSlot.slot.endTime).getTime() : null,
       }, this.env);
+
+      await this.broadcastTournamentUpdate(tournamentId, 'entered');
 
       if (this.env) {
         enqueueNotification(this.env, {
@@ -549,6 +887,13 @@ export class TournamentsService {
       await client.query(
         `UPDATE tournament_participants SET status = 'out', updated_at = NOW()
          WHERE tournament_id = $1 AND user_id = $2`,
+        [tournamentId, userId]
+      );
+
+      // Release the reserved play windows so the player is free to enter another
+      // tournament and the slots go back on offer.
+      await client.query(
+        `DELETE FROM tournament_round_slots WHERE tournament_id = $1 AND user_id = $2`,
         [tournamentId, userId]
       );
 
@@ -612,6 +957,8 @@ export class TournamentsService {
           enqueueNotification(this.env, { ...n, channels: ['in_app', 'email'] }).catch(console.error);
         }
       }
+
+      await this.broadcastTournamentUpdate(tournamentId, 'withdrawn');
 
       return mapRegistration(regResult.rows[0]);
     } catch (err) {
@@ -804,6 +1151,7 @@ export class TournamentsService {
       }
 
       await client.query('COMMIT');
+      await this.broadcastTournamentUpdate(tournamentId, 'round_closed');
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

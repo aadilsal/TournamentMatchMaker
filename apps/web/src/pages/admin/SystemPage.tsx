@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
 import type { AuditLogEntry, SystemHealth } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import {
+  AdminQueryError,
   AdminCard,
   AdminFilterBar,
   AdminFilterField,
@@ -16,10 +16,13 @@ import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
 import { useQuery } from '@tanstack/react-query';
+import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 export function AdminSystemPage() {
   const [entityType, setEntityType] = useState('');
   const [action, setAction] = useState('');
+  const askConfirm = useConfirm();
 
   const { data: health, isLoading } = useQuery({
     queryKey: ['admin', 'system', 'health'],
@@ -35,9 +38,26 @@ export function AdminSystemPage() {
     },
   });
 
-  const expireMatches = useMutation({
-    mutationFn: () => apiPost('/admin/system/expire-matches'),
+  const expireMatches = useAdminMutation({
+    mutationFn: () => apiPost<{ expired?: number }>('/admin/system/expire-matches'),
+    successMessage: (data) =>
+      typeof data?.expired === 'number'
+        ? data.expired === 0
+          ? 'No stale matches found — nothing to expire.'
+          : `Expired ${data.expired} stale match${data.expired === 1 ? '' : 'es'}.`
+        : 'Stale matches expired.',
+    invalidate: [['admin', 'audit'], ['admin', 'matches']],
   });
+
+  const handleExpireMatches = async () => {
+    const ok = await askConfirm({
+      title: 'Expire all stale matches?',
+      description:
+        'Every match still awaiting confirmation past its deadline will be closed as expired in one bulk operation. Affected players lose that match and cannot confirm it afterwards. This cannot be undone.',
+      confirmLabel: 'Expire stale matches',
+    });
+    if (ok) expireMatches.mutate();
+  };
 
   if (isLoading) return <GridSkeleton count={4} />;
 
@@ -50,10 +70,10 @@ export function AdminSystemPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => expireMatches.mutate()}
+            onClick={handleExpireMatches}
             disabled={expireMatches.isPending}
           >
-            Expire stale matches
+            {expireMatches.isPending ? 'Expiring…' : 'Expire stale matches'}
           </Button>
         }
       />
@@ -87,7 +107,9 @@ export function AdminSystemPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
-      {audit.isLoading ? (
+      {audit.error ? (
+        <AdminQueryError error={audit.error} resource="the audit log" onRetry={() => audit.refetch()} />
+      ) : audit.isLoading ? (
         <GridSkeleton count={4} />
       ) : (
         <>

@@ -3,12 +3,14 @@ import { cn } from '@/lib/utils';
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'secondary' | 'destructive' | 'outline' | 'ghost';
   size?: 'sm' | 'md' | 'lg';
+  ref?: React.Ref<HTMLButtonElement>;
 }
 
 export function Button({
   className,
   variant = 'default',
   size = 'md',
+  type = 'button',
   ...props
 }: ButtonProps) {
   return (
@@ -30,6 +32,7 @@ export function Button({
         },
         className
       )}
+      type={type}
       {...props}
     />
   );

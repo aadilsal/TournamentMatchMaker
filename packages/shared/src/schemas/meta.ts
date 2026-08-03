@@ -15,6 +15,15 @@ export const metaCurrentMatchQuerySchema = z.object({
   userId: z.string().uuid(),
 });
 
+/**
+ * Guards `POST /matches/:id/scores`. Without this a stale or malformed match id
+ * (e.g. one the headset cached across a rematch) reaches Postgres as invalid
+ * uuid syntax and surfaces as a 500 instead of a 400 the client can handle.
+ */
+export const metaMatchIdParamSchema = z.object({
+  id: z.string().uuid(),
+});
+
 export const metaVerifyLinkCodeSchema = z.object({
   code: z
     .string()
