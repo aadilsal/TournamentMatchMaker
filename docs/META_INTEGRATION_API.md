@@ -427,17 +427,23 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/solo-t
 |------|-------------------|
 | Player is in matchmaking queue | `409` — `Player must be in queue to submit a solo target` |
 | No active match (`pending_confirmation`, `confirmed`, `in_progress`) | `409` — `Cannot submit solo target while in an active match` |
+| No target recorded yet this round | `409` — `Solo target already submitted for this round` |
 | *(all of the above are already reflected in `canSubmitSoloTarget` — if it is `true`, this call will not fail on a precondition)* | |
 | Active tournament participant | `403` — `Not an active tournament participant` |
 | Participant status `active` or `advanced` | `403` — `Participant is not active in this round` |
 | Round still open | `409` — `Round has ended` |
 | Booked slot not expired (if player has a booking) | `409` — `Your booked slot has ended` |
+| `target` is an integer `0`–`999` | `400` — `Invalid request data` |
 
 #### Important behaviour
 
 - Solo play **does not advance** the player in the tournament by itself — it only records a target and keeps them in queue.
 - After submit, matchmaking is triggered immediately to find an opponent.
 - When paired, the **earlier solo timestamp** sets the chase target; the other player chases that score (see §6).
+- **One innings per round.** A second submission is rejected with `409` and the stored
+  target is left untouched. Retrying a request that timed out is therefore safe — treat
+  `409 Solo target already submitted for this round` as "already recorded", not a failure,
+  and never retry with a different score.
 
 #### When to show solo UI
 
@@ -686,7 +692,14 @@ on user action only; never probe it in a loop.
 On `429 RATE_LIMITED`, back off exponentially and retry. The response carries a
 `Retry-After` header (seconds) — honour it rather than guessing.
 
-**Idempotency:** Score submit is idempotent in the sense that a duplicate returns `409` rather than double-counting. Do not retry `409` duplicate errors with a new score.
+**Idempotency:** Score submit is idempotent in the sense that a duplicate returns `409` rather than double-counting. Do not retry `409` duplicate errors with a new score. The same holds for `POST /solo-target`.
+
+**Concurrency:** Score submission is serialised per match. Both headsets finishing at the
+same instant is the normal case, and both scores are always recorded — neither can
+overwrite the other or leave the match unresolved. If one headset fires the same request
+twice (a retry racing the original), exactly one returns `200` and the rest return `409`.
+**A score submit that times out is safe to retry**: either the first attempt landed and you
+get `409`, or it did not and the retry succeeds.
 
 ---
 
