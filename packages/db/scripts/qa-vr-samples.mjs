@@ -13,10 +13,11 @@ const KEY = process.env.META_API_KEY;
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const q = (s, p) => pool.query(s, p).then((r) => r.rows);
 
-async function show(label, method, path, body, { key = true } = {}) {
+async function show(label, method, path, body, { key = true, token } = {}) {
   const headers = { Accept: 'application/json' };
   if (body) headers['Content-Type'] = 'application/json';
   if (key) headers['x-meta-api-key'] = KEY;
+  if (token) headers.Authorization = `Bearer ${token}`;
   const res = await fetch(path.startsWith('http') ? path : VR + path, {
     method, headers, body: body ? JSON.stringify(body) : undefined,
   });
@@ -57,7 +58,8 @@ console.log('='.repeat(70));
 console.log('A. IDENTITY');
 console.log('='.repeat(70));
 const gen = await show('Web app issues a link code (player JWT, no Meta key)',
-  'GET', `${BASE}/integrations/meta/link-code`, null, { key: false });
+  'GET', `${BASE}/integrations/meta/link-code`, null,
+  { key: false, token: web.data.accessToken });
 await show('Quest exchanges the code for a userId', 'POST', '/identity/verify-link-code',
   { code: gen.data.code });
 await show('Same code replayed — single use', 'POST', '/identity/verify-link-code',
