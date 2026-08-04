@@ -39,7 +39,7 @@ import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
 import type { RedisClient } from '../../lib/redis.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireAdmin, requireSuperAdmin } from '../../middleware/admin.js';
+import { requireAdmin, requireSuperAdmin, requireAdminRoles } from '../../middleware/admin.js';
 import {
   loadAdminScope,
   assertVenueAccess,
@@ -78,6 +78,12 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   const ownsVenue = guardVenueAccess('id');
   const ownsTournament = guardTournamentAccess('id');
   const owns = (sql: string, param?: string) => guardOwnedResource(pool, sql, param);
+
+  // Sections the admin sidebar reserves for superadmin + tournament_admin.
+  // The list endpoints behind them were reachable by a venue_admin, who could
+  // read every player's notifications through the API even though the section
+  // is hidden from them. `requireAdminRoles` always lets superadmin through.
+  const tournamentSection = requireAdminRoles('tournament_admin');
 
   const dashboard = new AdminDashboardService(pool, redis);
   const audit = new AdminAuditService(pool);
@@ -639,7 +645,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   });
 
   // Matches
-  router.get('/matches', validate(adminMatchListQuerySchema, 'query'), async (req, res, next) => {
+  router.get('/matches', tournamentSection, validate(adminMatchListQuerySchema, 'query'), async (req, res, next) => {
     try {
       const result = await matches.list(req.query as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor });
@@ -707,7 +713,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   });
 
   // Buybacks
-  router.get('/buybacks', validate(adminBuybackListQuerySchema, 'query'), async (req, res, next) => {
+  router.get('/buybacks', tournamentSection, validate(adminBuybackListQuerySchema, 'query'), async (req, res, next) => {
     try {
       const result = await buybacks.list(req.query as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor, limit: Number(req.query.limit) || 20 });
@@ -751,7 +757,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   });
 
   // Notifications
-  router.get('/notifications', validate(adminNotificationListQuerySchema, 'query'), async (req, res, next) => {
+  router.get('/notifications', tournamentSection, validate(adminNotificationListQuerySchema, 'query'), async (req, res, next) => {
     try {
       const result = await notifications.list(req.query as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor });
