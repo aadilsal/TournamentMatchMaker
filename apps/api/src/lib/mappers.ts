@@ -140,6 +140,8 @@ interface TournamentRow {
   game: string;
   start_date: Date;
   end_date: Date;
+  registration_opens_at?: Date | null;
+  registration_closes_at?: Date | null;
   status: string;
   max_players: number | null;
   skill_tier?: number;
@@ -208,6 +210,8 @@ export function mapTournament(row: TournamentRow): Tournament {
     game: row.game,
     startDate: row.start_date.toISOString(),
     endDate: row.end_date.toISOString(),
+    registrationOpensAt: row.registration_opens_at?.toISOString() ?? null,
+    registrationClosesAt: row.registration_closes_at?.toISOString() ?? null,
     status: row.status as TournamentStatus,
     maxPlayers: row.max_players,
     skillTier: row.skill_tier ?? 3,

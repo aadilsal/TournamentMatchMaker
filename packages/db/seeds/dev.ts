@@ -215,15 +215,28 @@ async function upsertTournament(
     roundDurationMinutes?: number;
     phase?: string;
     currentRoundNumber?: number;
+    registrationOpensAt?: Date;
+    registrationClosesAt?: Date;
   }
 ) {
+  // The lifecycle sweep now drives status off these, so seeded tournaments need
+  // a window consistent with the status they are seeded in — otherwise an 'open'
+  // tournament whose window has already shut is closed and started within a
+  // minute of seeding, and the demo state is gone.
+  const regCloses = data.registrationClosesAt ?? data.startDate;
+  // An hour before now, or before the start date for back-dated fixtures —
+  // registration must always open strictly before it closes.
+  const regOpens =
+    data.registrationOpensAt ??
+    new Date(Math.min(Date.now(), regCloses.getTime()) - 60 * 60 * 1000);
   const existing = await client.query(`SELECT id FROM tournaments WHERE name = $1`, [data.name]);
   if (existing.rows[0]) {
     await client.query(
       `UPDATE tournaments SET
          game = $2, start_date = $3, end_date = $4, status = $5,
          max_players = $6, skill_tier = $7, buyback_price_cents = $8,
-         round_duration_minutes = $9, phase = $10, current_round_number = $11
+         round_duration_minutes = $9, phase = $10, current_round_number = $11,
+         registration_opens_at = $12, registration_closes_at = $13
        WHERE id = $1`,
       [
         existing.rows[0].id,
@@ -237,14 +250,16 @@ async function upsertTournament(
         data.roundDurationMinutes ?? 180,
         data.phase ?? 'normal',
         data.currentRoundNumber ?? 1,
+        regOpens.toISOString(),
+        regCloses.toISOString(),
       ]
     );
     return existing.rows[0].id as string;
   }
 
   const result = await client.query(
-    `INSERT INTO tournaments (name, game, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, round_duration_minutes, phase, current_round_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `INSERT INTO tournaments (name, game, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, round_duration_minutes, phase, current_round_number, registration_opens_at, registration_closes_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      RETURNING id`,
     [
       data.name,
@@ -258,6 +273,8 @@ async function upsertTournament(
       data.roundDurationMinutes ?? 180,
       data.phase ?? 'normal',
       data.currentRoundNumber ?? 1,
+      regOpens.toISOString(),
+      regCloses.toISOString(),
     ]
   );
   return result.rows[0].id as string;
@@ -1069,8 +1086,10 @@ async function seed() {
     const islamabadLeagueId = await upsertTournament(client, {
       name: 'Islamabad VR League',
       game: 'VR Cricket',
-      startDate: inDays(0),
-      endDate: inDays(7),
+      // Registration is open now and play begins in two days, so the lifecycle
+      // leaves it 'open' and the fresh-enter demo still works.
+      startDate: inDays(2),
+      endDate: inDays(9),
       status: 'open',
       maxPlayers: 32,
       skillTier: 2,

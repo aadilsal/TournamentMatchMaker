@@ -17,7 +17,12 @@ import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 import { MapPin, Clock, ChevronRight, Headset } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SlotConfirmModal } from '@/components/tournament/SlotConfirmModal';
-import { SlotPicker, todayString } from '@/components/slots/SlotPicker';
+import {
+  SlotPicker,
+  todayString,
+  getNextDates,
+  getRoundDates,
+} from '@/components/slots/SlotPicker';
 
 type Step = 'venue' | 'slot';
 
@@ -122,6 +127,25 @@ export function PlayFlowPage() {
   const slots = useMemo(() => slotOptions?.slots ?? [], [slotOptions]);
   const previousSlotId = slotOptions?.defaultTimeSlotId ?? previousRoundSlot?.timeSlotId ?? null;
 
+  // Only offer days the round can actually be played on. Without a round window
+  // (no active round) fall back to the rolling week, which is what the server
+  // will accept in that case anyway.
+  const roundDates = useMemo(() => {
+    const round = slotOptions?.round;
+    if (!round) return getNextDates(7);
+    const dates = getRoundDates(round.startsAt, round.endsAt);
+    return dates.length > 0 ? dates : [todayString()!];
+  }, [slotOptions?.round]);
+
+  // The strip starts on today, but the round may not open until later — move the
+  // selection onto the first playable day rather than showing an empty list.
+  useEffect(() => {
+    if (roundDates.length === 0) return;
+    if (!roundDates.includes(selectedDate)) {
+      setSelectedDate(roundDates[0]!);
+    }
+  }, [roundDates, selectedDate]);
+
   // Re-entering a later round defaults to the slot the player used last round.
   useEffect(() => {
     if (selectedSlot || !previousSlotId) return;
@@ -155,8 +179,18 @@ export function PlayFlowPage() {
   const roundNumber = slotOptions?.roundNumber ?? tournament.currentRoundNumber;
   const steps: Step[] = needsVenue ? ['venue', 'slot'] : ['slot'];
   const emptySlotMessage = slotOptions?.round
-    ? 'No slots on this date fall within the current tournament round. Try another day.'
+    ? 'No slots left on this date for this round. Try another day.'
     : undefined;
+
+  const roundWindowLabel = slotOptions?.round
+    ? `Round ${roundNumber} runs until ${new Date(slotOptions.round.endsAt).toLocaleString([], {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      })} — only days inside it can be played.`
+    : null;
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
@@ -243,8 +277,12 @@ export function PlayFlowPage() {
             <Clock className="h-4 w-4" />
             {selectedVenue ? `Choose slot at ${selectedVenue.name}` : 'Choose your play slot'}
           </h2>
+          {roundWindowLabel && (
+            <p className="text-sm text-[var(--color-muted-foreground)] -mt-2">{roundWindowLabel}</p>
+          )}
 
           <SlotPicker
+            dates={roundDates}
             selectedDate={selectedDate}
             onDateChange={(date) => {
               setSelectedDate(date);

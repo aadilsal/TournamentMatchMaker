@@ -18,6 +18,7 @@ import { processPairPlayersJob } from './jobs/pair-players.job.js';
 import { processExpireMatchesJob } from './jobs/expire-matches.job.js';
 import { processExpireUnplayedSlotsJob } from './jobs/expire-unplayed-slots.job.js';
 import { processCloseRoundJob } from './jobs/close-round.job.js';
+import { processTournamentLifecycleJob } from './jobs/tournament-lifecycle.job.js';
 import { processDispatchNotificationJob } from './jobs/dispatch-notification.job.js';
 
 const env = loadEnv();
@@ -45,6 +46,9 @@ await matchmakingQueue.add('expire-unplayed-repeat', {}, { repeat: { every: 6000
 // Polled every minute, not hourly: round duration can be set as low as 15
 // minutes, so an hourly sweep could leave a finished round open ~4x its length.
 await matchmakingQueue.add('close-round-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-close-round-repeat' });
+// Registration closing, play starting and the tournament completing all happen
+// on their own schedule; nothing used to move a tournament forward but an admin.
+await matchmakingQueue.add('tournament-lifecycle-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-tournament-lifecycle-repeat' });
 
 const matchmakingWorker = new Worker(
   BULLMQ_MATCHMAKING_QUEUE,
@@ -57,7 +61,9 @@ const matchmakingWorker = new Worker(
     } else if (job.name === 'expire-unplayed-repeat') {
       await processExpireUnplayedSlotsJob(job, pool, redis);
     } else if (job.name === 'close-round-repeat') {
-      await processCloseRoundJob(job, pool);
+      await processCloseRoundJob(job, pool, redis);
+    } else if (job.name === 'tournament-lifecycle-repeat') {
+      await processTournamentLifecycleJob(job, pool, redis);
     }
   },
   { connection, concurrency: 3 }

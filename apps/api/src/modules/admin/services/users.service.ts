@@ -12,6 +12,7 @@ import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
 import type { RedisClient } from '../../../lib/redis.js';
 import { revokeUserTokens } from '../../../lib/token-revocation.js';
+import { disconnectUser } from '../../../socket/emitters.js';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -27,6 +28,9 @@ export class AdminUsersService {
    */
   private async invalidateSessions(userId: string) {
     if (this.redis) await revokeUserTokens(this.redis, userId);
+    // Also drop their live sockets, so a suspended or demoted user stops
+    // receiving updates immediately rather than at the next re-check.
+    disconnectUser(userId, 'Your access changed — sign in again');
   }
 
   async list(query: AdminListQuery & { role?: string }) {

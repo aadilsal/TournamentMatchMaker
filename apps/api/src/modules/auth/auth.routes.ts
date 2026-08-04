@@ -7,6 +7,7 @@ import { validate } from '../../middleware/validate.js';
 import { authenticate } from '../../middleware/auth.js';
 import { credentialRateLimit } from '../../middleware/rateLimit.js';
 import { sendSuccess } from '../../lib/response.js';
+import { disconnectUser } from '../../socket/emitters.js';
 import { AuthService } from './auth.service.js';
 
 export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Router {
@@ -96,6 +97,9 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
       }
 
       await authService.logout(req.user!.sub, jti, exp);
+      // The socket authenticates once and would otherwise keep streaming — and
+      // accepting match actions — for this now-dead session.
+      disconnectUser(req.user!.sub, 'Signed out');
       res.clearCookie('refresh_token', { path: '/api/v1/auth' });
       sendSuccess(res, { message: 'Logged out successfully' });
     } catch (err) {

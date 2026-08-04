@@ -142,6 +142,9 @@ export interface Tournament {
   game: string;
   startDate: string;
   endDate: string;
+  /** Registration window — the buffer before play begins. */
+  registrationOpensAt: string | null;
+  registrationClosesAt: string | null;
   status: TournamentStatus;
   maxPlayers: number | null;
   skillTier: number;

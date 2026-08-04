@@ -186,14 +186,19 @@ export class TournamentsService {
     try {
       await client.query('BEGIN');
       const result = await client.query(
-        `INSERT INTO tournaments (name, game, start_date, end_date, status, max_players, skill_tier, buyback_price_cents, round_duration_minutes)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        `INSERT INTO tournaments (name, game, start_date, end_date, registration_opens_at, registration_closes_at,
+                                  status, max_players, skill_tier, buyback_price_cents, round_duration_minutes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
         [
           input.name,
           input.game,
           input.startDate,
           input.endDate,
+          // Default to a window that opens now and shuts when play begins, which
+          // is how tournaments behaved before the window existed.
+          input.registrationOpensAt ?? new Date().toISOString(),
+          input.registrationClosesAt ?? input.startDate,
           input.status ?? 'draft',
           input.maxPlayers ?? null,
           input.skillTier ?? 3,
@@ -255,11 +260,34 @@ export class TournamentsService {
     await assertNoOtherLiveTournament(this.pool, userId, tournamentId);
   }
 
+  /**
+   * The lifecycle sweep flips `status` within a minute of the window closing,
+   * so status alone leaves a gap where registration is shut but the row still
+   * says 'open'. Checking the timestamps too makes the boundary exact.
+   */
+  private assertRegistrationWindowOpen(tournament: Tournament) {
+    const now = Date.now();
+    if (tournament.registrationOpensAt && new Date(tournament.registrationOpensAt).getTime() > now) {
+      throw new AppError(
+        'CONFLICT',
+        `Registration opens ${new Date(tournament.registrationOpensAt).toLocaleString()}`,
+        409
+      );
+    }
+    if (
+      tournament.registrationClosesAt &&
+      new Date(tournament.registrationClosesAt).getTime() <= now
+    ) {
+      throw new AppError('CONFLICT', 'Registration for this tournament has closed', 409);
+    }
+  }
+
   async register(tournamentId: string, userId: string, input: RegisterTournamentInput) {
     const tournament = await this.getById(tournamentId);
     if (tournament.status !== 'open') {
       throw new AppError('CONFLICT', 'Tournament is not open for registration', 409);
     }
+    this.assertRegistrationWindowOpen(tournament);
 
     const userResult = await this.pool.query(
       `SELECT id FROM users WHERE id = $1`,
@@ -267,6 +295,9 @@ export class TournamentsService {
     );
     if (!userResult.rows[0]) throw new AppError('NOT_FOUND', 'User not found', 404);
 
+    // Cheap pre-check so an obviously-full tournament fails fast; the binding
+    // check happens under a lock inside the transaction below, because this one
+    // reads a count that every concurrent request sees as pre-insert.
     if (tournament.maxPlayers && (tournament.registrationCount ?? 0) >= tournament.maxPlayers) {
       throw new AppError('CONFLICT', 'Tournament is full', 409);
     }
@@ -286,6 +317,26 @@ export class TournamentsService {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
+
+      // Serialise registrations for this tournament on its own row. Counting
+      // outside a lock let every request in a simultaneous burst read the same
+      // pre-insert count and pass the capacity check, so a 3-player tournament
+      // accepted all 8 of them.
+      await client.query(`SELECT id FROM tournaments WHERE id = $1 FOR UPDATE`, [tournamentId]);
+
+      if (tournament.maxPlayers) {
+        const taken = await client.query(
+          `SELECT COUNT(*)::int AS count FROM tournament_registrations
+           WHERE tournament_id = $1 AND user_id <> $2`,
+          [tournamentId, userId]
+        );
+        // `user_id <> $2` so re-registering the same player is still idempotent
+        // rather than being rejected by a place they already hold.
+        if ((taken.rows[0]?.count ?? 0) >= tournament.maxPlayers) {
+          // The catch below rolls back and releases the client.
+          throw new AppError('CONFLICT', 'Tournament is full', 409);
+        }
+      }
 
       const result = await client.query(
         `INSERT INTO tournament_registrations (tournament_id, user_id, booking_id)
@@ -451,6 +502,9 @@ export class TournamentsService {
           409
         );
       }
+      // Entering as a new player registers them, so the registration window
+      // applies here too. Players already registered keep entering later rounds.
+      this.assertRegistrationWindowOpen(tournament);
       await this.assertNoOtherLiveTournament(userId, tournamentId);
     }
 

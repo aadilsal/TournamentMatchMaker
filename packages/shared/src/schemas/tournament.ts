@@ -8,17 +8,68 @@ export const tournamentStatusSchema = z.enum([
   'completed',
 ]);
 
-export const createTournamentSchema = z.object({
+/**
+ * The lifecycle runs off these four timestamps, so their ordering has to hold
+ * or a tournament can reach a state it cannot leave — registration closing
+ * after play starts, or an end date before the first round could finish.
+ */
+export const TOURNAMENT_WINDOW_RULES = [
+  {
+    path: 'registrationClosesAt',
+    message: 'Registration must close after it opens',
+    valid: (o: TournamentWindow) =>
+      !o.registrationOpensAt || !o.registrationClosesAt || o.registrationOpensAt < o.registrationClosesAt,
+  },
+  {
+    path: 'registrationClosesAt',
+    message: 'Registration must close on or before the start date',
+    valid: (o: TournamentWindow) =>
+      !o.registrationClosesAt || !o.startDate || o.registrationClosesAt <= o.startDate,
+  },
+  {
+    path: 'endDate',
+    message: 'End date must be after the start date',
+    valid: (o: TournamentWindow) => !o.startDate || !o.endDate || o.startDate < o.endDate,
+  },
+] as const;
+
+export interface TournamentWindow {
+  registrationOpensAt?: string | null;
+  registrationClosesAt?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export function applyTournamentWindowRules<T extends z.ZodTypeAny>(schema: T) {
+  return TOURNAMENT_WINDOW_RULES.reduce(
+    (acc, rule) =>
+      acc.refine((o: TournamentWindow) => rule.valid(o), {
+        path: [rule.path],
+        message: rule.message,
+      }),
+    schema as unknown as z.ZodEffects<z.ZodTypeAny>
+  );
+}
+
+/**
+ * The plain object, un-refined, so callers that need `.partial()` or `.extend()`
+ * can build on it and re-apply the window rules themselves.
+ */
+export const tournamentFieldsSchema = z.object({
   name: z.string().min(1).max(200),
   game: z.string().min(1).max(100),
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
+  registrationOpensAt: z.string().datetime().optional(),
+  registrationClosesAt: z.string().datetime().optional(),
   status: tournamentStatusSchema.optional(),
   maxPlayers: z.number().int().positive().optional(),
   skillTier: z.number().int().min(1).max(5).optional(),
   buybackPriceCents: z.number().int().min(0).optional(),
   roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60).optional(),
 });
+
+export const createTournamentSchema = applyTournamentWindowRules(tournamentFieldsSchema);
 
 export const tournamentListQuerySchema = z.object({
   status: tournamentStatusSchema.optional(),

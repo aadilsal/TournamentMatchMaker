@@ -35,6 +35,8 @@ export function TournamentsPage() {
 
   const { active, completed } = useMemo(
     () => ({
+      // 'closed' means registration is shut, not that the tournament is over —
+      // it still has to be played, so it stays under Live & upcoming.
       active: tournaments.filter((t) => t.status !== 'completed'),
       completed: tournaments.filter((t) => t.status === 'completed'),
     }),

@@ -108,6 +108,8 @@ export class AdminTournamentsService {
       ['game', 'game'],
       ['startDate', 'start_date'],
       ['endDate', 'end_date'],
+      ['registrationOpensAt', 'registration_opens_at'],
+      ['registrationClosesAt', 'registration_closes_at'],
       ['status', 'status'],
       ['maxPlayers', 'max_players'],
       ['skillTier', 'skill_tier'],

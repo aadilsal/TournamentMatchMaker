@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { createVenueSchema } from './venue.js';
 import { createSlotsSchema } from './slot.js';
-import { createTournamentSchema, tournamentStatusSchema } from './tournament.js';
+import {
+  createTournamentSchema,
+  tournamentFieldsSchema,
+  applyTournamentWindowRules,
+  tournamentStatusSchema,
+} from './tournament.js';
 
 export const userRoleSchema = z.enum(['player', 'venue_admin', 'tournament_admin', 'superadmin']);
 
@@ -99,11 +104,15 @@ export const adminVenueListQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
 });
 
-export const adminUpdateTournamentSchema = createTournamentSchema.partial().extend({
-  phase: z.enum(['normal', 'knockout', 'completed']).optional(),
-  currentRoundNumber: z.number().int().positive().optional(),
-  initialPlayerCount: z.number().int().positive().optional(),
-});
+// Re-applies the window rules after `.partial()`, so a partial edit still can't
+// leave registration closing after play starts.
+export const adminUpdateTournamentSchema = applyTournamentWindowRules(
+  tournamentFieldsSchema.partial().extend({
+    phase: z.enum(['normal', 'knockout', 'completed']).optional(),
+    currentRoundNumber: z.number().int().positive().optional(),
+    initialPlayerCount: z.number().int().positive().optional(),
+  })
+);
 
 export const adminTournamentListQuerySchema = z.object({
   status: tournamentStatusSchema.optional(),

@@ -40,6 +40,9 @@ const MIGRATION_MARKERS = {
   // It is idempotent, so it is never treated as pre-applied — running it twice
   // is a no-op.
   '1738000000014_retire-participants-on-completion': { dataOnly: true },
+  '1738000000015_registration-window': {
+    column: { table: 'tournaments', name: 'registration_opens_at' },
+  },
 };
 
 async function tableExists(client, table) {

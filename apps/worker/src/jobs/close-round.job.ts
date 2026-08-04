@@ -1,5 +1,7 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
+import type { Redis } from 'ioredis';
+import { emitBroadcast } from '../lib/socket-bridge.js';
 import {
   KNOCKOUT_ROUNDS,
   firstKnockoutMatchCount,
@@ -8,7 +10,7 @@ import {
   shouldStartKnockout,
 } from '@vr-tournament/shared';
 
-export async function processCloseRoundJob(_job: Job, pool: Pool) {
+export async function processCloseRoundJob(_job: Job, pool: Pool, redis: Redis) {
   const expired = await pool.query(
     `SELECT tr.tournament_id, tr.round_number
      FROM tournament_rounds tr
@@ -21,6 +23,12 @@ export async function processCloseRoundJob(_job: Job, pool: Pool) {
 
   for (const round of expired.rows) {
     await closeRound(pool, round.tournament_id, round.round_number);
+    // Closing a round advances or eliminates every player in it, and rebuilds
+    // the bracket — none of which reached the browser until the next poll.
+    await emitBroadcast(redis, 'tournament:updated', {
+      tournamentId: round.tournament_id,
+      reason: 'round_closed',
+    });
   }
 }
 

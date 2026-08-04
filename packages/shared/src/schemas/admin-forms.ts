@@ -111,6 +111,8 @@ export const adminTournamentFormSchema = z
     game: z.string().min(1, 'Game is required').max(100, 'Game name is too long'),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
+    registrationOpensAt: z.string().min(1, 'Registration open date is required'),
+    registrationClosesAt: z.string().min(1, 'Registration close date is required'),
     status: tournamentStatusSchema,
     maxPlayers: positiveIntString('Max players'),
     skillTier: skillTierString,
@@ -135,6 +137,32 @@ export const adminTournamentFormSchema = z
       });
     }
 
+    // The lifecycle runs off these four timestamps in order, so a window that
+    // opens after it closes, or closes after play has begun, would leave the
+    // tournament in a state it could never advance out of.
+    const regOpens = parseDateTimeLocal(data.registrationOpensAt);
+    const regCloses = parseDateTimeLocal(data.registrationClosesAt);
+    if (!regOpens) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['registrationOpensAt'], message: 'Invalid date' });
+    }
+    if (!regCloses) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['registrationClosesAt'], message: 'Invalid date' });
+    }
+    if (regOpens && regCloses && regCloses <= regOpens) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['registrationClosesAt'],
+        message: 'Registration must close after it opens',
+      });
+    }
+    if (regCloses && start && regCloses > start) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['registrationClosesAt'],
+        message: 'Registration must close on or before the start date',
+      });
+    }
+
     const value = parseInt(data.roundDurationValue, 10);
     const minutes = roundDurationToMinutes(value, data.roundDurationUnit as RoundDurationUnit);
     if (!isValidRoundDurationMinutes(minutes)) {
@@ -154,6 +182,8 @@ export function toTournamentApiBody(form: AdminTournamentFormInput) {
     game: form.game,
     startDate: new Date(form.startDate).toISOString(),
     endDate: new Date(form.endDate).toISOString(),
+    registrationOpensAt: new Date(form.registrationOpensAt).toISOString(),
+    registrationClosesAt: new Date(form.registrationClosesAt).toISOString(),
     status: form.status,
     maxPlayers: form.maxPlayers.trim() ? parseInt(form.maxPlayers, 10) : undefined,
     skillTier: parseInt(form.skillTier, 10),
@@ -405,6 +435,8 @@ export const adminSlotGenerationFormSchema = z
   .object({
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
+    registrationOpensAt: z.string().min(1, 'Registration open date is required'),
+    registrationClosesAt: z.string().min(1, 'Registration close date is required'),
   })
   .superRefine((data, ctx) => {
     const start = parseDateOnly(data.startDate);

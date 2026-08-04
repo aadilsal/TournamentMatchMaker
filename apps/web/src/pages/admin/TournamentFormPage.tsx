@@ -31,6 +31,8 @@ const defaultForm: {
   game: string;
   startDate: string;
   endDate: string;
+  registrationOpensAt: string;
+  registrationClosesAt: string;
   status: TournamentStatus;
   maxPlayers: string;
   skillTier: string;
@@ -42,6 +44,8 @@ const defaultForm: {
   game: 'VR Cricket',
   startDate: '',
   endDate: '',
+  registrationOpensAt: '',
+  registrationClosesAt: '',
   status: 'draft',
   maxPlayers: '',
   skillTier: '3',
@@ -71,6 +75,8 @@ export function AdminTournamentFormPage() {
         game: tournament.game,
         startDate: tournament.startDate.slice(0, 16),
         endDate: tournament.endDate.slice(0, 16),
+        registrationOpensAt: tournament.registrationOpensAt?.slice(0, 16) ?? '',
+        registrationClosesAt: tournament.registrationClosesAt?.slice(0, 16) ?? '',
         status: tournament.status,
         maxPlayers: tournament.maxPlayers?.toString() ?? '',
         skillTier: String(tournament.skillTier),
@@ -143,29 +149,61 @@ export function AdminTournamentFormPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] items-start">
         <AdminCard className="p-6 space-y-4">
           <div>
-            <Label>Name</Label>
-            <Input value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={200} />
+            <Label required>Name</Label>
+            <Input aria-required="true" value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={200} />
             <AdminFieldError message={errors.name} />
           </div>
           <div>
-            <Label>Game</Label>
-            <Input value={form.game} onChange={(e) => set('game', e.target.value)} maxLength={100} />
+            <Label required>Game</Label>
+            <Input aria-required="true" value={form.game} onChange={(e) => set('game', e.target.value)} maxLength={100} />
             <AdminFieldError message={errors.game} />
+          </div>
+          <div>
+            <p className="text-sm font-medium mb-1">Registration period</p>
+            <p className="text-xs text-[var(--color-muted-foreground)] mb-2">
+              The window before play begins when players can join. Registration
+              closes and the tournament starts on their own — you can still do
+              either early from the tournament page.
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label required>Registration opens</Label>
+                <Input
+                  type="datetime-local"
+                  aria-required="true"
+                  value={form.registrationOpensAt}
+                  onChange={(e) => set('registrationOpensAt', e.target.value)}
+                />
+                <AdminFieldError message={errors.registrationOpensAt} />
+              </div>
+              <div>
+                <Label required>Registration closes</Label>
+                <Input
+                  type="datetime-local"
+                  aria-required="true"
+                  value={form.registrationClosesAt}
+                  onChange={(e) => set('registrationClosesAt', e.target.value)}
+                />
+                <AdminFieldError message={errors.registrationClosesAt} />
+              </div>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <Label>Start</Label>
+              <Label required>Start</Label>
               <Input
                 type="datetime-local"
+                aria-required="true"
                 value={form.startDate}
                 onChange={(e) => set('startDate', e.target.value)}
               />
               <AdminFieldError message={errors.startDate} />
             </div>
             <div>
-              <Label>End</Label>
+              <Label required>End</Label>
               <Input
                 type="datetime-local"
+                aria-required="true"
                 value={form.endDate}
                 onChange={(e) => set('endDate', e.target.value)}
               />
@@ -173,7 +211,7 @@ export function AdminTournamentFormPage() {
             </div>
           </div>
           <div>
-            <Label>Normal round duration</Label>
+            <Label required>Normal round duration</Label>
             <div className="grid grid-cols-2 gap-3 mt-1">
               <Input
                 type="number"
@@ -211,13 +249,13 @@ export function AdminTournamentFormPage() {
               <AdminFieldError message={errors.maxPlayers} />
             </div>
             <div>
-              <Label>Skill tier</Label>
+              <Label required>Skill tier</Label>
               <AdminSkillTierSelect value={form.skillTier} onChange={(v) => set('skillTier', v)} />
               <AdminFieldError message={errors.skillTier} />
             </div>
           </div>
           <div>
-            <Label>Buyback price (cents)</Label>
+            <Label required>Buyback price (cents)</Label>
             <Input
               type="number"
               min={0}

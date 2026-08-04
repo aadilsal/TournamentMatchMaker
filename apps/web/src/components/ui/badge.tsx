@@ -35,7 +35,9 @@ export function tournamentStatusBadge(status: string) {
   const map: Record<string, { label: string; variant: BadgeVariant }> = {
     open: { label: 'Open', variant: 'success' },
     draft: { label: 'Draft', variant: 'warning' },
-    closed: { label: 'Closed', variant: 'neutral' },
+    // 'Closed' read as "this tournament is over". It only means new players can
+    // no longer register — it still has to be played.
+    closed: { label: 'Registration closed', variant: 'neutral' },
     in_progress: { label: 'Live', variant: 'info' },
     completed: { label: 'Completed', variant: 'neutral' },
   };

@@ -15,6 +15,32 @@ export function getNextDates(count: number) {
   });
 }
 
+/**
+ * Every day a round is playable on, from today (or the round's start, if it has
+ * not opened yet) through the day it closes — inclusive, so the closing day is
+ * offered.
+ *
+ * Offering a flat seven days regardless of the round meant most of the strip led
+ * to "no slots on this date", because the server only ever returns slots inside
+ * the round window. Bounding the strip to the round makes every date on it one
+ * that can actually hold a match.
+ */
+export function getRoundDates(startsAt: string, endsAt: string): string[] {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const toDayStart = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+
+  const start = toDayStart(new Date(Math.max(Date.now(), new Date(startsAt).getTime())));
+  const end = toDayStart(new Date(endsAt));
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+
+  const dates: string[] = [];
+  // Guard against a mis-set round window producing an unbounded strip.
+  for (let t = start; t <= end && dates.length < 60; t += dayMs) {
+    dates.push(new Date(t).toISOString().split('T')[0]!);
+  }
+  return dates;
+}
+
 export function formatSlotTime(iso: string) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
