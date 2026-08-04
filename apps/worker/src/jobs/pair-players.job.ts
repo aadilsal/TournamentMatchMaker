@@ -293,6 +293,13 @@ async function pairInQueue(
           startsAt: roundResult.rows[0].starts_at,
           endsAt: roundResult.rows[0].ends_at,
         };
+      } else {
+        // No open round for these players. A tournament match belongs to a
+        // round, and a match created after the round shut can never be scored —
+        // both players would sit in it until it expired, unable to requeue.
+        // Leave them in the queue; close-round will move them on.
+        await client.query('ROLLBACK');
+        return false;
       }
     }
 
@@ -381,10 +388,16 @@ async function pairInQueue(
       venueId = needsVenue ? chosenSlot.venueId : null;
     }
 
-    // Only players who physically attend consume a seat at the venue.
+    // Only players who physically attend consume a seat at the venue — and
+    // only in the slot they chose themselves. Since pairing no longer requires
+    // the two windows to overlap, the match is anchored to one of them; seating
+    // the other player there too would book them a seat at a time they never
+    // picked, and take capacity from that venue.
+    const seatsChosenSlot = (slot: BookingSlot | null) =>
+      !!slot && !!chosenSlot && slot.slotId === chosenSlot.slotId;
     const attendingPlayerIds = [
-      ...(p1HasVr ? [] : [candidate.userId]),
-      ...(p2HasVr ? [] : [partner.userId]),
+      ...(p1HasVr || !seatsChosenSlot(p1Slot) ? [] : [candidate.userId]),
+      ...(p2HasVr || !seatsChosenSlot(p2Slot) ? [] : [partner.userId]),
     ];
 
     const roundNumber = parseInt(p1Meta.roundNumber || p2Meta.roundNumber || '1', 10);

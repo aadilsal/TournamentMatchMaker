@@ -74,7 +74,39 @@ export class MatchesService {
        LIMIT 50`,
       [userId]
     );
-    return Promise.all(result.rows.map((row) => this.attachConfirmations(mapMatch(row))));
+
+    // The viewer's own play window for each match's round. The match itself is
+    // anchored to one player's slot, so this is what tells *this* player when
+    // they can play — the UI gates the Play button on it.
+    const slots = await this.pool.query(
+      `SELECT rs.tournament_id, rs.round_number, ts.id, ts.start_time, ts.end_time
+       FROM tournament_round_slots rs
+       JOIN time_slots ts ON ts.id = rs.time_slot_id
+       WHERE rs.user_id = $1`,
+      [userId]
+    );
+    const mine = new Map(
+      slots.rows.map((r) => [
+        `${r.tournament_id}:${r.round_number}`,
+        {
+          id: r.id as string,
+          startTime: (r.start_time as Date).toISOString(),
+          endTime: (r.end_time as Date).toISOString(),
+        },
+      ])
+    );
+
+    return Promise.all(
+      result.rows.map(async (row) => {
+        const match = await this.attachConfirmations(mapMatch(row));
+        const own = match.tournamentId
+          ? mine.get(`${match.tournamentId}:${match.roundNumber ?? 1}`)
+          : undefined;
+        // Outside a tournament there is no per-round slot, so the match's own
+        // window is the only one there is.
+        return { ...match, mySlot: own ?? match.slot ?? null };
+      })
+    );
   }
 
   async confirm(matchId: string, userId: string) {

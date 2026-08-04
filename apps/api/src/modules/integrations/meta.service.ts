@@ -156,7 +156,13 @@ export class MetaIntegrationService {
         throw new AppError('CONFLICT', 'Match is not currently playable', 409);
       }
 
-      await assertMatchSlotPlayable(client, match.time_slot_id);
+      // Pass the match so a tournament score is judged against its round
+      // deadline rather than one player's slot — the two players' windows need
+      // not overlap.
+      await assertMatchSlotPlayable(client, match.time_slot_id, {
+        tournament_id: match.tournament_id,
+        round_number: match.round_number,
+      });
 
       isPlayer1 = match.player1_id === userId;
       current = (match.result ?? {

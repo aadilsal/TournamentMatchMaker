@@ -127,6 +127,19 @@ export class MatchmakingService {
          LIMIT 1`,
         [input.tournamentId, userId, roundNumber]
       );
+      // A tournament match belongs to a round, so there has to be one open.
+      // The slot lookup above treats "no active round" as "no window to satisfy"
+      // and would happily admit the player — who then gets paired into a closed
+      // round and lands in a match that can never be scored.
+      const activeRound = await this.pool.query(
+        `SELECT id FROM tournament_rounds
+         WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at > NOW()`,
+        [input.tournamentId, roundNumber]
+      );
+      if (!activeRound.rows[0]) {
+        throw new AppError('CONFLICT', 'This round has closed — wait for the next one', 409);
+      }
+
       const rs = slotRow.rows[0];
       if (!rs) {
         throw new AppError(

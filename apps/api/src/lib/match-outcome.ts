@@ -194,10 +194,41 @@ export async function applyMatchOutcome(
 /** Accepts a pool or a checked-out client so callers can run it inside a transaction. */
 type Queryable = Pick<Pool, 'query'>;
 
+/**
+ * Whether a score may still be submitted for this match.
+ *
+ * A match carries a single `time_slot_id` — the window it was scheduled into —
+ * but the two players may hold different windows, because pairing no longer
+ * requires them to overlap. Keying purely off that one slot locked the player
+ * whose window came later out of ever submitting, leaving an unplayable match.
+ *
+ * For a tournament match the deadline that actually matters is the **round**:
+ * the round is what advances players, and a score arriving after it closes
+ * cannot be counted anyway. Outside a tournament there is no round, so the
+ * slot remains the only deadline available.
+ */
 export async function assertMatchSlotPlayable(
   pool: Queryable,
-  timeSlotId: string | null
+  timeSlotId: string | null,
+  match?: { tournament_id: string | null; round_number: number | null }
 ): Promise<void> {
+  if (match?.tournament_id) {
+    const round = await pool.query(
+      `SELECT ends_at, status FROM tournament_rounds
+       WHERE tournament_id = $1 AND round_number = $2`,
+      [match.tournament_id, match.round_number ?? 1]
+    );
+    const row = round.rows[0];
+    if (row) {
+      const ended = row.status !== 'active' || new Date(row.ends_at).getTime() <= Date.now();
+      if (ended) {
+        throw new AppError('CONFLICT', 'This round has closed — scores can no longer be submitted', 409);
+      }
+      return;
+    }
+    // No round row to judge against: fall through to the slot check below.
+  }
+
   if (!timeSlotId) return;
   const slot = await pool.query(`SELECT end_time FROM time_slots WHERE id = $1`, [timeSlotId]);
   const endTime = slot.rows[0]?.end_time;

@@ -78,7 +78,10 @@ describe('pairing algorithm', () => {
   describe('play windows', () => {
     const HOUR = 3_600_000;
 
-    it('never pairs players whose play windows do not overlap', () => {
+    // The format is asynchronous — one player sets a target, the other chases
+    // it — so opponents never have to be in VR at the same moment. Requiring an
+    // overlap stranded players who simply picked different times of day.
+    it('pairs players whose play windows do not overlap', () => {
       const now = Date.now();
       const entries = [
         {
@@ -100,7 +103,25 @@ describe('pairing algorithm', () => {
           slotEndAt: now + 6 * HOUR,
         },
       ];
-      expect(findBestPair(entries, now)).toBeNull();
+      const pair = findBestPair(entries, now);
+      expect(pair).not.toBeNull();
+      expect([pair!.candidate.userId, pair!.partner.userId].sort()).toEqual(['a', 'b']);
+    });
+
+    it('prefers an overlapping opponent over a non-overlapping one', () => {
+      const now = Date.now();
+      const entries = [
+        // 'a' can pair with either; 'overlap' shares a's window, 'later' does not.
+        { userId: 'a', joinedAt: now - 40000, city: 'Lahore', skillTier: 3, roundNumber: 1,
+          slotStartAt: now + HOUR, slotEndAt: now + 2 * HOUR },
+        { userId: 'later', joinedAt: now - 40000, city: 'Lahore', skillTier: 3, roundNumber: 1,
+          slotStartAt: now + 5 * HOUR, slotEndAt: now + 6 * HOUR },
+        { userId: 'overlap', joinedAt: now - 40000, city: 'Lahore', skillTier: 3, roundNumber: 1,
+          slotStartAt: now + HOUR, slotEndAt: now + 2 * HOUR },
+      ];
+      const pair = findBestPair(entries, now);
+      expect(pair).not.toBeNull();
+      expect([pair!.candidate.userId, pair!.partner.userId].sort()).toEqual(['a', 'overlap']);
     });
 
     it('pairs players whose play windows overlap', () => {

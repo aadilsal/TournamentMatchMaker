@@ -41,11 +41,18 @@ function minTierDistanceInRound(entries: QueueEntry[], roundNumber: number): num
 }
 
 /**
- * A match carries one time slot, so two players who both hold a play window can
- * only be paired if those windows overlap — otherwise one of them could never
- * play or submit a score. A player without a window (open queue) pairs freely.
+ * Whether the two players' chosen windows overlap.
+ *
+ * This is a *preference*, not a requirement. The format is asynchronous — one
+ * player sets a target and the other chases it — so they never have to be in
+ * VR at the same moment. Requiring an overlap meant two players in the same
+ * round could sit in the queue indefinitely simply because one picked the
+ * morning and the other the evening.
+ *
+ * Overlapping pairs still score higher, so a simultaneous match is preferred
+ * when one is available.
  */
-function slotsCompatible(a: QueueEntry, b: QueueEntry): boolean {
+function slotsOverlapping(a: QueueEntry, b: QueueEntry): boolean {
   const aHasWindow = a.slotStartAt != null && a.slotEndAt != null;
   const bHasWindow = b.slotStartAt != null && b.slotEndAt != null;
   if (!aHasWindow || !bHasWindow) return true;
@@ -53,9 +60,10 @@ function slotsCompatible(a: QueueEntry, b: QueueEntry): boolean {
 }
 
 function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number): number | null {
+  // The only hard requirements: not yourself, and the same round of the same
+  // tournament. Everything else below only ranks the candidates.
   if (a.userId === b.userId) return null;
   if (a.roundNumber !== b.roundNumber) return null;
-  if (!slotsCompatible(a, b)) return null;
 
   const dist = tierDistance(a.skillTier, b.skillTier);
   const maxWait = Math.max(waitSeconds(a, now), waitSeconds(b, now));
@@ -71,6 +79,11 @@ function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number)
   }
 
   let score = 100 - dist * 10;
+
+  // Prefer players who can be in VR together, without requiring it.
+  if (slotsOverlapping(a, b)) {
+    score += 15;
+  }
 
   const sameCity = isSameCity(a.city, b.city);
   if (!sameCity) {

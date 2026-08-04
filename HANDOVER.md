@@ -179,11 +179,12 @@ See [section 6](#6-playing-a-match--scoring). After a match:
 
 The platform scans the queue **every 2 seconds** and also immediately when someone joins.
 
-**Hard requirements** — a pair is impossible without all of these:
+**Hard requirements** — a pair is impossible without both of these:
 
 1. Both players are in the **same tournament and the same round**.
-2. Their chosen **time windows overlap**.
-3. Their window sits **inside the current round's window**.
+2. That round is **still open** (their chosen window sits inside it).
+
+**Time windows do *not* have to overlap.** The format is asynchronous — one player sets a target, the other chases it — so they never need to be in VR at the same moment. Someone who picked the morning can be matched with someone who picked the evening, and each plays in their own window. Overlapping pairs are still *preferred* when both options exist, so a simultaneous match happens where it can.
 
 **Preference, which relaxes over time** — skill tier:
 
@@ -193,7 +194,7 @@ The platform scans the queue **every 2 seconds** and also immediately when someo
 | 10–30 seconds | Within 1 tier |
 | 30+ seconds | Any tier |
 
-So a short wait is normal and intended — it's the system trying for a fair match first. Beyond about 30 seconds, if a player still isn't paired, it means no one else meets the hard requirements.
+So a short wait is normal and intended — it's the system trying for a fair match first. Beyond about 30 seconds, if a player still isn't paired, it means nobody else is in the same round of the same tournament.
 
 Pairing also prefers players who have waited longer, those whose slot is about to expire, and those who've already played a solo innings.
 
@@ -206,6 +207,17 @@ Pairing also prefers players who have waited longer, those whose slot is about t
 **Scores come from the Meta Quest headset only.** The website deliberately does not accept manually typed scores — this is what keeps results trustworthy. Attempting it returns *"Scores must be submitted from your Meta Quest headset."*
 
 The format is a short chase: one player bats and sets a target, the other chases it.
+
+**Each player plays in their own window.** Because pairing doesn't require overlapping windows, the two opponents may play hours apart. The website tells each player where they stand:
+
+| When | What they see on **Matches** |
+|---|---|
+| Before their window | *"You're all set. Your slot opens Wed, Aug 5, 05:30 (in 6 hours) — put your headset on then."* |
+| During their window | *"It's time — put your headset on and play."* |
+| After their innings | *"Innings recorded. We're waiting on your opponent…"* |
+| Both innings in | *"Both innings are in — working out the result now."* |
+
+There is **no Play button on the website** — play happens entirely in the headset. The site's job is to tell them when, and to show the score once it arrives.
 
 **Solo innings.** A player waiting in the queue can play alone in VR and submit a target score. When they're later paired, that becomes the target their opponent must chase — so waiting isn't dead time.
 
@@ -455,7 +467,7 @@ The Quest app authenticates with a shared API key. Full technical detail is in `
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| Player stuck "Finding opponent…" | Nobody else meets the hard requirements — different round, non-overlapping windows, or a window outside the round | Check **Queue**. If they're alone or mismatched, that's expected. If several are waiting and not pairing, use **Trigger pairing**, then check their rounds and slot windows |
+| Player stuck "Finding opponent…" | Nobody else is in the same round of the same tournament | Check **Queue**. If they're the only one in their round, that's expected — windows do *not* need to overlap, so anyone else in that round will match them. If several are waiting in the same round and not pairing, use **Trigger pairing** |
 | Tournament didn't start | It was still a **draft** — drafts never auto-publish | Publish it, or use **Start** |
 | Registration still open past the closing time | The sweep runs every 60 seconds | Wait a minute, or use **Close registration** |
 | Player can't join anything | Already in an unfinished tournament | Their banner names it — withdraw or finish |
@@ -482,6 +494,7 @@ If you read `docs/USER_GUIDE.md`, these behaviours have changed since it was wri
 5. **The date picker is bounded to the round** — only days the round can be played on are offered.
 6. **Suspension, role changes and session revocation take effect immediately**, including on open browser tabs.
 7. **The knockout bracket advances correctly.** Previously it could not progress past its first round.
+8. **Players no longer need overlapping time windows to be paired.** Same tournament, same open round is enough — each plays in their own window, and the Matches page tells them when theirs opens.
 
 ---
 

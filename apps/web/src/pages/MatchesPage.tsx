@@ -29,6 +29,31 @@ import { useState } from 'react';
 import { MapPin, Trophy, Swords } from 'lucide-react';
 import { motion } from 'motion/react';
 
+/**
+ * A player may only play inside their own booked window. Pairing no longer
+ * requires the two players' windows to overlap, so each plays in their own —
+ * which means the match's anchor slot is not necessarily this player's.
+ */
+function playWindow(match: Match) {
+  const window = match.mySlot ?? match.slot ?? null;
+  if (!window) return { state: 'open' as const, window: null };
+  const now = Date.now();
+  const start = new Date(window.startTime).getTime();
+  const end = new Date(window.endTime).getTime();
+  if (now < start) return { state: 'early' as const, window, start, end };
+  if (now > end) return { state: 'over' as const, window, start, end };
+  return { state: 'open' as const, window, start, end };
+}
+
+function untilLabel(target: number) {
+  const mins = Math.max(0, Math.round((target - Date.now()) / 60000));
+  if (mins < 60) return `in ${mins} minute${mins === 1 ? '' : 's'}`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+  const days = Math.round(hours / 24);
+  return `in ${days} day${days === 1 ? '' : 's'}`;
+}
+
 export function MatchesPage() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<Record<string, string>>({});
@@ -189,9 +214,6 @@ export function MatchesPage() {
                 const result = match.result as MatchResult | null;
                 const myScore = isP1 ? result?.player1Score : result?.player2Score;
                 const opponentScore = isP1 ? result?.player2Score : result?.player1Score;
-                const awaitingScores =
-                  (match.status === 'confirmed' || match.status === 'in_progress') &&
-                  (myScore == null || opponentScore == null);
                 const chaseTarget = match.result?.chaseTarget;
                 const amChasing = chaseTarget != null && match.result?.chasePlayerId === me?.id;
                 // Nothing on the board yet: whoever bats first sets the target
@@ -355,17 +377,58 @@ export function MatchesPage() {
                       {/* Score state for confirmed / in_progress */}
                       {(match.status === 'confirmed' || match.status === 'in_progress') && me && (
                         <div className="pt-1 space-y-2">
-                          {awaitingScores && (
-                            <p className="text-sm text-[var(--color-muted-foreground)]">
-                              Play in your Meta Quest headset — your score will appear here automatically.
-                            </p>
-                          )}
+                          {(() => {
+                            // Play happens in the headset, so this is guidance,
+                            // not a control: tell the player where they are —
+                            // waiting for their window, in it, or done.
+                            const play = playWindow(match);
+                            const when = play.window
+                              ? new Date(play.window.startTime).toLocaleString([], {
+                                  weekday: 'short', day: 'numeric', month: 'short',
+                                  hour: '2-digit', minute: '2-digit',
+                                })
+                              : null;
+
+                            if (myScore != null) {
+                              return (
+                                <p className="text-sm text-[var(--color-muted-foreground)]">
+                                  {opponentScore != null
+                                    ? 'Both innings are in — working out the result now.'
+                                    : "Innings recorded. We're waiting on your opponent to play theirs — you'll be notified as soon as they do."}
+                                </p>
+                              );
+                            }
+
+                            if (play.state === 'early' && when) {
+                              return (
+                                <p className="text-sm text-[var(--color-muted-foreground)]">
+                                  You&rsquo;re all set. Your slot opens{' '}
+                                  <span className="font-medium text-[var(--color-foreground)]">{when}</span>{' '}
+                                  ({untilLabel(play.start!)}) — put your headset on then and your score will appear here.
+                                </p>
+                              );
+                            }
+
+                            if (play.state === 'over') {
+                              return (
+                                <p className="text-sm text-[var(--color-muted-foreground)]">
+                                  Your play window has closed, so this match can no longer be played.
+                                </p>
+                              );
+                            }
+
+                            return (
+                              <p className="text-sm text-[var(--color-muted-foreground)]">
+                                It&rsquo;s time — put your headset on and play. Your score appears here automatically.
+                              </p>
+                            );
+                          })()}
                           {myScore != null && (
                             <p className="text-sm text-[var(--color-muted-foreground)]">
                               Your score: <span className="font-semibold text-[var(--color-foreground)]">{myScore} runs</span>
-                              {opponentScore != null
-                                ? <> · Opponent: <span className="font-semibold text-[var(--color-foreground)]">{opponentScore} runs</span></>
-                                : " · Awaiting opponent's score…"}
+                              {opponentScore != null && (
+                                <> · Opponent: <span className="font-semibold text-[var(--color-foreground)]">{opponentScore} runs</span></>
+                              )}
                             </p>
                           )}
                         </div>

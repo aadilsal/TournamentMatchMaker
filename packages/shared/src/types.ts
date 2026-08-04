@@ -301,6 +301,13 @@ export interface Match {
   player2?: Pick<User, 'id' | 'username' | 'skillTier' | 'hasVrHeadset'>;
   venue?: Pick<Venue, 'id' | 'name' | 'city' | 'address'>;
   slot?: Pick<TimeSlot, 'id' | 'startTime' | 'endTime'>;
+  /**
+   * The window *this viewer* chose for the round, which need not be the same as
+   * `slot` — pairing does not require the two players' windows to overlap, so
+   * the match is anchored to one of them while each player plays in their own.
+   * Present on `GET /matches/me`.
+   */
+  mySlot?: Pick<TimeSlot, 'id' | 'startTime' | 'endTime'> | null;
   confirmations?: MatchConfirmations | null;
 }
 
