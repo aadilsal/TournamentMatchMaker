@@ -212,6 +212,14 @@ export async function assertMatchSlotPlayable(
   timeSlotId: string | null,
   match?: { tournament_id: string | null; round_number: number | null }
 ): Promise<void> {
+  // The round and the slot are two separate deadlines and a match has to be
+  // inside both. Returning as soon as the round looked open treated the round as
+  // a replacement for the slot, so a tournament match whose booked window had
+  // already passed stayed scoreable for the rest of the round — hours, at the
+  // default duration. That also raced `expire-unplayed-slots`, which expires
+  // exactly those matches: whether a late score counted came down to which of
+  // the two got there first. `match.endTime` is documented as the deadline for
+  // submitting a score, so the slot check applies whatever the round says.
   if (match?.tournament_id) {
     const round = await pool.query(
       `SELECT ends_at, status FROM tournament_rounds
@@ -224,9 +232,7 @@ export async function assertMatchSlotPlayable(
       if (ended) {
         throw new AppError('CONFLICT', 'This round has closed — scores can no longer be submitted', 409);
       }
-      return;
     }
-    // No round row to judge against: fall through to the slot check below.
   }
 
   if (!timeSlotId) return;

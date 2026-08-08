@@ -10,6 +10,7 @@ import { Queue, Worker } from 'bullmq';
 import {
   BULLMQ_MATCHMAKING_QUEUE,
   BULLMQ_NOTIFICATIONS_QUEUE,
+  MATCHMAKING_JOB_CLOSE_ROUND_NOW,
   MATCHMAKING_JOB_PAIR_NOW,
   MATCHMAKING_JOB_PAIR_REPEAT,
 } from '@vr-tournament/shared';
@@ -18,6 +19,7 @@ import { processPairPlayersJob } from './jobs/pair-players.job.js';
 import { processExpireMatchesJob } from './jobs/expire-matches.job.js';
 import { processExpireUnplayedSlotsJob } from './jobs/expire-unplayed-slots.job.js';
 import { processCloseRoundJob } from './jobs/close-round.job.js';
+import { processReconcileQueueJob } from './jobs/reconcile-queue.job.js';
 import { processTournamentLifecycleJob } from './jobs/tournament-lifecycle.job.js';
 import { processDispatchNotificationJob } from './jobs/dispatch-notification.job.js';
 
@@ -36,19 +38,39 @@ const notificationQueue = new Queue(BULLMQ_NOTIFICATIONS_QUEUE, {
 
 const matchmakingQueue = new Queue(BULLMQ_MATCHMAKING_QUEUE, { connection });
 
-await matchmakingQueue.add(
-  MATCHMAKING_JOB_PAIR_REPEAT,
-  {},
-  { repeat: { every: 2000 }, jobId: 'matchmaking-pair-repeat' }
-);
-await matchmakingQueue.add('expire-repeat', {}, { repeat: { every: 30000 }, jobId: 'matchmaking-expire-repeat' });
-await matchmakingQueue.add('expire-unplayed-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-expire-unplayed-repeat' });
-// Polled every minute, not hourly: round duration can be set as low as 15
-// minutes, so an hourly sweep could leave a finished round open ~4x its length.
-await matchmakingQueue.add('close-round-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-close-round-repeat' });
-// Registration closing, play starting and the tournament completing all happen
-// on their own schedule; nothing used to move a tournament forward but an admin.
-await matchmakingQueue.add('tournament-lifecycle-repeat', {}, { repeat: { every: 60000 }, jobId: 'matchmaking-tournament-lifecycle-repeat' });
+const REPEAT_JOBS = [
+  { name: MATCHMAKING_JOB_PAIR_REPEAT, every: 2000, jobId: 'matchmaking-pair-repeat' },
+  { name: 'expire-repeat', every: 30000, jobId: 'matchmaking-expire-repeat' },
+  { name: 'expire-unplayed-repeat', every: 60000, jobId: 'matchmaking-expire-unplayed-repeat' },
+  // The gap between a round's `ends_at` and this sweep is dead time for every
+  // player in it: the API reads the clock live, so it reports the round shut the
+  // instant it expires, while the round that replaces it does not exist until
+  // the sweep runs. Players poll every 2-5s and saw `canSubmitSoloTarget` sit
+  // false for up to a minute with nothing to explain it. One indexed query per
+  // tick is cheap; the wait a player can see is not.
+  { name: 'close-round-repeat', every: 15000, jobId: 'matchmaking-close-round-repeat' },
+  // Registration closing, play starting and the tournament completing all happen
+  // on their own schedule; nothing used to move a tournament forward but an admin.
+  { name: 'tournament-lifecycle-repeat', every: 60000, jobId: 'matchmaking-tournament-lifecycle-repeat' },
+  // The queue is in Redis and the right to play is in Postgres; they drift.
+  { name: 'reconcile-queue-repeat', every: 60000, jobId: 'matchmaking-reconcile-queue-repeat' },
+] as const;
+
+// A repeat interval is part of the schedule's identity in Redis, not a property
+// that can be edited: re-adding one with a new `every` registers a second
+// schedule and leaves the old one ticking. Retiring anything that no longer
+// matches this table means changing an interval here actually changes it.
+for (const existing of await matchmakingQueue.getRepeatableJobs()) {
+  const wanted = REPEAT_JOBS.find((j) => j.name === existing.name);
+  if (!wanted || Number(existing.every) !== wanted.every) {
+    await matchmakingQueue.removeRepeatableByKey(existing.key);
+    console.log(`Retired stale schedule ${existing.name} (every ${existing.every}ms)`);
+  }
+}
+
+for (const job of REPEAT_JOBS) {
+  await matchmakingQueue.add(job.name, {}, { repeat: { every: job.every }, jobId: job.jobId });
+}
 
 const matchmakingWorker = new Worker(
   BULLMQ_MATCHMAKING_QUEUE,
@@ -60,8 +82,10 @@ const matchmakingWorker = new Worker(
       await processExpireMatchesJob(job, pool, redis, notificationQueue);
     } else if (job.name === 'expire-unplayed-repeat') {
       await processExpireUnplayedSlotsJob(job, pool, redis);
-    } else if (job.name === 'close-round-repeat') {
+    } else if (job.name === 'close-round-repeat' || job.name === MATCHMAKING_JOB_CLOSE_ROUND_NOW) {
       await processCloseRoundJob(job, pool, redis);
+    } else if (job.name === 'reconcile-queue-repeat') {
+      await processReconcileQueueJob(job, pool, redis);
     } else if (job.name === 'tournament-lifecycle-repeat') {
       await processTournamentLifecycleJob(job, pool, redis);
     }

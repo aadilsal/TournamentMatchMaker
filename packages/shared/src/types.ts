@@ -183,11 +183,36 @@ export interface TournamentParticipant {
   updatedAt: string;
 }
 
+/**
+ * Why a solo innings is or is not available right now.
+ *
+ * `canSubmitSoloTarget` is one bit covering several very different situations,
+ * and a headset cannot tell "you already batted this round" from "the round is
+ * changing over, ask again in a moment" — the second is a wait, the first is
+ * not. Every value here maps to exactly one thing `POST /solo-target` would
+ * answer, so the client can say what is happening instead of hiding the button.
+ */
+export type MetaSoloTargetState =
+  /** Go ahead — `POST /solo-target` will not fail on a precondition. */
+  | 'available'
+  /** Holding a match (including one awaiting confirmation); play that instead. */
+  | 'in_match'
+  /** Not in a matchmaking queue at all. */
+  | 'not_queued'
+  /** Queued, but not as an active participant of a tournament round. */
+  | 'not_participant'
+  /** This round's innings is already on the board. */
+  | 'already_played'
+  /** The round window has ended; the next round opens shortly. */
+  | 'round_closed';
+
 export interface MetaCurrentMatchResponse {
   inQueue: boolean;
   /** Tournament the player is queued for / playing in — required by `POST /solo-target`. */
   tournamentId: string | null;
   canSubmitSoloTarget: boolean;
+  /** The reason behind `canSubmitSoloTarget`; `'available'` exactly when it is true. */
+  soloTargetState: MetaSoloTargetState;
   match: {
     id: string;
     opponent: string;

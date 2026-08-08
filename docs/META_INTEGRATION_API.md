@@ -171,6 +171,7 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
     "inQueue": true,
     "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
     "canSubmitSoloTarget": true,
+    "soloTargetState": "available",
     "match": null
   },
   "error": null,
@@ -187,6 +188,7 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
     "inQueue": false,
     "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
     "canSubmitSoloTarget": false,
+    "soloTargetState": "in_match",
     "match": {
       "id": "1a911c21-85fb-435b-84d2-3f7a9c4e12ab",
       "opponent": "player5_queued",
@@ -212,7 +214,23 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
 | `inQueue` | boolean | `true` if player is waiting for an opponent |
 | `tournamentId` | UUID \| null | Tournament the player is queued for / playing in. **Pass this to `POST /solo-target`** — do not hard-code or cache it. `null` when the player is neither queued nor in a match. |
 | `canSubmitSoloTarget` | boolean | `true` if player may call `POST /solo-target` now |
+| `soloTargetState` | string | Why `canSubmitSoloTarget` reads as it does — see below. `"available"` exactly when it is `true`. |
 | `match` | object \| null | Active match details, or `null` if none |
+
+#### `soloTargetState` values
+
+`canSubmitSoloTarget` is one bit covering several different situations. Use this
+field to tell a wait apart from a refusal — `round_closed` resolves on its own
+within seconds, the rest do not.
+
+| Value | Meaning | What to show |
+|-------|---------|--------------|
+| `available` | Solo innings is playable now | The solo innings UI |
+| `in_match` | Holding a match, including one awaiting confirmation | The match, not the solo UI |
+| `not_queued` | Not in any matchmaking queue | Prompt to join a tournament |
+| `not_participant` | Queued, but not as an active participant of a tournament round | Neutral idle state |
+| `already_played` | This round's innings is already recorded | "Waiting for an opponent" |
+| `round_closed` | The round window has ended; the next round opens shortly | "Round changing over" — keep polling |
 
 #### `match` object (when present)
 
@@ -259,8 +277,14 @@ return a *different* match rather than `null`.
 
 **`inQueue: true` with `canSubmitSoloTarget: false` is normal.** It means the player is
 queued but may not play a solo innings right now — they already recorded a target this
-round, the round has closed, or they are holding a match that is not yet playable. Show
-a neutral “waiting for opponent” state; do not retry `POST /solo-target` to find out.
+round, the round has closed, or they are holding a match that is not yet playable. Read
+`soloTargetState` for which of those it is; do not retry `POST /solo-target` to find out.
+
+**`canSubmitSoloTarget` can go `true` → `false` → `true` on its own.** A round ends at a
+fixed time and the next one opens moments later, so a poll either side of that boundary
+answers differently with the player having done nothing. It is a changeover, not an
+error: `soloTargetState` reads `round_closed` throughout, and it clears within seconds.
+Keep polling and leave whatever the player is looking at on screen.
 
 ---
 
@@ -454,11 +478,12 @@ Call `GET /matches/current` and check:
   "inQueue": true,
   "tournamentId": "d8b8fa1a-72bf-4547-8009-050f56589bf3",
   "canSubmitSoloTarget": true,
+  "soloTargetState": "available",
   "match": null
 }
 ```
 
-If `canSubmitSoloTarget` is `true`, prompt the player to play solo and then call `POST /solo-target`, passing the **`tournamentId` from this same response**. `canSubmitSoloTarget` flips to `false` once a target has been recorded, so no separate check is needed.
+If `canSubmitSoloTarget` is `true`, prompt the player to play solo and then call `POST /solo-target`, passing the **`tournamentId` from this same response**. `canSubmitSoloTarget` flips to `false` once a target has been recorded, so no separate check is needed. If it is `false`, `soloTargetState` says why — `round_closed` is a changeover worth waiting out, the rest are not.
 
 ---
 
@@ -709,6 +734,7 @@ get `409`, or it did not and the retry succeeds.
 |---------|------|---------|
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |
 | 1.1 | July 2026 | Replaced email OTP with 4-digit profile code (`/identity/verify-link-code`) for linking headsets. |
+| 2.1 | August 2026 | **Added** `soloTargetState` to `GET /matches/current` — the reason behind `canSubmitSoloTarget`, so a round changeover can be told apart from a refusal. Additive: `canSubmitSoloTarget` is unchanged and still authoritative. **Fixed:** a solo innings played in one round no longer blocks the next one (`POST /solo-target` answered `409 already submitted` for a round the player had never batted in), and a round changeover no longer strands players for up to a minute. |
 | 2.0 | August 2026 | **Breaking:** slimmed down `GET /matches/current`. Removed `queueSize`, `soloTarget`, `match.status`, `match.scheduledAt`, and all internal IDs (`opponent.id`, `opponent.skillTier`, `venue.id`, `venue.city`, `slot.id`). `opponent` and `venue` are now plain strings; `slot` is flattened to `startTime` / `endTime`. `match` is non-null only while playable. **Added** top-level `tournamentId` so the Quest app can supply it to `POST /solo-target` without a second lookup, and `match.amSettingTarget` so the innings UI needs no inference. **Fixed:** `canSubmitSoloTarget` no longer returns `true` when an unplayable match would make `POST /solo-target` fail; a malformed `matchId` now returns `400` instead of `500`; Meta endpoints are metered per player rather than per IP so multiple headsets at one venue are not throttled. |
 
 ---

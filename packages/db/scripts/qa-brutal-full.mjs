@@ -125,10 +125,15 @@ async function bootstrap() {
 
 
 /** Migration 12: a player needs a tournament_round_slots row to enter the queue. */
+// One hour, not four: entry requires the chosen slot to sit wholly inside the
+// round window, and the fixture round ends at NOW() + 6h as measured when the
+// fixtures were built. A four-hour slot starting at +2h is measured against a
+// later NOW(), so it ended just past the round and entry was refused — the
+// suite failed by however many seconds had elapsed since setup.
 async function giveRoundSlot(userId, tournamentId, hours = 2) {
   const [slot] = await q(
     `INSERT INTO time_slots (venue_id, start_time, end_time, max_capacity, booked_count)
-     VALUES ($1, NOW() + ($2||' hours')::interval, NOW() + (($2::int+4)||' hours')::interval, 8, 0)
+     VALUES ($1, NOW() + ($2||' hours')::interval, NOW() + (($2::int+1)||' hours')::interval, 8, 0)
      RETURNING id`, [F.venueId, String(hours)]);
   await q(
     `INSERT INTO tournament_round_slots (tournament_id, user_id, round_number, time_slot_id, venue_id)
@@ -475,6 +480,26 @@ const clearMatches = (uid) => q(
   `UPDATE matches SET status='completed' WHERE (player1_id=$1 OR player2_id=$1)
     AND status IN ('pending_confirmation','confirmed','in_progress')`, [uid]);
 
+/**
+ * Empties a tournament's queue of everyone but `keepUserId`.
+ *
+ * The solo-innings tests describe a player waiting alone for an opponent, and
+ * anyone else left queued from an earlier section makes that false: the worker
+ * pairs the two within a couple of seconds, which clears the solo target and
+ * takes both out of the queue. The suite read that as the solo endpoint losing
+ * the target, when it was matchmaking doing its job.
+ */
+async function drainTournamentQueue(tournamentId, keepUserId) {
+  const key = `queue:tournament:${tournamentId}`;
+  for (const userId of await redis.zrange(key, 0, -1)) {
+    if (userId === keepUserId) continue;
+    await redis.zrem(key, userId);
+    await redis.zrem('queue:global', userId);
+    await redis.srem('queue:member', userId);
+    await redis.del(`queue:player:${userId}`);
+  }
+}
+
 async function testMatchesAndVR() {
   S('G. Matches + Meta/VR API');
   const [a, b, c] = F.p;
@@ -494,7 +519,7 @@ async function testMatchesAndVR() {
   r = await meta('GET', `/integrations/meta/matches/current?userId=${a.userId}`);
   const d = r.data, m = d?.match;
   check('current-match → 200', r.status === 200, `${r.status}`);
-  const TOP = ['canSubmitSoloTarget', 'inQueue', 'match', 'tournamentId'];
+  const TOP = ['canSubmitSoloTarget', 'inQueue', 'match', 'soloTargetState', 'tournamentId'];
   check('top-level keys exactly as documented',
     JSON.stringify(Object.keys(d ?? {}).sort()) === JSON.stringify(TOP), Object.keys(d ?? {}).join(','));
   const MK = ['amChasing', 'amSettingTarget', 'chaseTarget', 'endTime', 'id', 'myScore', 'opponent', 'opponentScore', 'startTime', 'venue'];
@@ -617,8 +642,10 @@ async function testSolo() {
 
   await req('POST', `/tournaments/${F.tOpen}/register`, {}, { token: a.token });
   await giveRoundSlot(a.userId, F.tOpen);
+  await drainTournamentQueue(F.tOpen, a.userId);
   const j = await req('POST', '/matchmaking/queue', { tournamentId: F.tOpen }, { token: a.token });
   if (!check('queued for solo test', j.status < 300, `${j.status} ${j.error?.message ?? ''}`)) return;
+  await drainTournamentQueue(F.tOpen, a.userId);
 
   r = await meta('GET', `/integrations/meta/matches/current?userId=${a.userId}`);
   check('queued → inQueue true', r.data?.inQueue === true, JSON.stringify(r.data));

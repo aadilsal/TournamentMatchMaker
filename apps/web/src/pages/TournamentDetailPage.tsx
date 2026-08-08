@@ -37,15 +37,24 @@ export function TournamentDetailPage() {
     enabled: !!id,
   });
 
-  const { data: myRegistration } = useQuery({
+  // Not registered is a 200 carrying `null`, so a thrown error here only ever
+  // means the question went unanswered — a dropped connection, an expired
+  // session, a 500. Swallowing that into `null` stated the opposite of what was
+  // known: the page declared the player unregistered and offered Join again,
+  // and because the query then counted as successful React Query never retried
+  // and cached the wrong answer until something else invalidated it.
+  const registrationQuery = useQuery({
     queryKey: ['tournament-registration', id],
-    queryFn: () => apiGet<TournamentRegistration | null>(`/tournaments/${id}/registration`).catch(() => null),
+    queryFn: () => apiGet<TournamentRegistration | null>(`/tournaments/${id}/registration`),
     enabled: !!id && isLoggedIn,
   });
+  const myRegistration = registrationQuery.data ?? null;
+  /** Whether the answer is actually known — not merely falsy. */
+  const registrationSettled = !isLoggedIn || registrationQuery.isSuccess;
 
   const { data: myParticipant } = useQuery({
     queryKey: ['tournament-participant', id],
-    queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`).catch(() => null),
+    queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`),
     enabled: !!id && isLoggedIn && !!myRegistration,
   });
 
@@ -108,8 +117,18 @@ export function TournamentDetailPage() {
         </p>
       </div>
 
+      {registrationQuery.isError && (
+        <p className="text-sm text-[var(--color-destructive)]">
+          Couldn’t check whether you’re in this tournament. Your place is safe — reload to try again.
+        </p>
+      )}
+
       <div className="flex flex-wrap gap-2">
-        {tournament.status === 'open' && !myRegistration && (
+        {/* Offered only once it is known the player is not already in. While the
+            answer is still loading or has failed, neither this nor the
+            registered actions below are shown, so nothing here can be read as
+            "your join did not take". */}
+        {tournament.status === 'open' && registrationSettled && !myRegistration && (
           <Button onClick={handleJoin}>
             {isLoggedIn ? 'Join tournament' : 'Register to join'}
           </Button>

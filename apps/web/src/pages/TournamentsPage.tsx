@@ -201,13 +201,18 @@ export function TournamentsPage() {
                     </Link>
                     {t.status === 'open' &&
                       (() => {
-                        // The tournament they're already in still offers Join —
-                        // that's their way back into it.
                         const blocked = !!liveTournament && liveTournament.id !== t.id;
+                        // The tournament they are already in still offers a way
+                        // back in, but it must not say "Join". Reading the same
+                        // word after joining is indistinguishable from the join
+                        // having failed, and the next click walks back through a
+                        // flow they have already completed.
+                        const alreadyIn = !!liveTournament && liveTournament.id === t.id;
                         return (
                           <Button
                             size="sm"
                             className="flex-1"
+                            variant={alreadyIn ? 'secondary' : 'default'}
                             disabled={blocked}
                             title={
                               blocked
@@ -216,7 +221,13 @@ export function TournamentsPage() {
                             }
                             onClick={() => handleJoin(t.id)}
                           >
-                            {!isLoggedIn ? 'Register to join' : blocked ? 'Already playing' : 'Join'}
+                            {!isLoggedIn
+                              ? 'Register to join'
+                              : blocked
+                                ? 'Already playing'
+                                : alreadyIn
+                                  ? "You're in — continue"
+                                  : 'Join'}
                           </Button>
                         );
                       })()}

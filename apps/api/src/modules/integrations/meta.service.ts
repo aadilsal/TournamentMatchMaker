@@ -3,6 +3,7 @@ import type {
   MatchResultExtended,
   MetaCurrentMatchResponse,
   MetaSoloTargetInput,
+  MetaSoloTargetState,
   MetaSubmitScoreInput,
 } from '@vr-tournament/shared';
 import {
@@ -18,7 +19,7 @@ import { mapMatch } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 import { applyMatchOutcome, assertMatchSlotPlayable } from '../../lib/match-outcome.js';
 import { requeuePlayer } from '../../lib/requeue-player.js';
-import { enqueuePairNow } from '../../lib/matchmaking-queue.js';
+import { enqueueCloseRoundNow, enqueuePairNow } from '../../lib/matchmaking-queue.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -73,6 +74,7 @@ export class MetaIntegrationService {
         inQueue: false,
         tournamentId: row.tournament_id ?? null,
         canSubmitSoloTarget: false,
+        soloTargetState: 'in_match',
         match: {
           id: row.id,
           opponent: row.opponent_username,
@@ -93,31 +95,89 @@ export class MetaIntegrationService {
     // No playable match — report queue state and whether a solo innings may be played now.
     const inQueue = await this.redis.sismember(QUEUE_MEMBER, userId);
     if (!inQueue) {
-      return { inQueue: false, tournamentId: null, canSubmitSoloTarget: false, match: null };
+      return {
+        inQueue: false,
+        tournamentId: null,
+        canSubmitSoloTarget: false,
+        soloTargetState: 'not_queued',
+        match: null,
+      };
     }
 
     const queueMeta = parseQueuePlayerMeta(await this.redis.hgetall(queuePlayerKey(userId)));
-    let canSubmitSoloTarget = false;
-    // `row` here can only be a pending_confirmation match, which blocks solo play.
-    if (!row && queueMeta?.tournamentId && !queueMeta.soloTarget) {
-      const round = await this.pool.query(
-        `SELECT tp.solo_target, tr.ends_at
-         FROM tournament_participants tp
-         JOIN tournament_rounds tr ON tr.tournament_id = tp.tournament_id AND tr.round_number = tp.round_number
-         WHERE tp.tournament_id = $1 AND tp.user_id = $2 AND tr.status = 'active'`,
-        [queueMeta.tournamentId, userId]
-      );
-      const r = round.rows[0];
-      canSubmitSoloTarget =
-        !!r && r.solo_target == null && new Date(r.ends_at).getTime() > Date.now();
-    }
+    const soloTargetState = await this.resolveSoloTargetState(userId, queueMeta, !!row);
 
     return {
       inQueue: true,
       tournamentId: queueMeta?.tournamentId ?? null,
-      canSubmitSoloTarget,
+      canSubmitSoloTarget: soloTargetState === 'available',
+      soloTargetState,
       match: null,
     };
+  }
+
+  /**
+   * Every branch here mirrors one rejection in `submitSoloTarget`, so the two
+   * cannot drift into disagreeing about whether an innings is playable — the
+   * documented promise is that `POST /solo-target` never fails a precondition
+   * the poll said was met.
+   */
+  private async resolveSoloTargetState(
+    userId: string,
+    queueMeta: ReturnType<typeof parseQueuePlayerMeta>,
+    holdsMatch: boolean
+  ): Promise<MetaSoloTargetState> {
+    // Only a pending_confirmation match reaches here — not playable, so it is
+    // never surfaced as `match`, but it still blocks an innings.
+    if (holdsMatch) return 'in_match';
+    if (!queueMeta?.tournamentId) return 'not_participant';
+
+    const round = await this.pool.query(
+      `SELECT tp.status, tp.solo_target, tr.ends_at
+       FROM tournament_participants tp
+       JOIN tournament_rounds tr ON tr.tournament_id = tp.tournament_id AND tr.round_number = tp.round_number
+       WHERE tp.tournament_id = $1 AND tp.user_id = $2 AND tr.status = 'active'`,
+      [queueMeta.tournamentId, userId]
+    );
+    const r = round.rows[0];
+
+    // The state of the round is settled before anything about the player,
+    // because a player who has already batted is precisely who sits waiting at
+    // a boundary — and asking about their innings first would answer
+    // `already_played` and return without ever noticing the round had run out.
+    // The close would then never be requested by the people most likely to be
+    // watching for it.
+    //
+    // No open round means either that none has been opened for them yet or —
+    // far more often — that the one they were in has just ended and has not
+    // been swept up. Until that close happens they can neither bat nor be
+    // paired, so ask for it now rather than wait for the sweep.
+    if (!r) {
+      await this.requestRoundClose(queueMeta.tournamentId);
+      return 'round_closed';
+    }
+    if (new Date(r.ends_at).getTime() <= Date.now()) {
+      await this.requestRoundClose(queueMeta.tournamentId);
+      return 'round_closed';
+    }
+    if (!['active', 'advanced'].includes(r.status)) return 'not_participant';
+    // The participant row is the arbiter, not the queue hash: `submitSoloTarget`
+    // enforces this against the row, and consulting a second copy is what let
+    // the two drift apart in the first place.
+    if (r.solo_target != null) return 'already_played';
+    return 'available';
+  }
+
+  /** Best effort: a poll must still answer if the queue cannot be reached. */
+  private async requestRoundClose(tournamentId: string) {
+    if (!this.env) return;
+    // Logged rather than swallowed: losing the nudge is survivable — the sweep
+    // still closes the round — but it is the difference between a changeover
+    // taking a second and taking fifteen, and a silent catch here is what hid
+    // the id being rejected outright.
+    await enqueueCloseRoundNow(this.env, tournamentId).catch((err) => {
+      console.error('close-round-now enqueue failed:', err);
+    });
   }
 
   async submitScore(matchId: string, input: MetaSubmitScoreInput) {
