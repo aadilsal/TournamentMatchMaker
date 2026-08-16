@@ -13,6 +13,7 @@ import {
   queueTournamentKey,
   pickEarlierSlot,
   resolveChaseOnPair,
+  initialScoresForChase,
 } from '@vr-tournament/shared';
 import type { WorkerEnv } from '../config/env.js';
 import { MATCHMAKING_PAIR_LOCK } from '../lib/queue-keys.js';
@@ -511,9 +512,13 @@ async function pairInQueue(
       soloInfoFromMeta(partner.userId, p2Meta)
     );
 
+    // A chase starts with the setter's innings already on the board — it is the
+    // solo target they recorded before pairing — so only the chaser still has
+    // an innings to play. Standard mode starts empty, as before.
+    const initialScores = initialScoresForChase(candidate.userId, chase);
+
     const initialResult = {
-      player1Score: null,
-      player2Score: null,
+      ...initialScores,
       winnerId: null,
       player1Target: chase.player1Target,
       player2Target: chase.player2Target,

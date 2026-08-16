@@ -505,8 +505,10 @@ async function testMatchesAndVR() {
   const [a, b, c] = F.p;
   await clearMatches(a.userId); await clearMatches(b.userId); await clearMatches(c.userId);
 
+  // Mirrors what pairing writes for a chase: the setter (a) has already batted,
+  // so their solo target is on the board and only the chaser (b) still submits.
   const { matchId, slot } = await makeMatch(F.tOpen, a.userId, b.userId, {
-    result: { player1Score: null, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: b.userId },
+    result: { player1Score: 87, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: b.userId },
   });
 
   // --- auth
@@ -538,8 +540,12 @@ async function testMatchesAndVR() {
   check('chaseTarget surfaced', m?.chaseTarget === 87, `${m?.chaseTarget}`);
   check('amChasing false for setter', m?.amChasing === false, `${m?.amChasing}`);
   check('amSettingTarget false when a chase target exists', m?.amSettingTarget === false, `${m?.amSettingTarget}`);
+  check('setter sees their solo target as myScore', m?.myScore === 87, `${m?.myScore}`);
   const rb = await meta('GET', `/integrations/meta/matches/current?userId=${b.userId}`);
   check('chaser sees amChasing=true', rb.data?.match?.amChasing === true, `${rb.data?.match?.amChasing}`);
+  check('chaser sees the target as opponentScore', rb.data?.match?.opponentScore === 87,
+    `${rb.data?.match?.opponentScore}`);
+  check('chaser has no score of their own yet', rb.data?.match?.myScore === null, `${rb.data?.match?.myScore}`);
 
   r = await meta('GET', '/integrations/meta/matches/current?userId=not-a-uuid');
   check('meta malformed userId → 400', r.status === 400, `${r.status}`);
@@ -563,37 +569,62 @@ async function testMatchesAndVR() {
   }
 
   // --- happy path + duplicates
+  // A chase has exactly one innings left to play, so the chaser's submission is
+  // the one that finishes it; the setter batted before the pair was ever made.
   r = await meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: a.userId, score: 50 });
-  check('first score accepted', r.status === 200, `${r.status} ${r.error?.message ?? ''}`);
-  r = await meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: a.userId, score: 60 });
+  check('setter cannot bat again in a chase → 409', r.status === 409, `${r.status}`);
+  r = await meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: b.userId, score: 51 });
+  check('chaser score accepted', r.status === 200, `${r.status} ${r.error?.message ?? ''}`);
+  check('chase completes on the chaser alone', r.data?.status === 'completed', `${r.data?.status}`);
+  r = await meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: b.userId, score: 60 });
   check('duplicate score → 409', r.status === 409, `${r.status}`);
 
+  // Standard mode still takes two innings, so it is where the partial-score and
+  // concurrency behaviour is exercised.
+  await clearMatches(a.userId); await clearMatches(b.userId);
+  const std = await makeMatch(F.tOpen, a.userId, b.userId);
+  r = await meta('POST', `/integrations/meta/matches/${std.matchId}/scores`, { userId: a.userId, score: 50 });
+  check('standard first score accepted', r.status === 200 && r.data?.status === 'in_progress',
+    `${r.status}/${r.data?.status}`);
+  r = await meta('POST', `/integrations/meta/matches/${std.matchId}/scores`, { userId: a.userId, score: 60 });
+  check('standard duplicate score → 409', r.status === 409, `${r.status}`);
+
   const race = await Promise.all([
-    meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: b.userId, score: 51 }),
-    meta('POST', `/integrations/meta/matches/${matchId}/scores`, { userId: b.userId, score: 52 }),
+    meta('POST', `/integrations/meta/matches/${std.matchId}/scores`, { userId: b.userId, score: 51 }),
+    meta('POST', `/integrations/meta/matches/${std.matchId}/scores`, { userId: b.userId, score: 52 }),
   ]);
   crit('concurrent duplicate score: exactly one wins', race.filter((x) => x.status === 200).length === 1,
     race.map((x) => x.status).join('/'));
 
   // --- chase resolution
+  const chaseMatch = () => makeMatch(F.tOpen, a.userId, b.userId, {
+    result: { player1Score: 50, player2Score: null, winnerId: null, chaseTarget: 50, chasePlayerId: b.userId } });
+
   await clearMatches(a.userId); await clearMatches(b.userId);
-  let mm = await makeMatch(F.tOpen, a.userId, b.userId, {
-    result: { player1Score: null, player2Score: null, winnerId: null, chaseTarget: 50, chasePlayerId: b.userId } });
-  await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: a.userId, score: 50 });
+  let mm = await chaseMatch();
   r = await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: b.userId, score: 51 });
   check('chaser > target → chaser wins', r.data?.result?.winnerId === b.userId, `${r.data?.result?.winnerId}`);
 
   await clearMatches(a.userId); await clearMatches(b.userId);
-  mm = await makeMatch(F.tOpen, a.userId, b.userId, {
-    result: { player1Score: null, player2Score: null, winnerId: null, chaseTarget: 50, chasePlayerId: b.userId } });
-  await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: a.userId, score: 50 });
+  mm = await chaseMatch();
   r = await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: b.userId, score: 49 });
   check('chaser < target → setter wins', r.data?.result?.winnerId === a.userId, `${r.data?.result?.winnerId}`);
 
+  // A chase paired before the setter's score was seeded still carries an empty
+  // half; the chaser's submission must fill it from the target rather than
+  // leave the match waiting on an innings the setter had already played.
   await clearMatches(a.userId); await clearMatches(b.userId);
   mm = await makeMatch(F.tOpen, a.userId, b.userId, {
     result: { player1Score: null, player2Score: null, winnerId: null, chaseTarget: 50, chasePlayerId: b.userId } });
-  await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: a.userId, score: 50 });
+  r = await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: b.userId, score: 51 });
+  check('legacy chase with no seeded score still resolves on the chaser',
+    r.data?.status === 'completed' && r.data?.result?.winnerId === b.userId,
+    `${r.data?.status}/${r.data?.result?.winnerId}`);
+  check('legacy chase records the target as the setter score', r.data?.result?.player1Score === 50,
+    `${r.data?.result?.player1Score}`);
+
+  await clearMatches(a.userId); await clearMatches(b.userId);
+  mm = await chaseMatch();
   r = await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: b.userId, score: 50 });
   check('chase tie → cancelled + rematch',
     r.data?.status === 'cancelled' && r.data?.result?.outcome === 'rematch',

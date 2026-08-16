@@ -1076,7 +1076,12 @@ export class TournamentsService {
           player2Score: number | null;
         } | null;
         const otherScore = isP1 ? res?.player2Score : res?.player1Score;
-        const otherBatted = m.status === 'in_progress' && otherScore != null;
+        // A score on the board is what makes the opponent's innings real — not
+        // the match having reached `in_progress`. A chase carries the setter's
+        // solo innings from the moment it is created, while the match sits at
+        // `confirmed` until the chaser submits: gating on the status alone
+        // cancelled those matches and threw away an innings that had been played.
+        const otherBatted = otherScore != null;
 
         if (otherBatted) {
           await client.query(

@@ -35,8 +35,8 @@ This document describes the **server-to-server HTTP API** your VR application sh
 2. VR player joins the matchmaking queue (handled by web/worker — no Meta API call required).
 3. **Optional — solo round:** While waiting in queue, player plays a solo innings in VR and submits their target score via `POST /solo-target`. This sets the chase target for when they are paired.
 4. When paired, poll `GET /matches/current` to get match details (opponent, venue, chase target, role).
-5. Both players complete the VR match and each submits **one score** via `POST /matches/:id/scores`.
-6. When both scores are in, the server resolves the winner (including chase/rematch rules) and updates tournament standings.
+5. Each player submits **one score in total** via `POST /matches/:id/scores` — and a solo target already counts as that player's score. So a **chase** takes one submission (the chaser's; the setter's target is already on the board), while a **standard** match takes two.
+6. Once the second half of the scoreline is in, the server resolves the winner (including chase/rematch rules) and updates tournament standings.
 
 ---
 
@@ -199,7 +199,7 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
       "amChasing": true,
       "amSettingTarget": false,
       "myScore": null,
-      "opponentScore": null
+      "opponentScore": 87
     }
   },
   "error": null,
@@ -244,8 +244,8 @@ within seconds, the rest do not.
 | `chaseTarget` | number \| null | Runs to chase (null = standard highest-score-wins) |
 | `amChasing` | boolean | `true` if **this player** must beat `chaseTarget` to win |
 | `amSettingTarget` | boolean | `true` if nothing is on the board yet and this player bats first — their score becomes the total the opponent must beat. Mutually exclusive with `amChasing`. |
-| `myScore` | number \| null | Score already submitted by this player (null = not yet submitted) |
-| `opponentScore` | number \| null | Opponent’s submitted score |
+| `myScore` | number \| null | This player’s score, or null if their innings is still to play. In a chase the setter’s solo target is already here from the moment they are paired. |
+| `opponentScore` | number \| null | Opponent’s score — for a chaser, this is the setter’s target, present from the start |
 
 `match` is non-null **only** while the match is playable. Once it completes, is cancelled
 (rematch), or expires, `match` becomes `null` again — there is no status field to inspect.
@@ -256,10 +256,14 @@ The three fields below are enough to pick the UI; you never need to infer state 
 
 | `chaseTarget` | `amChasing` | `amSettingTarget` | Show |
 |---|---|---|---|
-| number | `true` | `false` | **Chase** — beat `chaseTarget` to win |
-| number | `false` | `false` | **Defend** — opponent is chasing your target |
+| number | `true` | `false` | **Chase** — beat `chaseTarget` to win. Submit one score; it completes the match |
+| number | `false` | `false` | **Defend** — opponent is chasing your target. Nothing to submit: `myScore` already holds your solo target. Poll until `match` goes `null` |
 | `null` | `false` | `true` | **Bat first** — your score sets the total |
 | `null` | `false` | `false` | **Standard** — highest score wins; check `opponentScore` |
+
+A defending player must not be shown a score-entry screen: their innings was the
+solo one they already played, and `POST /matches/:id/scores` answers `409` for
+them. Only `amChasing` and `amSettingTarget`/standard players ever submit.
 
 #### Polling recommendation
 
@@ -290,7 +294,10 @@ Keep polling and leave whatever the player is looking at on screen.
 
 ### 5.2 Submit Match Score
 
-Each player submits **exactly one score per match**. Web score entry is disabled.
+Each player submits **at most one score per match**, and a solo target already
+counts as that player's score. In a chase (`chaseTarget != null`) only the
+**chaser** submits — that single score completes the match. Web score entry is
+disabled.
 
 ```
 POST /matches/{matchId}/scores
@@ -327,12 +334,14 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 
 #### Behaviour
 
-1. **First score from either player** → match moves to `in_progress`. Response returns full match object with one score set.
-2. **Second score** → server applies win/loss/chase/rematch rules (see §6). Response returns match with final `status` (`completed` or `cancelled` for rematch).
-3. **Duplicate submission** → `409` — each player may only submit once.
-4. **After booked slot end time** → `409` — `Match slot has ended — scores cannot be submitted`.
+1. **Chase match, chaser submits** → both halves of the scoreline are now in (the setter's half is their solo target), so the server resolves the match immediately: `completed`, or `cancelled` for a rematch tie. This is the **only** submission a chase match takes.
+2. **Chase match, setter submits** → `409`. Their solo innings is already recorded as their score; they never bat twice.
+3. **Standard match, first score from either player** → match moves to `in_progress`. Response returns the full match object with one score set.
+4. **Standard match, second score** → server applies win/loss/rematch rules (see §6). Response returns match with final `status` (`completed` or `cancelled` for rematch).
+5. **Duplicate submission** → `409` — each player may only submit once.
+6. **After booked slot end time** → `409` — `Match slot has ended — scores cannot be submitted`.
 
-#### Example response — waiting for opponent’s score
+#### Example response — waiting for opponent’s score (standard match; a chase never reaches this state)
 
 ```json
 {
@@ -347,8 +356,8 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
       "player1Score": 95,
       "player2Score": null,
       "winnerId": null,
-      "chaseTarget": 87,
-      "chasePlayerId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
+      "chaseTarget": null,
+      "chasePlayerId": null,
       "source": "meta"
     },
     "player1": { "id": "...", "username": "player20", "skillTier": 3, "hasVrHeadset": true },
@@ -361,7 +370,11 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 }
 ```
 
-#### Example response — match completed
+#### Example response — chase completed by the chaser’s single score
+
+Player 1 is the chaser and submits `95` against a target of `87`. Player 2 never
+submits anything: their `87` is the solo innings they played before pairing, put
+on the board when the match was created.
 
 ```json
 {
@@ -371,7 +384,7 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
     "status": "completed",
     "result": {
       "player1Score": 95,
-      "player2Score": 72,
+      "player2Score": 87,
       "winnerId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
       "chaseTarget": 87,
       "chasePlayerId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
@@ -393,6 +406,7 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 | `404` | `NOT_FOUND` | `Match not found` | Well-formed `matchId` that does not exist (e.g. cached across a rematch) |
 | `409` | `CONFLICT` | `Match is not currently playable` | Status not `confirmed`/`in_progress` |
 | `409` | `CONFLICT` | `Player 1 score already submitted` / `Player 2 score already submitted` | Duplicate submit |
+| `409` | `CONFLICT` | `Your solo target is already recorded as your score for this match — only the chaser submits` | The target-setter tried to submit in a chase match |
 | `409` | `CONFLICT` | `Match slot has ended — scores cannot be submitted` | Past slot `endTime` |
 
 ---
@@ -578,15 +592,21 @@ When one or both players submitted a solo target before pairing:
 | `chaseTarget` | Runs the chaser must exceed to win |
 | `amChasing` | Whether the current player is the chaser |
 
-**Chase resolution (when both scores submitted):**
+The format is **asynchronous**: the setter played their innings alone, before the
+pair existed, and that innings *is* the target. So the match is created with the
+setter's score already on the board (`myScore` for them, `opponentScore` for the
+chaser) and only the chaser has an innings left to play. The two never have to be
+in VR at the same moment.
+
+**Chase resolution (on the chaser's score):**
 
 | Condition | Result |
 |-----------|--------|
 | Chaser score **>** `chaseTarget` | Chaser wins |
-| Chaser score **≤** `chaseTarget` | Setter (non-chaser) wins |
-| Chaser score **=** setter score | **Rematch** — match `cancelled`, both re-queued |
+| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins |
+| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued |
 
-If both players had solo targets, the **earlier** `soloPlayedAt` timestamp sets the chase; the other player chases.
+If both players had solo targets, the **earlier** `soloPlayedAt` timestamp sets the chase; the other player chases — their own earlier solo target is not carried into the match, they play a live chase innings against the target.
 
 ### 6.2 Standard mode (no chase)
 
@@ -629,8 +649,10 @@ On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`)
      inQueue && canSubmitSoloTarget          │
               │                               │
               ▼                               ▼
-   Play solo → POST /solo-target     Play head-to-head
-              │                     POST /matches/:id/scores
+   Play solo → POST /solo-target     amChasing / standard:
+              │                       play, POST /matches/:id/scores
+              │                     defending (chaseTarget set, not chasing):
+              │                       nothing to submit — just keep polling
               │                               │
               └──────────────┬────────────────┘
                              ▼
@@ -641,7 +663,7 @@ On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`)
 ### Score submission checklist
 
 - [ ] Use `match.id` from the **latest** current-match response (a player can hold more than one match; never cache the id).
-- [ ] Submit each player’s score **once**.
+- [ ] Submit each player’s score **at most once** — and never for a defender (`chaseTarget` set, `amChasing: false`), whose solo target is already their score.
 - [ ] Pick the innings UI from `chaseTarget` / `amChasing` / `amSettingTarget` (see §5.1).
 - [ ] Handle `409` duplicate gracefully (score already recorded).
 - [ ] Handle slot-ended `409` with a user-visible message.
@@ -669,12 +691,13 @@ On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`)
 | 2 | Queue poll | Login on web, join tournament queue, GET current | `inQueue: true` |
 | 3 | Solo target | While queued, POST solo-target | `201`, `canSubmitSoloTarget` becomes false |
 | 4 | Pairing | Second test user joins queue | GET current returns `match` with `chaseTarget` |
-| 5 | Partial score | Player A POST score | `200`; A's next poll shows `myScore` set, `opponentScore` null |
-| 6 | Complete match | Player B POST score | `completed`, `winnerId` set; `match` no longer returned |
+| 5 | Setter's view | Setter GET current after pairing | `amChasing: false`, `myScore` == their solo target, `opponentScore: null` |
+| 6 | Chase completes on one score | Chaser POST score | `completed`, `winnerId` set; `match` no longer returned for either player |
 | 7 | Duplicate score | Same player POST again | `409` |
 | 8 | Wrong user | POST score with non-participant userId | `403` |
 | 9 | Chase win | Chaser score > chaseTarget | Chaser in `winnerId` |
-| 10 | Chase tie | Chaser score == setter score | `cancelled`, rematch / re-queue |
+| 10 | Chase tie | Chaser score == chaseTarget | `cancelled`, rematch / re-queue |
+| 10b | Setter cannot bat twice | Setter POST score in a chase | `409` — solo target already stands as their score |
 | 11 | Stale match id | POST score to a malformed / unknown id | `400` then `404` — never `500` |
 | 12 | Multi-headset venue | 3 userIds × 30 polls/min from one IP | No `429` |
 | 13 | Link code replay | Verify the same code twice | `200` then `400 CODE_INVALID` |
@@ -732,6 +755,7 @@ get `409`, or it did not and the retry succeeds.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.2 | August 2026 | **Fixed:** a chase now completes on the chaser's score alone. The target-setter's solo innings is recorded as their score when the pair is made, so the scoreline is half-filled from the start (`myScore` for the setter, `opponentScore` for the chaser). Previously both scores were left null, and the match sat unresolved until the setter submitted a *second* innings that the "defend" UI never asks for — in practice until the round or slot expired. A setter who does submit now gets a `409` naming the reason. Chase matches created before this change still resolve on the chaser's submission. |
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |
 | 1.1 | July 2026 | Replaced email OTP with 4-digit profile code (`/identity/verify-link-code`) for linking headsets. |
 | 2.1 | August 2026 | **Added** `soloTargetState` to `GET /matches/current` — the reason behind `canSubmitSoloTarget`, so a round changeover can be told apart from a refusal. Additive: `canSubmitSoloTarget` is unchanged and still authoritative. **Fixed:** a solo innings played in one round no longer blocks the next one (`POST /solo-target` answered `409 already submitted` for a round the player had never batted in), and a round changeover no longer strands players for up to a minute. |

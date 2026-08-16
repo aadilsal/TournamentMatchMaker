@@ -60,6 +60,33 @@ export function resolveChaseOnPair(
   };
 }
 
+/**
+ * The scoreline a chase match starts with.
+ *
+ * The target-setter has already batted — their solo innings *is* the chase
+ * target — so their score goes on the board the moment the pair is made. That
+ * is what makes the format asynchronous: only the chaser still has an innings
+ * to play, and the match resolves on their single submission.
+ *
+ * Leaving both scores null instead left the setter shown a "defend" screen
+ * (`amChasing: false`, `amSettingTarget: false`) with nothing to submit, while
+ * the backend went on waiting for a second innings from them that no client
+ * would ever send — so the match hung until the round or slot expired.
+ */
+export function initialScoresForChase(
+  player1Id: string,
+  chase: Pick<ChaseSetup, 'chaseTarget' | 'chasePlayerId'>
+): { player1Score: number | null; player2Score: number | null } {
+  if (chase.chaseTarget == null || !chase.chasePlayerId) {
+    return { player1Score: null, player2Score: null };
+  }
+  const setterIsPlayer1 = chase.chasePlayerId !== player1Id;
+  return {
+    player1Score: setterIsPlayer1 ? chase.chaseTarget : null,
+    player2Score: setterIsPlayer1 ? null : chase.chaseTarget,
+  };
+}
+
 export type MatchOutcome = 'player1_win' | 'player2_win' | 'rematch' | 'incomplete';
 
 export function resolveMatchOutcome(

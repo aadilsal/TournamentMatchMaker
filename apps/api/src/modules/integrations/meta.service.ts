@@ -231,6 +231,22 @@ export class MetaIntegrationService {
         winnerId: null,
       }) as Record<string, unknown>;
 
+      const chaseTarget = (current.chaseTarget as number | null) ?? null;
+      const chasePlayerId = (current.chasePlayerId as string | null) ?? null;
+      const isChaser = chaseTarget != null && chasePlayerId === userId;
+      const isSetter = chaseTarget != null && chasePlayerId != null && chasePlayerId !== userId;
+
+      // The setter never bats twice: their solo target is their innings, and
+      // pairing already put it on the board. Say so rather than answering the
+      // generic duplicate message, which read as "your score was lost".
+      if (isSetter) {
+        throw new AppError(
+          'CONFLICT',
+          'Your solo target is already recorded as your score for this match — only the chaser submits',
+          409
+        );
+      }
+
       if (isPlayer1 && current.player1Score !== null && current.player1Score !== undefined) {
         throw new AppError('CONFLICT', 'Player 1 score already submitted', 409);
       }
@@ -238,10 +254,16 @@ export class MetaIntegrationService {
         throw new AppError('CONFLICT', 'Player 2 score already submitted', 409);
       }
 
+      // Matches paired before the setter's score was seeded still carry an empty
+      // half. Filling it from the chase target here means those matches resolve
+      // on the chaser's submission too, instead of hanging until the round
+      // expires waiting on an innings the setter had already played.
+      const setterScore = isChaser ? chaseTarget : null;
+
       updated = {
         ...current,
-        player1Score: isPlayer1 ? score : (current.player1Score as number | null),
-        player2Score: isPlayer1 ? (current.player2Score as number | null) : score,
+        player1Score: isPlayer1 ? score : ((current.player1Score as number | null) ?? setterScore),
+        player2Score: isPlayer1 ? ((current.player2Score as number | null) ?? setterScore) : score,
         source: 'meta' as const,
       };
 

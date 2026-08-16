@@ -163,7 +163,9 @@ const [match] = await q(
   `INSERT INTO matches (tournament_id, player1_id, player2_id, venue_id, time_slot_id, status, result, scheduled_at, round_number)
    VALUES ($1,$2,$3,$4,$5,'confirmed',$6, NOW() + INTERVAL '10 minutes', 1) RETURNING id`,
   [tournamentId, userId, opponent.id, venue.id, slot.id,
-   JSON.stringify({ player1Score: null, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: opponent.id })]);
+   // As pairing writes it: the setter's solo innings is already the scoreline's
+   // first half, so the chaser is the only one with an innings left to play.
+   JSON.stringify({ player1Score: 87, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: opponent.id })]);
 
 const paired = await call('Poll again — now paired, chase mode',
   'GET', `/matches/current?userId=${userId}`);
@@ -175,7 +177,8 @@ expect('startTime / endTime are ISO 8601',
   !Number.isNaN(Date.parse(m?.startTime)) && !Number.isNaN(Date.parse(m?.endTime)));
 expect('chaseTarget surfaced', m?.chaseTarget === 87, `${m?.chaseTarget}`);
 expect('this player is the setter, not the chaser', m?.amChasing === false);
-expect('scores start null', m?.myScore === null && m?.opponentScore === null);
+expect('setter already has their solo innings on the board',
+  m?.myScore === 87 && m?.opponentScore === null, `${m?.myScore}/${m?.opponentScore}`);
 expect('exactly the 10 documented fields',
   JSON.stringify(Object.keys(m ?? {}).sort()) ===
   JSON.stringify(['amChasing','amSettingTarget','chaseTarget','endTime','id','myScore','opponent','opponentScore','startTime','venue']),
@@ -187,16 +190,15 @@ expect('opponent is the chaser', oppView.data?.match?.amChasing === true);
 expect('both headsets see the same match id', oppView.data?.match?.id === m.id);
 
 // ── 5. Scores ───────────────────────────────────────────────────────────────
-const s1 = await call('Setter submits their score', 'POST', `/matches/${m.id}/scores`,
-  { body: { userId, score: 87 } });
-expect('accepted', s1.status === 200);
-
-const s1dup = await call('Same headset submits again (network retry)',
-  'POST', `/matches/${m.id}/scores`, { body: { userId, score: 90 } });
-expect('duplicate rejected with 409', s1dup.status === 409);
+// The setter has nothing left to submit — the innings they played alone is the
+// target on the board — so the chaser's score is the one that ends the match.
+const s1 = await call('Setter tries to bat a second time', 'POST', `/matches/${m.id}/scores`,
+  { body: { userId, score: 90 } });
+expect('rejected with 409 — solo target already stands as their score', s1.status === 409,
+  `${s1.status}`);
 
 const mid = await call('Poll mid-match', 'GET', `/matches/current?userId=${userId}`);
-expect('myScore reflects submission', mid.data?.match?.myScore === 87);
+expect('myScore is the solo target', mid.data?.match?.myScore === 87);
 expect('opponentScore still null', mid.data?.match?.opponentScore === null);
 
 // both headsets finishing at the same instant — the case that used to lose a score

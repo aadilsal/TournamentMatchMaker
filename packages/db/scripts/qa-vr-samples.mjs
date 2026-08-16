@@ -88,7 +88,8 @@ const [m] = await q(
   `INSERT INTO matches (tournament_id,player1_id,player2_id,venue_id,time_slot_id,status,result,scheduled_at,round_number)
    VALUES ($1,$2,$3,$4,$5,'confirmed',$6,NOW()+INTERVAL '15 minutes',1) RETURNING id`,
   [t.id, p5.id, opp.id, v.id, slot.id,
-   JSON.stringify({ player1Score: null, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: opp.id })]);
+   // Pairing seeds the setter's solo innings as their score; only the chaser bats.
+   JSON.stringify({ player1Score: 87, player2Score: null, winnerId: null, chaseTarget: 87, chasePlayerId: opp.id })]);
 
 await show('Paired — chase mode, this player SET the target', 'GET', `/matches/current?userId=${p5.id}`);
 await show('Same match from the chaser\'s headset', 'GET', `/matches/current?userId=${opp.id}`);
@@ -96,8 +97,8 @@ await show('Same match from the chaser\'s headset', 'GET', `/matches/current?use
 console.log('\n' + '='.repeat(70));
 console.log('C. POST /matches/:matchId/scores');
 console.log('='.repeat(70));
-await show('Setter submits', 'POST', `/matches/${m.id}/scores`, { userId: p5.id, score: 87 });
-await show('Same headset submits again', 'POST', `/matches/${m.id}/scores`, { userId: p5.id, score: 90 });
+await show('Setter tries to bat again — their solo target already stands', 'POST',
+  `/matches/${m.id}/scores`, { userId: p5.id, score: 90 });
 await show('Poll mid-match', 'GET', `/matches/current?userId=${p5.id}`);
 await show('Chaser submits — match completes', 'POST', `/matches/${m.id}/scores`,
   { userId: opp.id, score: 88 });
