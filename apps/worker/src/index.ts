@@ -89,7 +89,7 @@ const matchmakingWorker = new Worker(
     } else if (job.name === 'expire-unplayed-repeat') {
       await processExpireUnplayedSlotsJob(job, pool, redis);
     } else if (job.name === 'close-round-repeat' || job.name === MATCHMAKING_JOB_CLOSE_ROUND_NOW) {
-      await processCloseRoundJob(job, pool, redis);
+      await processCloseRoundJob(job, pool, redis, notificationQueue);
     } else if (job.name === 'reconcile-queue-repeat') {
       await processReconcileQueueJob(job, pool, redis);
     } else if (job.name === 'tournament-lifecycle-repeat') {

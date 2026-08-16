@@ -12,7 +12,7 @@ import { mapMatch } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { matchConfirmKey } from '../../../lib/queue-keys.js';
-import { applyMatchOutcome } from '../../../lib/match-outcome.js';
+import { applyMatchOutcome, applyMatchWinner } from '../../../lib/match-outcome.js';
 import { MatchesService } from '../../matches/matches.service.js';
 import { releaseSlotLock } from '../../../lib/slot-lock.js';
 
@@ -248,15 +248,13 @@ export class AdminMatchesService {
       source: input.source ?? existing.source ?? 'manual',
     };
 
-    if (input.winnerId && input.player1Score == null && input.player2Score == null) {
-      await this.pool.query(
-        `UPDATE matches SET result = $1, status = 'completed', updated_at = NOW() WHERE id = $2`,
-        [JSON.stringify(result), id]
-      );
-    } else if (
-      input.player1Score != null &&
-      input.player2Score != null
-    ) {
+    // Both halves are judged on the merged result, not on this request alone.
+    // Gating on `input` meant filling in the *missing* score of a half-played
+    // match wrote the number and nothing else: the match stayed `in_progress`
+    // with no winner, nobody advanced, and neither player was released. With a
+    // chase that is the normal case, since the setter's innings is already on
+    // the board when the match is created.
+    if (result.player1Score != null && result.player2Score != null) {
       await applyMatchOutcome(
         this.pool,
         this.redis,
@@ -264,9 +262,14 @@ export class AdminMatchesService {
         id,
         match,
         result,
-        input.player1Score,
-        input.player2Score
+        result.player1Score,
+        result.player2Score
       );
+    } else if (input.winnerId) {
+      // A winner named without a full scoreline still has to move the
+      // tournament — rating, standings, advancement, elimination, the loser out
+      // of the queue. Completing the row alone left every one of those undone.
+      await applyMatchWinner(this.pool, this.redis, this.env, id, match, result, input.winnerId);
     } else {
       await this.pool.query(
         `UPDATE matches SET result = $1, updated_at = NOW() WHERE id = $2`,

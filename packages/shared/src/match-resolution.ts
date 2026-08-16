@@ -87,6 +87,31 @@ export function initialScoresForChase(
   };
 }
 
+/**
+ * What to do with a match whose time ran out before both innings were in.
+ *
+ * A half-played match is not the same as an unplayed one. One player batted —
+ * in a chase, the setter batted before the pair even existed — and expiring the
+ * match throws that innings away, which is the whole reason a no-show cost the
+ * player who actually turned up. Whoever put a score on the board takes it.
+ *
+ * Only a completely empty scoreline is genuinely abandoned.
+ */
+export type AbandonedMatchOutcome = 'player1_walkover' | 'player2_walkover' | 'abandoned';
+
+export function resolveAbandonedMatch(
+  player1Score: number | null | undefined,
+  player2Score: number | null | undefined
+): AbandonedMatchOutcome {
+  const p1 = player1Score ?? null;
+  const p2 = player2Score ?? null;
+  if (p1 !== null && p2 === null) return 'player1_walkover';
+  if (p2 !== null && p1 === null) return 'player2_walkover';
+  // Both present is not this function's case — a complete scoreline resolves
+  // through `resolveMatchOutcome` long before anything expires it.
+  return 'abandoned';
+}
+
 export type MatchOutcome = 'player1_win' | 'player2_win' | 'rematch' | 'incomplete';
 
 export function resolveMatchOutcome(

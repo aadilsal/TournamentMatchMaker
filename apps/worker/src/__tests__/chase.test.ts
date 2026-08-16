@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   initialScoresForChase,
+  resolveAbandonedMatch,
   resolveChaseOnPair,
   resolveMatchOutcome,
 } from '@vr-tournament/shared';
@@ -40,6 +41,29 @@ describe('chase setup at pairing', () => {
     // board; the later player's own solo target does not carry into the match.
     expect(chase).toMatchObject({ chaseTarget: 55, chasePlayerId: P2 });
     expect(initialScoresForChase(P1, chase)).toEqual({ player1Score: 55, player2Score: null });
+  });
+});
+
+describe('a match that runs out of time', () => {
+  it('gives it to the player who batted when the other never showed', () => {
+    // The shape a chase leaves behind: the setter's innings on the board, the
+    // chaser's half still empty when the round or slot closes.
+    expect(resolveAbandonedMatch(55, null)).toBe('player1_walkover');
+    expect(resolveAbandonedMatch(null, 55)).toBe('player2_walkover');
+  });
+
+  it('counts a score of zero as an innings played', () => {
+    expect(resolveAbandonedMatch(0, null)).toBe('player1_walkover');
+    expect(resolveAbandonedMatch(null, 0)).toBe('player2_walkover');
+  });
+
+  it('abandons a match nobody played', () => {
+    expect(resolveAbandonedMatch(null, null)).toBe('abandoned');
+    expect(resolveAbandonedMatch(undefined, undefined)).toBe('abandoned');
+  });
+
+  it('leaves a complete scoreline alone — that resolves normally, not here', () => {
+    expect(resolveAbandonedMatch(55, 60)).toBe('abandoned');
   });
 });
 

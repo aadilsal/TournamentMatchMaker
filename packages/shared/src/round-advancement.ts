@@ -23,6 +23,44 @@ export function firstKnockoutMatchCount(playerCount: number): number {
   return Math.floor(playerCount / 2);
 }
 
+/**
+ * The draw for a knockout round, given who is still standing.
+ *
+ * An odd field is the case that used to deadlock the bracket:
+ * `firstKnockoutMatchCount(3)` is 1, so the third player was dropped from the
+ * draw with no match and no path, and the slot above them waited forever for an
+ * opponent nobody had scheduled. Here the odd player out takes a bye instead —
+ * the best record gets it — and comes back into the draw next round, when the
+ * field is even again.
+ *
+ * Pairs are listed in bracket-slot order.
+ */
+export function knockoutDraw(players: string[]): {
+  roundNumber: number;
+  pairs: Array<[string, string]>;
+  bye: string | null;
+} {
+  const roundNumber =
+    players.length > 8
+      ? KNOCKOUT_ROUNDS.ro16
+      : players.length > 4
+        ? KNOCKOUT_ROUNDS.qf
+        : players.length > 2
+          ? KNOCKOUT_ROUNDS.sf
+          : KNOCKOUT_ROUNDS.final;
+
+  const odd = players.length % 2 === 1;
+  const bye = odd ? (players[0] ?? null) : null;
+  const drawn = odd ? players.slice(1) : players;
+
+  const pairs: Array<[string, string]> = [];
+  for (let i = 0; i + 1 < drawn.length; i += 2) {
+    pairs.push([drawn[i], drawn[i + 1]]);
+  }
+
+  return { roundNumber, pairs, bye };
+}
+
 /** Knockout round numbers for bracket display */
 export const KNOCKOUT_ROUNDS = {
   ro16: 100,

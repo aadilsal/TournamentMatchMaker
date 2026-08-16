@@ -32,7 +32,7 @@ import { releaseSlotLock } from '../../lib/slot-lock.js';
 import { BookingsService } from '../bookings/bookings.service.js';
 import {
   KNOCKOUT_ROUNDS,
-  firstKnockoutMatchCount,
+  knockoutDraw,
   knockoutRoundLabel,
   playersToAdvance,
   resolveFieldSize,
@@ -43,6 +43,8 @@ import {
 } from '@vr-tournament/shared';
 import { createBuybackPaymentIntent } from '../../lib/stripe.js';
 import { emitTournamentUpdated } from '../../socket/sync-events.js';
+import { emitToUser } from '../../socket/emitters.js';
+import { settleOpenMatches } from '../../lib/match-outcome.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -904,16 +906,35 @@ export class TournamentsService {
     if (!participant) {
       throw new AppError('FORBIDDEN', 'Not registered for this tournament', 403);
     }
-    if (participant.status !== 'eliminated') {
-      throw new AppError('CONFLICT', 'Only eliminated players can buy back', 409);
+    // Two statuses mean "no longer competing": `eliminated` is losing a match,
+    // `out` is missing the cut when a round closed. Only the first was accepted,
+    // so a player knocked out by the standings — through no decision of their
+    // own — was told buybacks were for eliminated players only.
+    //
+    // `out` also marks a player who withdrew, and withdrawing deletes the
+    // registration, so requiring one is what keeps them from buying back into a
+    // tournament they left.
+    if (!['eliminated', 'out'].includes(participant.status)) {
+      throw new AppError('CONFLICT', 'Only players who are out of the tournament can buy back', 409);
+    }
+    const registration = await this.getRegistration(tournamentId, userId);
+    if (!registration) {
+      throw new AppError('FORBIDDEN', 'Not registered for this tournament', 403);
     }
 
     await this.assertBuybackAllowed(tournamentId, tournament);
 
+    // Buy back into the round that is running now, not the one the player went
+    // out in. Only a match loser is still in the current round; a player cut at
+    // a round close carries the closed round's number, and checking that always
+    // answered "round time has ended" — so the cut was unbuyable-back by
+    // construction.
+    const buybackRound = tournament.currentRoundNumber ?? participant.roundNumber;
+
     const roundOpen = await this.pool.query(
       `SELECT id FROM tournament_rounds
        WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at > NOW()`,
-      [tournamentId, participant.roundNumber]
+      [tournamentId, buybackRound]
     );
     if (!roundOpen.rows[0]) {
       throw new AppError('CONFLICT', 'Round time has ended — buybacks are no longer available', 409);
@@ -922,7 +943,7 @@ export class TournamentsService {
     return createBuybackPaymentIntent(this.env, this.pool, {
       userId,
       tournamentId,
-      roundNumber: participant.roundNumber,
+      roundNumber: buybackRound,
       matchId: input.matchId ?? null,
       amountCents: tournament.buybackPriceCents,
     });
@@ -979,11 +1000,17 @@ export class TournamentsService {
         [buybackId]
       );
 
+      // The round number moves with them. A player cut at a round close still
+      // carries the closed round's number, and enrolment only ever re-queues
+      // participants sitting in the tournament's current round — so leaving it
+      // behind meant a Redis restart would drop them out of matchmaking for
+      // good, with the buyback already paid for.
       await client.query(
         `UPDATE tournament_participants
-         SET status = 'active', buyback_count = buyback_count + 1, updated_at = NOW()
+         SET status = 'active', round_number = $3, buyback_count = buyback_count + 1,
+             updated_at = NOW()
          WHERE tournament_id = $1 AND user_id = $2`,
-        [tournamentId, userId]
+        [tournamentId, userId, buyback.round_number]
       );
 
       await client.query('COMMIT');
@@ -1225,6 +1252,7 @@ export class TournamentsService {
 
   async closeRound(tournamentId: string, roundNumber: number) {
     const client = await this.pool.connect();
+    let openedBracketMatches: Array<{ matchId: string; player1Id: string; player2Id: string }> = [];
     try {
       await client.query('BEGIN');
 
@@ -1243,6 +1271,11 @@ export class TournamentsService {
         `UPDATE tournament_rounds SET status = 'closed' WHERE tournament_id = $1 AND round_number = $2`,
         [tournamentId, roundNumber]
       );
+
+      // A match still open in this round can never be scored once the round
+      // shuts — `assertMatchSlotPlayable` refuses it — and while it stays open
+      // the `hasActiveMatch` guard keeps both players out of the next round.
+      await settleOpenMatches(client, tournamentId, roundNumber);
 
       const tournamentResult = await client.query(
         `SELECT initial_player_count, round_duration_minutes FROM tournaments WHERE id = $1`,
@@ -1272,7 +1305,7 @@ export class TournamentsService {
       }
 
       if (shouldStartKnockout(activeCount, fieldSize)) {
-        await this.generateKnockoutBracket(client, tournamentId, active);
+        openedBracketMatches = await this.generateKnockoutBracket(client, tournamentId, active);
         await client.query(
           `UPDATE tournaments SET phase = 'knockout', updated_at = NOW() WHERE id = $1`,
           [tournamentId]
@@ -1319,6 +1352,9 @@ export class TournamentsService {
       }
 
       await client.query('COMMIT');
+      for (const m of openedBracketMatches) {
+        await this.announceBracketMatch(m.matchId, m.player1Id, m.player2Id);
+      }
       await this.broadcastTournamentUpdate(tournamentId, 'round_closed');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -1332,7 +1368,8 @@ export class TournamentsService {
     client: import('pg').PoolClient,
     tournamentId: string,
     players: Array<{ user_id: string }>
-  ) {
+  ): Promise<Array<{ matchId: string; player1Id: string; player2Id: string }>> {
+    const opened: Array<{ matchId: string; player1Id: string; player2Id: string }> = [];
     const sorted = players;
     for (const p of sorted) {
       await client.query(
@@ -1342,17 +1379,62 @@ export class TournamentsService {
       );
     }
 
-    const matchCount = firstKnockoutMatchCount(sorted.length);
-    for (let slot = 0; slot < matchCount; slot++) {
-      const p1 = sorted[slot * 2]?.user_id;
-      const p2 = sorted[slot * 2 + 1]?.user_id;
-      if (!p1 || !p2) continue;
-
-      await client.query(
+    // `knockoutDraw` sizes the round to the field and gives an odd player out a
+    // bye. Taking `firstKnockoutMatchCount` slots instead simply left them out
+    // of the draw, with no match to play and no way to reach the next round.
+    const { roundNumber, pairs } = knockoutDraw(sorted.map((p) => p.user_id));
+    for (const [slot, [p1, p2]] of pairs.entries()) {
+      // Confirmed on creation: a bracket match has no confirmation step to
+      // wait for, and one left pending was expired by the five-minute sweep
+      // before either player could reach it — the headset never even shows an
+      // unconfirmed match.
+      const created = await client.query(
         `INSERT INTO matches (tournament_id, player1_id, player2_id, status, round_number, phase, bracket_slot)
-         VALUES ($1, $2, $3, 'pending_confirmation', $4, 'knockout', $5)`,
-        [tournamentId, p1, p2, KNOCKOUT_ROUNDS.ro16, slot]
+         VALUES ($1, $2, $3, 'confirmed', $4, 'knockout', $5)
+         RETURNING id`,
+        [tournamentId, p1, p2, roundNumber, slot]
       );
+      opened.push({ matchId: created.rows[0].id, player1Id: p1, player2Id: p2 });
+    }
+
+    return opened;
+  }
+
+  /** Tell both players a bracket match is open; nothing else announces one. */
+  private async announceBracketMatch(matchId: string, player1Id: string, player2Id: string) {
+    const users = await this.pool.query(
+      `SELECT id, username, skill_tier FROM users WHERE id = ANY($1)`,
+      [[player1Id, player2Id]]
+    );
+    const byId = new Map(users.rows.map((u) => [u.id, u]));
+
+    for (const [playerId, opponentId] of [
+      [player1Id, player2Id],
+      [player2Id, player1Id],
+    ] as const) {
+      const opponent = byId.get(opponentId);
+      const payload = {
+        matchId,
+        opponent: {
+          id: opponentId,
+          username: opponent?.username ?? 'Unknown',
+          skillTier: opponent?.skill_tier ?? 3,
+        },
+        chaseTarget: null,
+        amChasing: false,
+        autoConfirmed: true,
+        confirmDeadline: null,
+      };
+      emitToUser(playerId, 'match:found', payload);
+      if (this.env) {
+        enqueueNotification(this.env, {
+          userId: playerId,
+          type: 'match_found',
+          channels: ['in_app', 'email'],
+          payload,
+          idempotencyKey: `match-found:${matchId}:${playerId}`,
+        }).catch(console.error);
+      }
     }
   }
 
@@ -1396,15 +1478,31 @@ export class TournamentsService {
       ]
     );
 
+    // A slot with only one side known has to stay `pending_confirmation` —
+    // `matches_players_present` permits a half-empty match in no other state —
+    // so it is announced only once the other feeder fills it in below.
     if (inserted.rows[0]) return;
 
     // The slot already existed (or the concurrent insert beat us to it): claim
-    // our half of it without disturbing the other side.
-    await this.pool.query(
-      `UPDATE matches SET ${col} = $1, updated_at = NOW()
+    // our half of it without disturbing the other side. Filling the last empty
+    // side opens the match, so it is confirmed here — left pending, the
+    // five-minute sweep expired it within the next 30 seconds, because the slot
+    // was created when the *first* feeder resolved and is long past that age by
+    // the time the second one lands.
+    const filled = await this.pool.query(
+      `UPDATE matches SET ${col} = $1,
+              status = CASE WHEN ${col === 'player1_id' ? 'player2_id' : 'player1_id'} IS NOT NULL
+                            THEN 'confirmed' ELSE status END,
+              updated_at = NOW()
        WHERE tournament_id = $2 AND round_number = $3 AND bracket_slot = $4
-         AND phase = 'knockout'`,
+         AND phase = 'knockout'
+       RETURNING id, player1_id, player2_id, status`,
       [winnerId, match.tournament_id, nextRound, nextSlot]
     );
+
+    const row = filled.rows[0];
+    if (row?.status === 'confirmed' && row.player1_id && row.player2_id) {
+      await this.announceBracketMatch(row.id, row.player1_id, row.player2_id);
+    }
   }
 }

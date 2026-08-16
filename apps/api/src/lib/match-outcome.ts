@@ -3,6 +3,7 @@ import type { RedisClient } from './redis.js';
 import type { Env } from '../config/env.js';
 import type { MatchResultExtended } from '@vr-tournament/shared';
 import {
+  resolveAbandonedMatch,
   resolveMatchOutcome,
   winnerIdFromOutcome,
 } from '@vr-tournament/shared';
@@ -83,11 +84,42 @@ export async function applyMatchOutcome(
   }
 
   const winnerId = winnerIdFromOutcome(outcome, match.player1_id, match.player2_id)!;
-  const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
-  const finalResult: MatchResultExtended = {
+  return applyMatchWinner(pool, redis, env, matchId, match, {
     ...result,
     player1Score,
     player2Score,
+  }, winnerId);
+}
+
+/**
+ * Everything a decided match sets in motion: ratings, standings, the winner's
+ * place in the next round, the loser's exit, and the notifications for both.
+ *
+ * Split out from `applyMatchOutcome` because a winner is not always read off a
+ * scoreline. An admin settling a disputed match names the winner directly, and
+ * that path used to write `status = 'completed'` and stop — no rating, no
+ * advancement, no elimination, no requeue — so the tournament never moved and
+ * both players were quietly re-enrolled into the round they had just finished.
+ */
+export async function applyMatchWinner(
+  pool: Pool,
+  redis: RedisClient,
+  env: Env | undefined,
+  matchId: string,
+  match: {
+    player1_id: string;
+    player2_id: string;
+    tournament_id: string | null;
+    phase: string | null;
+    round_number: number | null;
+    time_slot_id: string | null;
+  },
+  result: MatchResultExtended,
+  winnerId: string
+): Promise<{ status: string; result: MatchResultExtended }> {
+  const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+  const finalResult: MatchResultExtended = {
+    ...result,
     winnerId,
     outcome: 'win',
     source: result.source ?? 'meta',
@@ -189,6 +221,68 @@ export async function applyMatchOutcome(
   });
 
   return { status: 'completed', result: finalResult };
+}
+
+/**
+ * Settle every match still open in a round that is being closed.
+ *
+ * The worker's `close-round` job keeps its own copy of this — the two apps do
+ * not share a database layer — but both decide the outcome with the same
+ * `resolveAbandonedMatch`, so the rule itself lives in one place.
+ *
+ * Must run before the standings are read, so a walkover counts toward the cut.
+ * Ratings are left alone deliberately: a no-show says nothing about skill.
+ */
+export async function settleOpenMatches(
+  client: Queryable,
+  tournamentId: string,
+  roundNumber: number
+): Promise<void> {
+  const open = await client.query(
+    `SELECT id, player1_id, player2_id, result
+     FROM matches
+     WHERE tournament_id = $1 AND round_number = $2
+       AND status IN ('pending_confirmation', 'confirmed', 'in_progress')
+     FOR UPDATE`,
+    [tournamentId, roundNumber]
+  );
+
+  for (const match of open.rows) {
+    const result = (match.result ?? {}) as MatchResultExtended;
+
+    // A complete scoreline is already on its way to being resolved: the score
+    // that filled it commits before `applyMatchOutcome` runs, so there is a
+    // moment where the match is finished but not yet marked. Expiring it in
+    // that window would overwrite a real result with an abandonment.
+    if (result.player1Score != null && result.player2Score != null) continue;
+
+    const outcome = resolveAbandonedMatch(result.player1Score, result.player2Score);
+
+    if (outcome === 'abandoned') {
+      await client.query(`UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`, [
+        match.id,
+      ]);
+      continue;
+    }
+
+    const winnerId = outcome === 'player1_walkover' ? match.player1_id : match.player2_id;
+    const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+
+    await client.query(
+      `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+    );
+    await client.query(
+      `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+       WHERE tournament_id = $1 AND user_id = $2`,
+      [tournamentId, winnerId]
+    );
+    await client.query(
+      `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+       WHERE tournament_id = $1 AND user_id = $2`,
+      [tournamentId, loserId]
+    );
+  }
 }
 
 /** Accepts a pool or a checked-out client so callers can run it inside a transaction. */

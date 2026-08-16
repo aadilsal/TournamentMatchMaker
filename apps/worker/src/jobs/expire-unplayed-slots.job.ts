@@ -1,7 +1,12 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
-import { queuePlayerKey, QUEUE_MEMBER, queueTournamentKey } from '@vr-tournament/shared';
+import {
+  queuePlayerKey,
+  QUEUE_MEMBER,
+  queueTournamentKey,
+  resolveAbandonedMatch,
+} from '@vr-tournament/shared';
 import { releaseSlotLock } from '../lib/slot-lock.js';
 import { emitToUser } from '../lib/socket-bridge.js';
 import { removeFromQueue } from '../lib/queue-cleanup.js';
@@ -33,17 +38,51 @@ export async function processExpireUnplayedSlotsJob(
     for (const match of expiredMatches.rows) {
       await client.query('BEGIN');
       try {
-        await client.query(
-          `UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-          [match.id]
-        );
+        const result = (match.result ?? {}) as {
+          player1Score?: number | null;
+          player2Score?: number | null;
+        };
+        // One player having batted is not the same as nobody turning up. In a
+        // chase the setter batted before the pair even existed, so expiring the
+        // match threw away a real innings and handed the no-show the same
+        // outcome as the player who played. Whoever is on the board takes it.
+        const outcome = resolveAbandonedMatch(result.player1Score, result.player2Score);
+        const status = outcome === 'abandoned' ? 'expired' : 'completed';
+
+        if (outcome === 'abandoned') {
+          await client.query(
+            `UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+            [match.id]
+          );
+        } else {
+          const winnerId =
+            outcome === 'player1_walkover' ? match.player1_id : match.player2_id;
+          const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+          await client.query(
+            `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+          );
+          if (match.tournament_id) {
+            await client.query(
+              `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+               WHERE tournament_id = $1 AND user_id = $2`,
+              [match.tournament_id, winnerId]
+            );
+            await client.query(
+              `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+               WHERE tournament_id = $1 AND user_id = $2`,
+              [match.tournament_id, loserId]
+            );
+          }
+        }
+
         await releaseSlotLock(client, redis, match.time_slot_id);
         await client.query('COMMIT');
 
         for (const userId of [match.player1_id, match.player2_id]) {
           await emitToUser(redis, userId, 'match:updated', {
             matchId: match.id,
-            status: 'expired',
+            status,
           });
         }
       } catch (err) {

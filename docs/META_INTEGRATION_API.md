@@ -1,6 +1,6 @@
 # Pixel Paddle / VR Cricket League — Meta Quest Integration API
 
-**Version:** 2.0  
+**Version:** 2.3  
 **Last updated:** August 2026  
 **Audience:** Meta Quest / VR game integration team  
 **Contact:** aadilsalman786@gmail.com
@@ -630,6 +630,32 @@ On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`)
 - Scores can only be submitted while the match’s `endTime` is in the future.
 - Players should complete VR play within their venue slot window.
 
+### 6.5 Walkovers
+
+A match can finish without your player ever submitting — and without their
+opponent submitting either.
+
+If a match runs out of time (its slot ends, or its round closes) with exactly
+one score on the board, the player who batted **wins by walkover**: `status`
+becomes `completed`, `winnerId` is set, and `result.walkover` is `true`. Only a
+match with *no* score at all is `expired`.
+
+This matters most in a chase, where the setter's innings goes on the board when
+the pair is made: a chaser who never plays hands the setter the match. Nothing
+is required of the client — just keep polling, and handle `match` going `null`
+as usual.
+
+### 6.6 Knockout matches
+
+When a tournament reaches its bracket, matches are created **already confirmed**
+and appear in `GET /matches/current` like any other. They carry no `venue`,
+`startTime`, or `endTime` — a bracket match is played whenever both players are
+ready, bounded only by the tournament's end date — and no `chaseTarget`, so both
+players submit a score exactly as in standard mode.
+
+An odd number of players leaves one with a **bye**: they play no match that
+round and simply keep polling until their next opponent is drawn.
+
 ---
 
 ## 7. Recommended VR client flow
@@ -755,6 +781,7 @@ get `409`, or it did not and the retry succeeds.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.3 | August 2026 | **Added** §6.5 walkovers and §6.6 knockout matches. A match that runs out of time with one score on the board now completes as a walkover for the player who batted, instead of expiring and discarding a played innings. Knockout matches are created confirmed, so they reach the headset through `GET /matches/current` — previously the bracket was only visible on the web, and a bracket match was expired five minutes after it was created, unannounced, so no tournament could finish its bracket. An odd field now gives a bye rather than dropping the extra player out of the draw. |
 | 2.2 | August 2026 | **Fixed:** a chase now completes on the chaser's score alone. The target-setter's solo innings is recorded as their score when the pair is made, so the scoreline is half-filled from the start (`myScore` for the setter, `opponentScore` for the chaser). Previously both scores were left null, and the match sat unresolved until the setter submitted a *second* innings that the "defend" UI never asks for — in practice until the round or slot expired. A setter who does submit now gets a `409` naming the reason. Chase matches created before this change still resolve on the chaser's submission. |
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |
 | 1.1 | July 2026 | Replaced email OTP with 4-digit profile code (`/identity/verify-link-code`) for linking headsets. |

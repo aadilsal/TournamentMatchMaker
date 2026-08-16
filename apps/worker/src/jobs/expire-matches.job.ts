@@ -13,10 +13,20 @@ export async function processExpireMatchesJob(
 ) {
   const client = await pool.connect();
   try {
+    // Knockout is excluded on purpose. A bracket slot is created the moment the
+    // *first* feeder match resolves, with the other side still undecided, and it
+    // waits at `pending_confirmation` — the only state
+    // `matches_players_present` allows a half-empty match to sit in — until the
+    // sibling finishes, which is always far longer than five minutes. Sweeping
+    // it on age expired the match the instant it became complete, so no bracket
+    // could advance and the tournament stalled in a knockout phase nothing else
+    // sweeps. Bracket matches now open as `confirmed`; the only ones left here
+    // are the half-filled slots, which are waiting by design.
     const expired = await client.query(
       `SELECT m.*
        FROM matches m
        WHERE m.status = 'pending_confirmation'
+         AND m.phase <> 'knockout'
          AND m.created_at < NOW() - INTERVAL '5 minutes'`
     );
 
@@ -69,8 +79,12 @@ export async function processExpireMatchesJob(
             });
           }
         }
-      } catch {
+      } catch (err) {
+        // Silence here is what hid the bracket problem: every sweep tried to
+        // expire a half-filled knockout slot, the CHECK constraint refused it,
+        // and the rollback said nothing — for as long as the slot existed.
         await client.query('ROLLBACK');
+        console.error(`Expiring match ${match.id} failed:`, err);
       }
     }
   } finally {
