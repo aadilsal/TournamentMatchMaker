@@ -226,6 +226,71 @@ export class TournamentsService {
     }
   }
 
+  /**
+   * Keep the opening round's window in step with the tournament's own dates.
+   *
+   * Round 1 is written once, at creation, from the start date the tournament had
+   * then. Editing the start date or the round length afterwards left the round
+   * behind, and every downstream reader takes the *round* as the authority: the
+   * slot picker only offers slots inside it, `enter` rejects anything outside
+   * it, and pairing discards a window that does not fit. A moved start date
+   * therefore left a tournament that looked correct on every screen and that
+   * nobody could enter.
+   *
+   * Restricted to a round with no matches in it, so a round already being played
+   * is never moved.
+   */
+  private async realignOpeningRound(tournamentId: string) {
+    await this.pool.query(
+      `UPDATE tournament_rounds tr
+       SET starts_at = t.start_date,
+           ends_at   = t.start_date + make_interval(mins => t.round_duration_minutes)
+       FROM tournaments t
+       WHERE t.id = $1
+         AND tr.tournament_id = t.id
+         AND tr.round_number = t.current_round_number
+         AND tr.status = 'active'
+         AND t.status IN ('draft', 'open', 'closed')
+         AND NOT EXISTS (
+           SELECT 1 FROM matches m
+           WHERE m.tournament_id = t.id AND m.round_number = tr.round_number
+         )`,
+      [tournamentId]
+    );
+  }
+
+  /** Called by the admin edit form after the tournament row itself is updated. */
+  async syncOpeningRoundWindow(tournamentId: string) {
+    await this.realignOpeningRound(tournamentId);
+  }
+
+  /**
+   * Open the first round the moment an admin starts a tournament by hand.
+   *
+   * Starting early otherwise produced a tournament that was live but whose round
+   * had not begun — matchmaking waits for an open round, so nothing at all
+   * happened until the original start date came round. An admin pressing Start
+   * means play begins now.
+   */
+  async beginOpeningRoundNow(tournamentId: string) {
+    await this.pool.query(
+      `UPDATE tournament_rounds tr
+       SET starts_at = NOW(),
+           ends_at   = NOW() + make_interval(mins => t.round_duration_minutes)
+       FROM tournaments t
+       WHERE t.id = $1
+         AND tr.tournament_id = t.id
+         AND tr.round_number = t.current_round_number
+         AND tr.status = 'active'
+         AND (tr.starts_at > NOW() OR tr.ends_at <= NOW())
+         AND NOT EXISTS (
+           SELECT 1 FROM matches m
+           WHERE m.tournament_id = t.id AND m.round_number = tr.round_number
+         )`,
+      [tournamentId]
+    );
+  }
+
   /** Push the fresh registration count to every connected client. */
   async broadcastTournamentUpdate(tournamentId: string, reason: TournamentUpdatedReason) {
     try {
@@ -478,7 +543,13 @@ export class TournamentsService {
     if (!this.redis) throw new AppError('INTERNAL', 'Redis not configured', 500);
 
     const tournament = await this.getById(tournamentId);
-    if (tournament.status !== 'open' && tournament.status !== 'in_progress') {
+    // 'closed' is the gap between registration shutting and play starting. New
+    // entrants are turned away below, but a player who is already registered has
+    // to be able to pick their play window in it — otherwise the one stretch of
+    // time when they know they are in the tournament and know when it starts is
+    // the one stretch when the system will not let them prepare for it, and they
+    // arrive at the first round with nothing for matchmaking to schedule.
+    if (!['open', 'closed', 'in_progress'].includes(tournament.status)) {
       throw new AppError('CONFLICT', 'Tournament is not accepting entries', 409);
     }
 

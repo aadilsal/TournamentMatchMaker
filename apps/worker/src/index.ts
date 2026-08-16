@@ -20,6 +20,7 @@ import { processExpireMatchesJob } from './jobs/expire-matches.job.js';
 import { processExpireUnplayedSlotsJob } from './jobs/expire-unplayed-slots.job.js';
 import { processCloseRoundJob } from './jobs/close-round.job.js';
 import { processReconcileQueueJob } from './jobs/reconcile-queue.job.js';
+import { processEnrollParticipantsJob } from './jobs/enroll-participants.job.js';
 import { processTournamentLifecycleJob } from './jobs/tournament-lifecycle.job.js';
 import { processDispatchNotificationJob } from './jobs/dispatch-notification.job.js';
 
@@ -54,6 +55,11 @@ const REPEAT_JOBS = [
   { name: 'tournament-lifecycle-repeat', every: 60000, jobId: 'matchmaking-tournament-lifecycle-repeat' },
   // The queue is in Redis and the right to play is in Postgres; they drift.
   { name: 'reconcile-queue-repeat', every: 60000, jobId: 'matchmaking-reconcile-queue-repeat' },
+  // Registering for a tournament put nobody in its matchmaking queue, so a
+  // tournament could go live with a full field and nothing to pair. This is the
+  // step that joins the two, and it repeats so a queue lost to a Redis restart
+  // or a worker outage refills itself.
+  { name: 'enroll-participants-repeat', every: 10000, jobId: 'matchmaking-enroll-participants-repeat' },
 ] as const;
 
 // A repeat interval is part of the schedule's identity in Redis, not a property
@@ -88,6 +94,11 @@ const matchmakingWorker = new Worker(
       await processReconcileQueueJob(job, pool, redis);
     } else if (job.name === 'tournament-lifecycle-repeat') {
       await processTournamentLifecycleJob(job, pool, redis);
+      // A tournament that just went live has a field waiting outside the queue;
+      // enrol it now rather than on the enrolment job's own next tick.
+      await processEnrollParticipantsJob(job, pool, redis, notificationQueue);
+    } else if (job.name === 'enroll-participants-repeat') {
+      await processEnrollParticipantsJob(job, pool, redis, notificationQueue);
     }
   },
   { connection, concurrency: 3 }

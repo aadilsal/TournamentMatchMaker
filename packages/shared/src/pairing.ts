@@ -110,10 +110,27 @@ function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number)
   return score;
 }
 
-/** Scan all queue pairs — not only FIFO head — and return the best match. */
+/**
+ * Stable identity for an unordered pair, so a pair that could not be turned
+ * into a match can be named and set aside without depending on which of the two
+ * was scanned first.
+ */
+export function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`;
+}
+
+/**
+ * Scan all queue pairs — not only FIFO head — and return the best match.
+ *
+ * `excluded` holds pairs the caller has already tried and failed to turn into a
+ * match on this pass. Without it the highest-scoring pair is returned again on
+ * every call, so a single pair that cannot be scheduled — no open round, no slot
+ * — permanently hid every other pairable player in the same queue.
+ */
 export function findBestPair(
   entries: QueueEntry[],
-  now = Date.now()
+  now = Date.now(),
+  excluded?: ReadonlySet<string>
 ): { candidate: QueueEntry; partner: QueueEntry } | null {
   if (entries.length < 2) return null;
 
@@ -123,6 +140,7 @@ export function findBestPair(
     for (let j = i + 1; j < entries.length; j++) {
       const a = entries[i];
       const b = entries[j];
+      if (excluded?.has(pairKey(a.userId, b.userId))) continue;
       const score = scorePair(a, b, entries, now);
       if (score === null) continue;
 

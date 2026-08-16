@@ -29,11 +29,68 @@ interface Transition {
   describe: (name: string) => string;
 }
 
+/**
+ * Put the opening round's window back where the tournament's own dates say it
+ * should be, at the moment play begins.
+ *
+ * Round 1 is written when the tournament is *created*, from the start date it
+ * had then, and nothing rewrote it afterwards. Move the start date — which is
+ * ordinary while a tournament is still being set up — and the round kept the
+ * old window. Two things follow, both silent: the slot picker offers nothing,
+ * because it only offers slots inside the round, so no player can enter; and if
+ * the stale window has already elapsed by the time play begins, `close-round`
+ * shuts round 1 on its first sweep and eliminates half a field that never got
+ * to play a single match.
+ *
+ * Only ever applied to a round nobody has played in yet, so a real round in
+ * progress can never be moved out from under its matches.
+ */
+async function alignOpeningRound(client: PoolClient, tournamentId: string): Promise<void> {
+  const result = await client.query(
+    `UPDATE tournament_rounds tr
+     SET starts_at = aligned.starts_at,
+         ends_at   = aligned.ends_at
+     FROM tournaments t
+     CROSS JOIN LATERAL (
+       SELECT CASE
+                WHEN t.start_date + make_interval(mins => t.round_duration_minutes) > NOW()
+                THEN t.start_date
+                ELSE NOW()
+              END AS starts_at
+     ) base
+     CROSS JOIN LATERAL (
+       SELECT base.starts_at,
+              base.starts_at + make_interval(mins => t.round_duration_minutes) AS ends_at
+     ) aligned
+     WHERE t.id = $1
+       AND tr.tournament_id = t.id
+       AND tr.round_number = t.current_round_number
+       AND tr.status = 'active'
+       AND (tr.starts_at <> aligned.starts_at OR tr.ends_at <> aligned.ends_at)
+       AND NOT EXISTS (
+         SELECT 1 FROM matches m
+         WHERE m.tournament_id = t.id AND m.round_number = tr.round_number
+       )
+     RETURNING tr.round_number, tr.starts_at, tr.ends_at`,
+    [tournamentId]
+  );
+
+  const row = result.rows[0];
+  if (row) {
+    console.log(
+      `Realigned round ${row.round_number} of ${tournamentId} to ${new Date(row.starts_at).toISOString()} – ${new Date(row.ends_at).toISOString()}`
+    );
+  }
+}
+
 const TRANSITIONS: Transition[] = [
   {
     from: 'open',
     to: 'closed',
-    due: `registration_closes_at IS NOT NULL AND registration_closes_at <= NOW()`,
+    // Play beginning shuts registration whatever the window says. A tournament
+    // whose `registration_closes_at` was cleared by hand had no way out of
+    // 'open' at all, so it never reached 'in_progress' and never ran.
+    due: `(registration_closes_at IS NOT NULL AND registration_closes_at <= NOW()) OR start_date <= NOW()`,
     reason: 'status_changed',
     describe: (name) => `Registration closed for "${name}"`,
   },
@@ -55,6 +112,7 @@ const TRANSITIONS: Transition[] = [
          WHERE id = $1`,
         [tournamentId, count.rows[0]?.count ?? 0]
       );
+      await alignOpeningRound(client, tournamentId);
     },
     describe: (name) => `Started "${name}"`,
   },

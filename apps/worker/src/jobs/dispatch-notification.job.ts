@@ -136,6 +136,15 @@ export async function processDispatchNotificationJob(
         startDate: String(payload.startDate ?? new Date().toISOString()),
         bracketUrl: `${env.APP_URL}/tournaments/${payload.tournamentId}`,
       });
+    } else if (type === 'tournament_live') {
+      const name = String(payload.tournamentName ?? 'Your tournament');
+      const needsSlot = payload.needsSlot === true;
+      subject = `${name} is live — you're in matchmaking`;
+      html = needsSlot
+        ? `<p><strong>${name}</strong> has started and you are in the queue for round ${payload.roundNumber}.</p>
+           <p>You have not picked a play window yet — <a href="${env.APP_URL}/play?tournament=${payload.tournamentId}">choose one now</a> so we can schedule your match.</p>`
+        : `<p><strong>${name}</strong> has started and you are in the queue for round ${payload.roundNumber}.</p>
+           <p>We will let you know the moment your opponent is found. <a href="${env.APP_URL}/tournaments/${payload.tournamentId}">View the tournament</a></p>`;
     } else if (type === 'match_confirmed') {
       subject = 'Match Confirmed';
       html = `<p>Your match has been confirmed. <a href="${env.APP_URL}/matches">View details</a></p>`;

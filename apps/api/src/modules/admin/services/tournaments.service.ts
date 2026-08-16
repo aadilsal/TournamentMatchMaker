@@ -147,6 +147,15 @@ export class AdminTournamentsService {
       await this.retireParticipants(id);
     }
 
+    // The opening round was written from the start date this tournament had when
+    // it was created. Editing either the start date or the round length here left
+    // it pointing at a window that no longer exists — which is invisible on the
+    // form and fatal everywhere else, because the round is what the slot picker,
+    // `enter` and pairing all measure a play window against.
+    if (input.startDate !== undefined || input.roundDurationMinutes !== undefined) {
+      await this.tournaments.syncOpeningRoundWindow(id);
+    }
+
     await writeAudit(this.pool, {
       actorId,
       action: 'tournament.update',
@@ -185,10 +194,16 @@ export class AdminTournamentsService {
       [id]
     );
     const initialPlayerCount = countResult.rows[0]?.count ?? 0;
-    return this.update(actorId, id, {
+    const tournament = await this.update(actorId, id, {
       status: 'in_progress',
       initialPlayerCount: initialPlayerCount > 0 ? initialPlayerCount : undefined,
     });
+    // Pressing Start means play begins now, so the opening round opens now too.
+    // Without this a tournament started ahead of its own start date was live with
+    // no open round, and matchmaking — which will only build a match inside a
+    // round — had nothing to do until the original date arrived.
+    await this.tournaments.beginOpeningRoundNow(id);
+    return tournament;
   }
 
   /**

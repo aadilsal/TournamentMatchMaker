@@ -81,6 +81,16 @@ export async function processExpireUnplayedSlotsJob(
       const inQueue = await redis.sismember(QUEUE_MEMBER, row.user_id);
       if (!inQueue) continue;
 
+      // The query above asks the database whether this player *has ever held* a
+      // window that is now over. What matters is the window their queue entry is
+      // actually waiting on: a player carrying no window at all is waiting for
+      // one to be found for them, not against a dead one, and dropping them here
+      // put them straight back into the fight with enrolment — out every minute,
+      // back in seconds later, never in the queue long enough to be paired.
+      const meta = await redis.hgetall(queuePlayerKey(row.user_id));
+      const queuedSlotEndsAt = meta.slotEndAt ? parseInt(meta.slotEndAt, 10) : null;
+      if (!queuedSlotEndsAt || queuedSlotEndsAt > Date.now()) continue;
+
       const activeMatch = await client.query(
         `SELECT id FROM matches
          WHERE (player1_id = $1 OR player2_id = $1)

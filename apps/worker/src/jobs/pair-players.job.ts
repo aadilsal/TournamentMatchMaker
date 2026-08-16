@@ -4,6 +4,7 @@ import type { Redis } from 'ioredis';
 import type { QueuePairFailedEvent } from '@vr-tournament/shared';
 import {
   findBestPair,
+  pairKey,
   type QueueEntry,
   QUEUE_GLOBAL,
   QUEUE_MEMBER,
@@ -12,7 +13,6 @@ import {
   queueTournamentKey,
   pickEarlierSlot,
   resolveChaseOnPair,
-  slotsOverlap,
 } from '@vr-tournament/shared';
 import type { WorkerEnv } from '../config/env.js';
 import { MATCHMAKING_PAIR_LOCK } from '../lib/queue-keys.js';
@@ -143,6 +143,45 @@ async function findAvailableSlot(
   return null;
 }
 
+/**
+ * Any play window inside the round, regardless of where it is.
+ *
+ * Two VR players need a *time*, not a seat: they play from home, so no venue
+ * capacity is consumed and no location has to match. Without this, a pair of VR
+ * players who never picked a slot themselves — the case for anyone who only
+ * registered — had no window at all, and a tournament match with no window is
+ * rejected below. They sat in the queue forever with nothing to explain it.
+ *
+ * Deliberately not filtered on capacity or `status`: a slot that is full or
+ * locked for venue players is still a perfectly good clock for two people
+ * playing at home.
+ */
+async function findAnySlotInRound(
+  client: import('pg').PoolClient,
+  round: { startsAt: Date; endsAt: Date }
+): Promise<BookingSlot | null> {
+  const result = await client.query(
+    `SELECT ts.id AS slot_id, ts.venue_id, ts.start_time, ts.end_time
+     FROM time_slots ts
+     JOIN venues v ON v.id = ts.venue_id
+     WHERE v.active = true
+       AND ts.end_time > NOW()
+       AND ts.start_time >= $1
+       AND ts.end_time <= $2
+     ORDER BY ts.start_time ASC
+     LIMIT 1`,
+    [round.startsAt, round.endsAt]
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    slotId: row.slot_id,
+    venueId: row.venue_id,
+    startTime: row.start_time,
+    endTime: row.end_time,
+  };
+}
+
 function slotWithinRound(
   slot: BookingSlot,
   round: { startsAt: Date; endsAt: Date } | null
@@ -223,15 +262,30 @@ async function cleanupTournamentIndex(redis: Redis, tournamentId: string, queueK
   }
 }
 
+/**
+ * The outcome of one attempt to turn the best-scoring pair into a match.
+ *
+ * `skip` matters as much as `paired`: an attempt can fail for a reason that is
+ * specific to those two players (their round is shut, neither has a window)
+ * while the rest of the queue is perfectly pairable. Reporting that separately
+ * from "nothing left to do" is what lets the drain move on instead of retrying
+ * the same doomed pair until the job gives up.
+ */
+type PairAttempt =
+  | { status: 'idle' }
+  | { status: 'paired' }
+  | { status: 'skip'; key: string };
+
 async function pairInQueue(
   pool: Pool,
   redis: Redis,
   queueKey: string,
   tournamentId: string | null,
-  notificationQueue: { add: (name: string, data: unknown, opts?: { jobId?: string }) => Promise<unknown> }
-): Promise<boolean> {
+  notificationQueue: { add: (name: string, data: unknown, opts?: { jobId?: string }) => Promise<unknown> },
+  excluded: Set<string>
+): Promise<PairAttempt> {
   const members = await redis.zrange(queueKey, 0, -1);
-  if (members.length < 2) return false;
+  if (members.length < 2) return { status: 'idle' };
 
   const entries: QueueEntry[] = [];
   for (const userId of members) {
@@ -249,14 +303,41 @@ async function pairInQueue(
     });
   }
 
-  const match = findBestPair(entries);
-  if (!match) return false;
+  const match = findBestPair(entries, Date.now(), excluded);
+  if (!match) return { status: 'idle' };
 
   const { candidate, partner } = match;
+  const key = pairKey(candidate.userId, partner.userId);
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
+
+    // The queue and the matches table are written in separate stores, so a
+    // membership can outlive the match that should have removed it: a crash
+    // between the two, or a player enrolled from another path in the instant
+    // between the Redis removal and the commit. Pairing off a stale entry gives
+    // one player two live matches at once, which nothing downstream can undo —
+    // so the guard lives here, where the match row itself is being written.
+    const busy = await client.query(
+      `SELECT DISTINCT unnest(ARRAY[player1_id, player2_id]) AS user_id
+       FROM matches
+       WHERE status IN ('pending_confirmation', 'confirmed', 'in_progress')
+         AND (player1_id = ANY($1) OR player2_id = ANY($1))`,
+      [[candidate.userId, partner.userId]]
+    );
+    const busyIds = new Set<string>(
+      busy.rows
+        .map((r) => r.user_id as string)
+        .filter((id) => id === candidate.userId || id === partner.userId)
+    );
+    if (busyIds.size > 0) {
+      await client.query('ROLLBACK');
+      for (const userId of busyIds) {
+        await removeStaleQueueEntry(redis, queueKey, tournamentId, userId);
+      }
+      return { status: 'skip', key };
+    }
 
     const p1Meta = await redis.hgetall(queuePlayerKey(candidate.userId));
     const p2Meta = await redis.hgetall(queuePlayerKey(partner.userId));
@@ -299,7 +380,7 @@ async function pairInQueue(
         // both players would sit in it until it expired, unable to requeue.
         // Leave them in the queue; close-round will move them on.
         await client.query('ROLLBACK');
-        return false;
+        return { status: 'skip', key };
       }
     }
 
@@ -339,7 +420,7 @@ async function pairInQueue(
           'venue_required',
           'Venue location is required to find a slot. Update your city or book a venue first.'
         );
-        return false;
+        return { status: 'skip', key };
       }
       chosenSlot = await findAvailableSlot(client, {
         lat: matchPoint?.lat,
@@ -357,7 +438,7 @@ async function pairInQueue(
           'no_slots',
           'No venue slots available nearby. Try a different time or venue.'
         );
-        return false;
+        return { status: 'skip', key };
       }
     } else if (chosenSlot) {
       // Capacity is already accounted for only when the chosen slot is one an
@@ -366,6 +447,13 @@ async function pairInQueue(
       // player is turning up in person.
       usedExistingBooking =
         chosenSlot.slotId === p1Booking?.slotId || chosenSlot.slotId === p2Booking?.slotId;
+    }
+
+    // Neither player picked a window and neither needs a venue: both are playing
+    // from home, so any window inside the round will do. This is the ordinary
+    // case for two players who registered and left the scheduling to us.
+    if (!chosenSlot && tournamentId && !needsVenue && roundWindow) {
+      chosenSlot = await findAnySlotInRound(client, roundWindow);
     }
 
     // A tournament match with no window is unplayable — neither player could
@@ -378,7 +466,7 @@ async function pairInQueue(
         'no_slots',
         'Pick a time slot for this round so we can schedule your match.'
       );
-      return false;
+      return { status: 'skip', key };
     }
 
     if (chosenSlot) {
@@ -393,8 +481,15 @@ async function pairInQueue(
     // the two windows to overlap, the match is anchored to one of them; seating
     // the other player there too would book them a seat at a time they never
     // picked, and take capacity from that venue.
+    //
+    // A player holding no window of their own is the exception: the slot below
+    // was found *for this match*, so it is theirs by assignment and they do
+    // attend it. Excluding them left every such match with nobody attending,
+    // which skipped `finalizeMatchSlotBookings` — and that is the only thing
+    // that takes a slot back out of `locked`. The slot stayed locked, and every
+    // later match and booking was refused it.
     const seatsChosenSlot = (slot: BookingSlot | null) =>
-      !!slot && !!chosenSlot && slot.slotId === chosenSlot.slotId;
+      !!chosenSlot && (!slot || slot.slotId === chosenSlot.slotId);
     const attendingPlayerIds = [
       ...(p1HasVr || !seatsChosenSlot(p1Slot) ? [] : [candidate.userId]),
       ...(p2HasVr || !seatsChosenSlot(p2Slot) ? [] : [partner.userId]),
@@ -461,7 +556,7 @@ async function pairInQueue(
           'slot_lock_failed',
           'Could not reserve the venue slot. Retrying with another slot…'
         );
-        return false;
+        return { status: 'skip', key };
       }
     }
 
@@ -573,7 +668,7 @@ async function pairInQueue(
     }
 
     console.log(`Paired ${candidate.userId} vs ${partner.userId} → match ${matchId} (${matchStatus})`);
-    return true;
+    return { status: 'paired' };
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('Pairing error:', err);
@@ -583,12 +678,41 @@ async function pairInQueue(
       'pairing_error',
       'Something went wrong while creating your match. Still searching…'
     );
-    return false;
+    // Set aside rather than aborting: whatever went wrong belongs to these two,
+    // and everyone else behind them in the queue is still pairable.
+    return { status: 'skip', key };
   } finally {
     client.release();
   }
 }
 
+/** Drop a membership that can no longer produce a match, leaving no orphans. */
+async function removeStaleQueueEntry(
+  redis: Redis,
+  queueKey: string,
+  tournamentId: string | null,
+  userId: string
+) {
+  const multi = redis.multi();
+  multi.zrem(queueKey, userId);
+  multi.zrem(QUEUE_GLOBAL, userId);
+  if (tournamentId) multi.zrem(queueTournamentKey(tournamentId), userId);
+  multi.srem(QUEUE_MEMBER, userId);
+  multi.del(queuePlayerKey(userId));
+  await multi.exec();
+  if (tournamentId) await cleanupTournamentIndex(redis, tournamentId, queueKey);
+  console.log(`Dropped queue entry for ${userId}: already holds an active match`);
+}
+
+/**
+ * Keep pairing until the queue has nothing left that can be matched.
+ *
+ * Pairs that fail for their own reasons are set aside for the rest of the pass
+ * instead of ending it. Before this, `findBestPair` returned the same
+ * highest-scoring pair on every call, so one unschedulable pair at the top of
+ * the ranking stopped the drain dead — every other player in that queue went
+ * unpaired for as long as those two stayed in it.
+ */
 async function drainQueue(
   pool: Pool,
   redis: Redis,
@@ -597,7 +721,24 @@ async function drainQueue(
   notificationQueue: { add: (name: string, data: unknown, opts?: { jobId?: string }) => Promise<unknown> }
 ) {
   let paired = 0;
-  while (await pairInQueue(pool, redis, queueKey, tournamentId, notificationQueue)) {
+  const excluded = new Set<string>();
+
+  // Bounded so a pathological queue cannot hold the job open: every iteration
+  // either creates a match or retires one pair from consideration.
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const result = await pairInQueue(
+      pool,
+      redis,
+      queueKey,
+      tournamentId,
+      notificationQueue,
+      excluded
+    );
+    if (result.status === 'idle') break;
+    if (result.status === 'skip') {
+      excluded.add(result.key);
+      continue;
+    }
     paired++;
     if (paired >= 50) break;
   }

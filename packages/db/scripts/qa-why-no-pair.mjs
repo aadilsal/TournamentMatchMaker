@@ -31,12 +31,101 @@ function overlaps(aStart, aEnd, bStart, bEnd) {
   return Number(aStart) < Number(bEnd) && Number(bStart) < Number(aEnd);
 }
 
+/**
+ * Who is entitled to play but is not in a queue at all.
+ *
+ * Starting from Redis — as the rest of this script does — cannot see the
+ * failure that matters most: a tournament that goes live with a full field and
+ * an empty queue. There is nothing to walk, so the old version printed "No
+ * queues have anyone in them" and exited, which reads as "nothing to do" when it
+ * actually means "nobody was ever entered". Start from the database instead.
+ */
+async function reportLiveTournaments() {
+  const live = await q(
+    `SELECT t.id, t.name, t.status, t.phase, t.current_round_number,
+            t.start_date, t.registration_closes_at,
+            r.status AS round_status, r.starts_at, r.ends_at
+     FROM tournaments t
+     LEFT JOIN tournament_rounds r
+       ON r.tournament_id = t.id AND r.round_number = t.current_round_number
+     WHERE t.status IN ('open', 'closed', 'in_progress')
+     ORDER BY t.start_date`
+  );
+  if (live.length === 0) return;
+
+  console.log(`${'='.repeat(78)}`);
+  console.log('TOURNAMENTS AND WHO IS ACTUALLY IN MATCHMAKING');
+
+  for (const t of live) {
+    if (onlyTournament && t.id !== onlyTournament) continue;
+
+    const roundOpen =
+      t.round_status === 'active' &&
+      t.starts_at &&
+      new Date(t.starts_at).getTime() <= now &&
+      new Date(t.ends_at).getTime() > now;
+
+    console.log(`\n  ${t.name}  [${t.id}]`);
+    console.log(`    status=${t.status} phase=${t.phase} currentRound=${t.current_round_number}`);
+    console.log(`    starts ${fmt(new Date(t.start_date).getTime())}, registration shuts ${fmt(t.registration_closes_at && new Date(t.registration_closes_at).getTime())}`);
+    if (!t.round_status) {
+      console.log('    !! no tournament_rounds row for the current round — nothing can be paired');
+    } else {
+      console.log(
+        `    round ${t.current_round_number}: status=${t.round_status} window ${fmt(new Date(t.starts_at).getTime())} .. ${fmt(new Date(t.ends_at).getTime())}` +
+          (roundOpen ? '  (open now)' : '  !! NOT OPEN NOW — matchmaking will not run')
+      );
+    }
+
+    const participants = await q(
+      `SELECT tp.user_id, tp.status, tp.round_number, u.username, u.has_vr_headset,
+              (SELECT COUNT(*)::int FROM matches m
+                WHERE (m.player1_id = tp.user_id OR m.player2_id = tp.user_id)
+                  AND m.status IN ('pending_confirmation','confirmed','in_progress')) AS live_matches,
+              (SELECT ts.end_time FROM tournament_round_slots rs
+                 JOIN time_slots ts ON ts.id = rs.time_slot_id
+                WHERE rs.tournament_id = tp.tournament_id AND rs.user_id = tp.user_id
+                  AND ts.end_time > NOW()
+                ORDER BY (rs.round_number = tp.round_number) DESC, rs.round_number DESC
+                LIMIT 1) AS slot_ends
+       FROM tournament_participants tp
+       JOIN users u ON u.id = tp.user_id
+       WHERE tp.tournament_id = $1
+       ORDER BY u.username`,
+      [t.id]
+    );
+
+    if (participants.length === 0) {
+      console.log('    no participants registered');
+      continue;
+    }
+
+    for (const p of participants) {
+      const inQueue = await redis.sismember('queue:member', p.user_id);
+      const state = inQueue
+        ? 'in queue'
+        : p.live_matches > 0
+          ? 'holds a match'
+          : !['active', 'advanced'].includes(p.status)
+            ? `not playable (${p.status})`
+            : roundOpen
+              ? 'NOT IN QUEUE — will not be paired'
+              : 'not in queue (round not open yet)';
+      console.log(
+        `      ${String(p.username).padEnd(16)} ${state.padEnd(32)} slot=${p.slot_ends ? fmt(new Date(p.slot_ends).getTime()) : 'NONE'}`
+      );
+    }
+  }
+}
+
+await reportLiveTournaments();
+
 const queueKeys = (await redis.keys('queue:tournament:*')).filter((k) => k !== 'queue:tournament:ids');
 const globalKey = 'queue:global';
 if ((await redis.zcard(globalKey)) > 0) queueKeys.push(globalKey);
 
 if (queueKeys.length === 0) {
-  console.log('No queues have anyone in them.');
+  console.log('\nNo queues have anyone in them.');
   await redis.quit();
   await pool.end();
   process.exit(0);
@@ -115,8 +204,12 @@ for (const key of queueKeys) {
       if (a.roundNumber !== b.roundNumber) {
         reasons.push(`different round (${a.roundNumber} vs ${b.roundNumber}) — never pairs`);
       }
+      // Non-overlapping windows are only a preference now: the format is
+      // asynchronous, one player sets a target and the other chases it, so they
+      // never have to be in VR at the same moment. Reporting it as a blocker sent
+      // people looking for a scheduling problem that was not there.
       if (!overlaps(a.slotStartAt, a.slotEndAt, b.slotStartAt, b.slotEndAt)) {
-        reasons.push('time slots do not overlap — never pairs');
+        console.log(`    note: ${a.username} and ${b.username} have non-overlapping windows (allowed, just scored lower)`);
       }
 
       // Tier tolerance only bites with 3+ players; with two it is always satisfied.
