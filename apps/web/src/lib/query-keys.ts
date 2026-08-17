@@ -41,6 +41,7 @@ export function invalidateTournamentQueries(queryClient: QueryClient, tournament
       ['tournament-participant', tournamentId],
       ['tournament-slot-options', tournamentId],
       ['tournament-my-slot', tournamentId],
+      ['tournament-entry-state', tournamentId],
       ['admin', 'tournament', tournamentId],
     ]) {
       queryClient.invalidateQueries({ queryKey: key });
@@ -57,6 +58,7 @@ export function invalidateTournamentQueries(queryClient: QueryClient, tournament
     ['tournament-participant'],
     ['tournament-slot-options'],
     ['tournament-my-slot'],
+    ['tournament-entry-state'],
     ['admin', 'tournament'],
   ]) {
     queryClient.invalidateQueries({ queryKey: key });

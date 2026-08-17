@@ -11,6 +11,8 @@ export interface QueueEntry {
   soloPlayedAt?: number;
   slotStartAt?: number | null;
   slotEndAt?: number | null;
+  /** Opponent this entry owes a rematch to after a draw. */
+  rematchWith?: string | null;
 }
 
 export function tierDistance(a: number, b: number): number {
@@ -59,11 +61,36 @@ function slotsOverlapping(a: QueueEntry, b: QueueEntry): boolean {
   return slotsOverlap(a.slotStartAt, a.slotEndAt, b.slotStartAt, b.slotEndAt);
 }
 
+/**
+ * A pinned pair outranks anything the scorer could produce.
+ *
+ * The number only has to beat every score `scorePair` can reach, so that two
+ * players who owe each other a rematch are taken before an open pair that
+ * happens to sit in the same tier — otherwise the rematch waits behind whoever
+ * has been queuing longest, and one of the two can be consumed by the general
+ * pairing pass in the meantime.
+ */
+export const REMATCH_PAIR_SCORE = 1_000_000;
+
 function scorePair(a: QueueEntry, b: QueueEntry, all: QueueEntry[], now: number): number | null {
   // The only hard requirements: not yourself, and the same round of the same
   // tournament. Everything else below only ranks the candidates.
   if (a.userId === b.userId) return null;
   if (a.roundNumber !== b.roundNumber) return null;
+
+  // A draw is replayed by the same two players, so an entry that owes a rematch
+  // is not a candidate for anyone else — not even a perfect tier match who has
+  // been waiting longer. This is a hard exclusion rather than a ranking bonus:
+  // scored, the pin would only be a preference, and the pinned player would be
+  // paired off with a stranger during the minutes before their opponent has
+  // finished picking a window. The pin is mutual by construction; requiring
+  // both halves means a stale one-sided pin blocks a match instead of forcing
+  // an unwanted one.
+  const aPin = a.rematchWith ?? null;
+  const bPin = b.rematchWith ?? null;
+  if (aPin !== null || bPin !== null) {
+    return aPin === b.userId && bPin === a.userId ? REMATCH_PAIR_SCORE : null;
+  }
 
   const dist = tierDistance(a.skillTier, b.skillTier);
   const maxWait = Math.max(waitSeconds(a, now), waitSeconds(b, now));

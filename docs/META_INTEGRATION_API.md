@@ -389,7 +389,7 @@ on the board when the match was created.
       "chaseTarget": 87,
       "chasePlayerId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
       "source": "meta",
-      "outcome": "player1_win"
+      "outcome": "win"
     }
   },
   "error": null,
@@ -397,14 +397,13 @@ on the board when the match was created.
 }
 ```
 
-> **`outcome` describes the match, not the caller.** `player1_win` / `player2_win`
-> name the winning side of the match — they are **not** relative to the `userId`
-> you posted. Submitting a losing chase returns `player2_win` (the setter's win)
-> to the chaser. To answer *"did my player win?"*, compare
-> `result.winnerId === userId`; never read `outcome` for that.
+> **`winnerId` is the field that names the winner.** `"outcome": "win"` is written
+> on every decided match whoever won — it is **not** relative to the `userId` you
+> posted, and a losing chaser gets it too. To answer *"did my player win?"*,
+> compare `result.winnerId === userId`; never read `outcome` for that.
 >
-> Matches decided before this change store a flat `"outcome": "win"`, which names
-> no side at all — read `winnerId` for those.
+> On a draw there is no winner: `winnerId` stays `null`, `outcome` is `"rematch"`,
+> and the match `status` is `cancelled`.
 
 #### Error responses
 
@@ -609,11 +608,11 @@ in VR at the same moment.
 
 **Chase resolution (on the chaser's score):**
 
-| Condition | Result | `result.outcome` |
-|-----------|--------|------------------|
-| Chaser score **>** `chaseTarget` | Chaser wins | `player1_win` / `player2_win` — whichever side the chaser is |
-| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins | `player1_win` / `player2_win` — whichever side the setter is |
-| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued | `rematch` |
+| Condition | Result | `result.winnerId` | `result.outcome` |
+|-----------|--------|-------------------|------------------|
+| Chaser score **>** `chaseTarget` | Chaser wins | the chaser | `win` |
+| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins | the setter | `win` |
+| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued | `null` | `rematch` |
 
 The target must be **exceeded**, not matched. A chaser posting `70` against a
 `chaseTarget` of `87` loses, and the response carries the **setter's** win — with
@@ -629,15 +628,35 @@ When `chaseTarget` is `null`:
 | Condition | Result |
 |-----------|--------|
 | Higher score wins | Winner advanced, loser eliminated (normal rounds) |
-| Equal scores | **Rematch** — both re-queued |
+| Equal scores | **Rematch** — the same two players replay (see §6.3) |
 
 ### 6.3 Rematch
 
-On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`):
+A draw is replayed by **the same two players**. Neither is returned to open
+matchmaking, and neither can be paired with anyone else until the replay is
+made or the round closes.
 
-- Poll `GET /matches/current` again — `match` returns to `null` and `inQueue` becomes `true`.
-- A new match will be created when the pairing worker runs.
+On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`,
+`result.winnerId: null`):
+
+- Both players **leave the queue**. `GET /matches/current` returns `match: null`
+  **and `inQueue: false`** — this is the state to detect. It is not an error and
+  not a lost match.
+- Each player must **choose a new play window — a new date and time** before the
+  replay can be scheduled. Neither the window from the drawn match nor any other
+  default is carried over. This is done in the player app
+  (`POST /tournaments/:id/enter`); there is no VR-side call for it.
+- Once **both** have chosen, the pairing worker creates the new match between
+  those two and nobody else. `GET /matches/current` starts returning it, and its
+  `result.rematchOfMatchId` points at the drawn match.
 - Submit scores only to the **new** `match.id`.
+- If the round closes with only **one** of the two having chosen a window, that
+  player **wins by walkover** — a completed match appears with `walkover: true`
+  and `rematchOfMatchId` set. If neither chose, the draw simply stands.
+
+Nothing is required of the VR client beyond continuing to poll and surfacing
+"pick a new slot in the app to replay" while `match` is `null` and `inQueue` is
+`false` after a rematch.
 
 ### 6.4 Time windows
 
@@ -670,6 +689,20 @@ players submit a score exactly as in standard mode.
 An odd number of players leaves one with a **bye**: they play no match that
 round and simply keep polling until their next opponent is drawn.
 
+### 6.7 Advancing a round
+
+Winning a normal-round match does **not** put the player back into matchmaking.
+Rounds fall on different dates, so the window they played the last round in
+cannot schedule the next one. They leave the queue (`inQueue: false`) and choose
+a window for the new round in the player app — the time of day they last used is
+offered as the default, the date is theirs to pick.
+
+The same applies to a player who survives the standings cut when a round closes
+without them having played.
+
+For the VR client this is the same `match: null, inQueue: false` state as a
+rematch: keep polling, and the next match appears once a window is chosen.
+
 ---
 
 ## 7. Recommended VR client flow
@@ -698,6 +731,10 @@ round and simply keep polling until their next opponent is drawn.
                              ▼
               Poll GET /matches/current until
               match == null (finished / rematch / back in queue)
+
+  match == null && !inQueue  → the player has nothing scheduled.
+  After a draw, and after winning a round, this is the normal state:
+  they pick a play window in the app, and the next match appears here.
 ```
 
 ### Score submission checklist
@@ -736,7 +773,9 @@ round and simply keep polling until their next opponent is drawn.
 | 7 | Duplicate score | Same player POST again | `409` |
 | 8 | Wrong user | POST score with non-participant userId | `403` |
 | 9 | Chase win | Chaser score > chaseTarget | Chaser in `winnerId` |
-| 10 | Chase tie | Chaser score == chaseTarget | `cancelled`, rematch / re-queue |
+| 10 | Chase tie | Chaser score == chaseTarget | `cancelled`, `winnerId: null`, both leave the queue (`inQueue: false`) |
+| 10a | Rematch is exclusive | After the tie, one player picks a new slot and waits | No match — they are not paired with anyone else |
+| 10c | Rematch pairs the same two | Both players pick new slots | New match between the same pair, `result.rematchOfMatchId` set |
 | 10b | Setter cannot bat twice | Setter POST score in a chase | `409` — solo target already stands as their score |
 | 11 | Stale match id | POST score to a malformed / unknown id | `400` then `404` — never `500` |
 | 12 | Multi-headset venue | 3 userIds × 30 polls/min from one IP | No `429` |

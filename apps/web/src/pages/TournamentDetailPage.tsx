@@ -4,11 +4,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type {
   Tournament,
   TournamentBracket,
+  TournamentEntryState,
   TournamentParticipant,
   TournamentRegistration,
 } from '@vr-tournament/shared';
 import { apiDelete, apiGet, getAccessToken } from '@/lib/api';
-import { invalidateTournamentQueries } from '@/lib/query-keys';
+import { invalidateTournamentQueries, LIVE_STALE_TIME } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -56,6 +57,18 @@ export function TournamentDetailPage() {
     queryKey: ['tournament-participant', id],
     queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${id}/participant`),
     enabled: !!id && isLoggedIn && !!myRegistration,
+  });
+
+  // Nothing is scheduled on the player's behalf any more, so the page has to say
+  // when the next step is theirs: a round they have advanced into, or a draw they
+  // owe a replay for. Without it, a player who has done nothing wrong simply sees
+  // no match and no reason for it.
+  const { data: entryState } = useQuery({
+    queryKey: ['tournament-entry-state', id],
+    queryFn: () =>
+      apiGet<TournamentEntryState>(`/tournaments/${id}/entry-state`).catch(() => null),
+    enabled: !!id && isLoggedIn && !!myRegistration,
+    staleTime: LIVE_STALE_TIME,
   });
 
   useEffect(() => {
@@ -135,8 +148,15 @@ export function TournamentDetailPage() {
         )}
         {myRegistration && (
           <>
-            <Button variant="secondary" onClick={handleJoin}>
-              Pick slot & find next match
+            <Button
+              variant={entryState?.needsSlot ? 'default' : 'secondary'}
+              onClick={handleJoin}
+            >
+              {entryState?.reason === 'rematch'
+                ? 'Pick a new slot for your replay'
+                : entryState?.reason === 'new_round'
+                  ? `Pick your slot for round ${entryState.roundNumber}`
+                  : 'Pick slot & find next match'}
             </Button>
             <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
               {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
@@ -147,6 +167,28 @@ export function TournamentDetailPage() {
           <BuybackButton tournamentId={tournament.id} tournament={tournament} />
         )}
       </div>
+
+      {entryState?.reason === 'rematch' && entryState.rematch && (
+        <div className="rounded-xl border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-4 text-sm space-y-1">
+          <p className="font-semibold">
+            Your match with {entryState.rematch.opponentName ?? 'your opponent'} was a draw.
+          </p>
+          <p className="text-[var(--color-muted-foreground)]">
+            You replay the same opponent. Pick a new date and time before round{' '}
+            {entryState.roundNumber} closes — if only one of you does, the match goes to them.
+          </p>
+        </div>
+      )}
+
+      {entryState?.reason === 'new_round' && (
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 text-sm space-y-1">
+          <p className="font-semibold">You’re through to round {entryState.roundNumber}.</p>
+          <p className="text-[var(--color-muted-foreground)]">
+            Pick the date you want to play on — your usual time is preselected. You won’t be matched
+            until you have.
+          </p>
+        </div>
+      )}
 
       {/* Registration closes when the tournament leaves the open phase. */}
       {tournament.status !== 'open' && !myRegistration && (

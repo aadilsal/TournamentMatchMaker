@@ -3,13 +3,13 @@ import type { RedisClient } from './redis.js';
 import type { Env } from '../config/env.js';
 import type { MatchResultExtended } from '@vr-tournament/shared';
 import {
-  outcomeForWinner,
   resolveAbandonedMatch,
   resolveMatchOutcome,
   winnerIdFromOutcome,
 } from '@vr-tournament/shared';
 import { updateUserRating } from './rating.js';
 import { requeuePlayer, removeFromQueue } from './requeue-player.js';
+import { openRematch } from './rematch.js';
 import { enqueueNotification } from './bullmq.js';
 import { TournamentsService } from '../modules/tournaments/tournaments.service.js';
 import { emitMatchUpdated } from '../socket/sync-events.js';
@@ -45,6 +45,7 @@ export async function applyMatchOutcome(
   }
 
   if (outcome === 'rematch') {
+    const roundNumber = match.round_number ?? 1;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -52,6 +53,20 @@ export async function applyMatchOutcome(
         `UPDATE matches SET status = 'cancelled', result = $1, updated_at = NOW() WHERE id = $2`,
         [JSON.stringify({ ...result, player1Score, player2Score, outcome: 'rematch' }), matchId]
       );
+      // The instruction to replay is committed with the cancellation, so the
+      // pair can never end up with a dead match and nothing telling the queue
+      // they belong to each other. Knockout is excluded: those matches are
+      // drawn by the bracket rather than picked out of the queue, so a pin the
+      // queue would have to consume has nothing to act on there.
+      if (match.tournament_id && match.phase !== 'knockout') {
+        await openRematch(client, {
+          tournamentId: match.tournament_id,
+          roundNumber,
+          sourceMatchId: matchId,
+          player1Id: match.player1_id,
+          player2Id: match.player2_id,
+        });
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
@@ -60,15 +75,49 @@ export async function applyMatchOutcome(
       client.release();
     }
 
-    if (match.tournament_id) {
-      const roundNumber = match.round_number ?? 1;
+    if (match.phase === 'knockout') {
+      // A bracket slot has no window to pick and no queue pin to honour, so a
+      // drawn knockout match goes back the way it always has: both players
+      // returned to the queue for their bracket round, which pairs them with
+      // each other because nobody else is in it.
+      if (match.tournament_id) {
+        for (const userId of [match.player1_id, match.player2_id]) {
+          await requeuePlayer(pool, redis, userId, {
+            tournamentId: match.tournament_id,
+            roundNumber,
+            allowWithoutSlot: true,
+          }, env);
+        }
+      }
+    } else {
+      // Neither player is put back in the queue here. A draw is replayed against
+      // the same opponent, at a window both of them have to choose again — an
+      // automatic requeue on the window they just used would pair whoever came
+      // back first with whatever stranger was waiting, which is the one thing a
+      // rematch must not do. They re-enter through the slot picker, and the pin
+      // written above is what brings them back to each other.
       for (const userId of [match.player1_id, match.player2_id]) {
-        // requeuePlayer recovers the player's chosen play window for this round,
-        // so a rematch keeps a playable slot for VR and venue players alike.
-        await requeuePlayer(pool, redis, userId, {
-          tournamentId: match.tournament_id,
-          roundNumber,
-        }, env);
+        await removeFromQueue(redis, userId);
+      }
+    }
+
+    if (env && match.tournament_id && match.phase !== 'knockout') {
+      for (const [userId, opponentId] of [
+        [match.player1_id, match.player2_id],
+        [match.player2_id, match.player1_id],
+      ]) {
+        enqueueNotification(env, {
+          userId,
+          type: 'rematch_required',
+          channels: ['in_app'],
+          payload: {
+            matchId,
+            tournamentId: match.tournament_id,
+            roundNumber,
+            opponentId,
+          },
+          idempotencyKey: `rematch-required:${matchId}:${userId}`,
+        }).catch(console.error);
       }
     }
 
@@ -122,7 +171,7 @@ export async function applyMatchWinner(
   const finalResult: MatchResultExtended = {
     ...result,
     winnerId,
-    outcome: outcomeForWinner(winnerId, match.player1_id),
+    outcome: 'win',
     source: result.source ?? 'meta',
   };
 
@@ -163,20 +212,12 @@ export async function applyMatchWinner(
         [match.tournament_id, loserId]
       );
 
-      // The winner carries their previously chosen play window into the next
-      // round by default; requeuePlayer resolves it from tournament_round_slots.
-      await client.query(
-        `INSERT INTO tournament_round_slots
-           (tournament_id, user_id, round_number, time_slot_id, venue_id, booking_id)
-         SELECT rs.tournament_id, rs.user_id, $1, rs.time_slot_id, rs.venue_id, rs.booking_id
-         FROM tournament_round_slots rs
-         JOIN time_slots ts ON ts.id = rs.time_slot_id
-         WHERE rs.tournament_id = $2 AND rs.user_id = $3 AND ts.end_time > NOW()
-         ORDER BY rs.round_number DESC
-         LIMIT 1
-         ON CONFLICT (tournament_id, user_id, round_number) DO NOTHING`,
-        [winnerNextRound, match.tournament_id, winnerId]
-      );
+      // No window is carried into the next round. The round the winner just
+      // finished had a date attached to it, and the next one does not fall on
+      // the same day — copying the slot row forward scheduled them into a
+      // window that had already passed, or into one they never agreed to. They
+      // pick again through the slot picker, which offers the time of day they
+      // last used as the default and asks them for the date.
     }
 
     await client.query('COMMIT');
@@ -191,10 +232,11 @@ export async function applyMatchWinner(
     const tournamentsService = new TournamentsService(pool, redis, env);
     await tournamentsService.advanceKnockoutWinner(matchId, winnerId);
   } else if (winnerNextRound !== null && match.tournament_id) {
-    await requeuePlayer(pool, redis, winnerId, {
-      tournamentId: match.tournament_id,
-      roundNumber: winnerNextRound,
-    }, env);
+    // Both leave the queue: the loser for good, the winner until they have
+    // chosen a window for the round they just reached. Leaving the winner
+    // queued on the entry from the round they finished is what let them be
+    // paired for a round they had not scheduled themselves into.
+    await removeFromQueue(redis, winnerId);
     await removeFromQueue(redis, loserId);
   }
 
@@ -203,9 +245,25 @@ export async function applyMatchWinner(
       userId: winnerId,
       type: 'match_won',
       channels: ['in_app'],
-      payload: { matchId },
+      payload: { matchId, tournamentId: match.tournament_id, nextRound: winnerNextRound },
       idempotencyKey: `match-won:${matchId}:${winnerId}`,
     }).catch(console.error);
+
+    // Advancing now leaves the player with nothing scheduled, so the prompt to
+    // pick a window is the only thing standing between them and a round they
+    // sit out without ever being told why.
+    if (winnerNextRound !== null && match.tournament_id) {
+      enqueueNotification(env, {
+        userId: winnerId,
+        type: 'slot_selection_required',
+        channels: ['in_app'],
+        payload: {
+          tournamentId: match.tournament_id,
+          roundNumber: winnerNextRound,
+        },
+        idempotencyKey: `slot-required:${match.tournament_id}:${winnerId}:${winnerNextRound}`,
+      }).catch(console.error);
+    }
     enqueueNotification(env, {
       userId: loserId,
       type: 'match_lost',
@@ -271,15 +329,91 @@ export async function settleOpenMatches(
 
     await client.query(
       `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+      [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+    );
+    await client.query(
+      `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+       WHERE tournament_id = $1 AND user_id = $2`,
+      [tournamentId, winnerId]
+    );
+    await client.query(
+      `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+       WHERE tournament_id = $1 AND user_id = $2`,
+      [tournamentId, loserId]
+    );
+  }
+}
+
+/**
+ * Settle every draw in this round that was never replayed.
+ *
+ * A replay needs both players to come back and pick a window, and only one of
+ * them may do so. Left alone that is indistinguishable from neither turning up,
+ * and the player who did their part is cut on the same footing as the one who
+ * ignored it — so the rule an abandoned match already gets applies here too:
+ * the side that showed up takes the walkover. A match row is written for it so
+ * the result is visible in the players' history rather than existing only as a
+ * number in the standings. Ratings are left alone, as with any walkover.
+ *
+ * The worker keeps its own copy of this in `close-round.job.ts`, and the two
+ * must agree.
+ */
+export async function settleUnplayedRematches(
+  client: Queryable,
+  tournamentId: string,
+  roundNumber: number
+): Promise<void> {
+  const pending = await client.query(
+    `SELECT id, source_match_id, player1_id, player2_id, player1_slot_id, player2_slot_id
+     FROM tournament_rematches
+     WHERE tournament_id = $1 AND round_number = $2 AND status = 'pending'
+     FOR UPDATE`,
+    [tournamentId, roundNumber]
+  );
+
+  for (const rematch of pending.rows) {
+    const p1Ready = rematch.player1_slot_id !== null;
+    const p2Ready = rematch.player2_slot_id !== null;
+
+    // Both came back but were never paired, or neither did. Either way there is
+    // no basis for handing one of them a win, so the draw stands.
+    if (p1Ready === p2Ready) {
+      await client.query(
+        `UPDATE tournament_rematches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [rematch.id]
+      );
+      continue;
+    }
+
+    const winnerId = p1Ready ? rematch.player1_id : rematch.player2_id;
+    const loserId = p1Ready ? rematch.player2_id : rematch.player1_id;
+
+    const walkover = await client.query(
+      `INSERT INTO matches
+         (tournament_id, player1_id, player2_id, status, round_number, phase, result)
+       VALUES ($1, $2, $3, 'completed', $4, 'normal', $5)
+       RETURNING id`,
       [
+        tournamentId,
+        rematch.player1_id,
+        rematch.player2_id,
+        roundNumber,
         JSON.stringify({
-          ...result,
+          player1Score: null,
+          player2Score: null,
           winnerId,
-          outcome: outcomeForWinner(winnerId, match.player1_id),
+          outcome: 'win',
           walkover: true,
+          rematchOfMatchId: rematch.source_match_id,
         }),
-        match.id,
       ]
+    );
+
+    await client.query(
+      `UPDATE tournament_rematches
+       SET status = 'expired', match_id = $1, updated_at = NOW()
+       WHERE id = $2`,
+      [walkover.rows[0].id, rematch.id]
     );
     await client.query(
       `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()

@@ -1,7 +1,3 @@
-// Type-only, so the cycle with match-resolution.ts (which imports
-// MatchResultExtended from here) is erased at compile time.
-import type { PersistedOutcome } from './match-resolution.js';
-
 export type UserRole = 'player' | 'venue_admin' | 'tournament_admin' | 'superadmin';
 
 export type SlotStatus = 'available' | 'full' | 'locked';
@@ -286,6 +282,48 @@ export interface EnterTournamentResult {
   booking: Booking | null;
   roundSlot: TournamentRoundSlot | null;
   searching: boolean;
+  /** Set when this entry was the return leg of a draw. */
+  rematch: PendingRematch | null;
+}
+
+/** A draw the player still owes, from the perspective of the player asking. */
+export interface PendingRematch {
+  id: string;
+  tournamentId: string;
+  roundNumber: number;
+  sourceMatchId: string;
+  opponentId: string;
+  opponentName: string | null;
+  /** Whether this player has already picked their window for the replay. */
+  hasChosenSlot: boolean;
+  /** Whether the opponent has — the UI says "waiting for them" rather than "searching". */
+  opponentHasChosenSlot: boolean;
+}
+
+/**
+ * Why the player is being asked to pick a play window, and what to default it
+ * to. `reason` is what the screen leads with; the two flags below are the rules
+ * the client would otherwise have to re-derive from the round number.
+ */
+export type EntryReason = 'none' | 'first_entry' | 'new_round' | 'rematch';
+
+export interface TournamentEntryState {
+  roundNumber: number;
+  /** No playable window held for this round — nothing can be paired until there is one. */
+  needsSlot: boolean;
+  reason: EntryReason;
+  /**
+   * Whether to preselect the time of day the player last used. True when they
+   * advance a round — same time, new date. False after a draw, where the replay
+   * is a fresh pick, and false on a first entry, where there is nothing to
+   * carry.
+   */
+  carryPreviousTime: boolean;
+  /** The window they last held — the source of the carried time, never of the date. */
+  previousSlot: TournamentRoundSlot | null;
+  /** The window they hold for this round, once chosen. */
+  currentSlot: TournamentRoundSlot | null;
+  rematch: PendingRematch | null;
 }
 
 export type MatchScoreSource = 'meta' | 'manual';
@@ -303,13 +341,12 @@ export interface MatchResultExtended extends MatchResult {
   chasePlayerId?: string | null;
   source?: MatchScoreSource;
   /**
-   * How the match was decided, named from the match's own side — not the
-   * reader's. `'win'` is the legacy value on matches decided before the sides
-   * were named; it carries no information about which player won, so read
-   * `winnerId` for those. `'loss'` and `'solo_pending'` were declared here but
-   * never written by any code path, and are gone.
+   * How the match ended. It names no side: `'win'` is written on every decided
+   * match whoever won, so it cannot answer "did my player win?" — read
+   * `winnerId` for that, and treat a null `winnerId` on a `'rematch'` as "no
+   * winner yet, the pair plays again".
    */
-  outcome?: PersistedOutcome | 'win' | null;
+  outcome?: 'win' | 'loss' | 'rematch' | 'solo_pending' | null;
 }
 
 export interface MatchConfirmations {

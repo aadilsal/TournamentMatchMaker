@@ -8,6 +8,7 @@ import type {
   Tournament,
   TournamentListQuery,
   TournamentMatchesQuery,
+  TournamentEntryState,
   TournamentRoundSlot,
   TournamentSlotOptionsQuery,
   TournamentUpdatedReason,
@@ -34,6 +35,7 @@ import {
   KNOCKOUT_ROUNDS,
   knockoutDraw,
   knockoutRoundLabel,
+  queuePlayerKey,
   playersToAdvance,
   resolveFieldSize,
   shouldStartKnockout,
@@ -44,7 +46,8 @@ import {
 import { createBuybackPaymentIntent } from '../../lib/stripe.js';
 import { emitTournamentUpdated } from '../../socket/sync-events.js';
 import { emitToUser } from '../../socket/emitters.js';
-import { settleOpenMatches } from '../../lib/match-outcome.js';
+import { settleOpenMatches, settleUnplayedRematches } from '../../lib/match-outcome.js';
+import { getPendingRematch, recordRematchSlot } from '../../lib/rematch.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -615,6 +618,15 @@ export class TournamentsService {
       bookingId,
     });
 
+    // A player returning from a draw is pinned to the opponent they drew with.
+    // The pin travels on the queue entry, so pairing can honour it without
+    // reading the database, and the pick itself is recorded on the rematch so
+    // round close can tell which of the two came back.
+    const rematch = await getPendingRematch(this.pool, tournamentId, userId);
+    if (rematch) {
+      await recordRematchSlot(this.pool, rematch.id, userId, slot.slotId);
+    }
+
     await removeFromQueue(this.redis, userId);
     await requeuePlayer(this.pool, this.redis, userId, {
       tournamentId,
@@ -624,6 +636,8 @@ export class TournamentsService {
       slotId: slot.slotId,
       slotStartAt: new Date(slot.startTime).getTime(),
       slotEndAt: new Date(slot.endTime).getTime(),
+      rematchWith: rematch?.opponentId ?? null,
+      rematchId: rematch?.id ?? null,
     }, this.env);
 
     await this.broadcastTournamentUpdate(tournamentId, existingReg ? 'entered' : 'registered');
@@ -633,6 +647,71 @@ export class TournamentsService {
       booking,
       roundSlot,
       searching: true,
+      rematch: rematch ? { ...rematch, hasChosenSlot: true } : null,
+    };
+  }
+
+  /**
+   * What the entry screen needs to know before it can ask for anything.
+   *
+   * The client would otherwise have to infer all of this from the round number
+   * and a slot lookup, and get it wrong in the two cases that matter: a player
+   * who has advanced holds a window for the round they *finished*, which looks
+   * like a window until you check the round it belongs to, and a player who
+   * drew holds one that is still live and still theirs — it is simply not
+   * allowed to stand in for the replay.
+   */
+  async getEntryState(tournamentId: string, userId: string): Promise<TournamentEntryState> {
+    const tournament = await this.getById(tournamentId);
+    const participant = await this.getParticipant(tournamentId, userId);
+    const roundNumber = participant?.roundNumber ?? tournament.currentRoundNumber ?? 1;
+
+    const [currentSlot, previousSlot, rematch] = await Promise.all([
+      this.getRoundSlot(tournamentId, userId, roundNumber),
+      this.getLatestRoundSlot(tournamentId, userId),
+      getPendingRematch(this.pool, tournamentId, userId),
+    ]);
+
+    // A window that has already ended is not one they can play in, so it does
+    // not count as holding one — this is the same rule the queue applies.
+    const currentSlotLive =
+      currentSlot?.slot != null && new Date(currentSlot.slot.endTime).getTime() > Date.now();
+
+    // The draw is asked first: a drawn player holds a live window for this round
+    // and still has to pick again, so answering "do they hold one?" first would
+    // report them as ready when they are not.
+    if (rematch && !rematch.hasChosenSlot) {
+      return {
+        roundNumber,
+        needsSlot: true,
+        reason: 'rematch',
+        carryPreviousTime: false,
+        previousSlot: null,
+        currentSlot: currentSlotLive ? currentSlot : null,
+        rematch,
+      };
+    }
+
+    if (currentSlotLive) {
+      return {
+        roundNumber,
+        needsSlot: false,
+        reason: 'none',
+        carryPreviousTime: false,
+        previousSlot,
+        currentSlot,
+        rematch,
+      };
+    }
+
+    return {
+      roundNumber,
+      needsSlot: true,
+      reason: previousSlot ? 'new_round' : 'first_entry',
+      carryPreviousTime: previousSlot != null,
+      previousSlot,
+      currentSlot: null,
+      rematch,
     };
   }
 
@@ -749,7 +828,13 @@ export class TournamentsService {
       params
     );
 
-    const previous = await this.getLatestRoundSlot(tournamentId, userId);
+    // A replay is a fresh choice of date *and* time, so the window they used
+    // for the drawn match is not offered back to them as the default. Everywhere
+    // else the last window is the sensible default: the round has moved to a new
+    // date, but the time of day they can play at rarely has.
+    const rematch = await getPendingRematch(this.pool, tournamentId, userId);
+    const isRematchPick = rematch != null && !rematch.hasChosenSlot;
+    const previous = isRematchPick ? null : await this.getLatestRoundSlot(tournamentId, userId);
 
     let rows = result.rows;
     if (hasVr) {
@@ -776,6 +861,7 @@ export class TournamentsService {
         : null,
       defaultTimeSlotId: previous?.timeSlotId ?? null,
       previousSlot: previous,
+      rematch,
       slots: rows.map((row) => ({
         ...mapSlot(row),
         venue: {
@@ -1060,6 +1146,8 @@ export class TournamentsService {
     }
     const toNotify: MatchNotification[] = [];
     const toRequeue: string[] = [];
+    /** Opponents whose rematch pin this withdrawal cancels. */
+    const unpinned: string[] = [];
 
     try {
       await client.query('BEGIN');
@@ -1086,6 +1174,22 @@ export class TournamentsService {
         `DELETE FROM tournament_round_slots WHERE tournament_id = $1 AND user_id = $2`,
         [tournamentId, userId]
       );
+
+      // A replay this player owed can never happen now, and the pin on the other
+      // side of it would leave their opponent unpairable for the rest of the
+      // round — refusing every opponent in the queue while waiting for someone
+      // who has left the tournament.
+      const freed = await client.query(
+        `UPDATE tournament_rematches
+         SET status = 'expired', updated_at = NOW()
+         WHERE tournament_id = $1 AND status = 'pending'
+           AND (player1_id = $2 OR player2_id = $2)
+         RETURNING CASE WHEN player1_id = $2 THEN player2_id ELSE player1_id END AS opponent_id`,
+        [tournamentId, userId]
+      );
+      for (const row of freed.rows) {
+        unpinned.push(row.opponent_id as string);
+      }
 
       const activeMatches = await client.query(
         `SELECT * FROM matches
@@ -1142,6 +1246,15 @@ export class TournamentsService {
       await client.query('COMMIT');
 
       await removeFromQueue(this.redis, userId);
+
+      // The pin lives on the queue entry as well as in the database, so clearing
+      // it in one place is not enough — an entry still carrying `rematchWith`
+      // pairs with nobody.
+      for (const otherId of unpinned) {
+        if (await this.redis.exists(queuePlayerKey(otherId))) {
+          await this.redis.hset(queuePlayerKey(otherId), { rematchWith: '', rematchId: '' });
+        }
+      }
 
       for (const otherId of toRequeue) {
         await requeuePlayer(this.pool, this.redis, otherId, { tournamentId }, this.env);
@@ -1276,6 +1389,7 @@ export class TournamentsService {
       // shuts — `assertMatchSlotPlayable` refuses it — and while it stays open
       // the `hasActiveMatch` guard keeps both players out of the next round.
       await settleOpenMatches(client, tournamentId, roundNumber);
+      await settleUnplayedRematches(client, tournamentId, roundNumber);
 
       const tournamentResult = await client.query(
         `SELECT initial_player_count, round_duration_minutes FROM tournaments WHERE id = $1`,

@@ -1,7 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   initialScoresForChase,
-  outcomeForWinner,
   resolveAbandonedMatch,
   resolveChaseOnPair,
   resolveMatchOutcome,
@@ -98,14 +97,5 @@ describe('chase resolution from the seeded scoreline', () => {
     const p1Chases = { chaseTarget: 55, chasePlayerId: P1 };
     expect(resolveMatchOutcome(P1, P2, 56, 55, p1Chases)).toBe('player1_win');
     expect(resolveMatchOutcome(P1, P2, 54, 55, p1Chases)).toBe('player2_win');
-  });
-});
-
-describe('the outcome stored on a decided match', () => {
-  it('names the side that won instead of a bare "win"', () => {
-    // The chaser posting a losing innings is the case that made a flat 'win'
-    // read as "you won" to whoever submitted it. It is the setter's win.
-    expect(outcomeForWinner(P1, P1)).toBe('player1_win');
-    expect(outcomeForWinner(P2, P1)).toBe('player2_win');
   });
 });

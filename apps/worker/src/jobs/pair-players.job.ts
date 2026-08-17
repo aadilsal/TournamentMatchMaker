@@ -301,6 +301,7 @@ async function pairInQueue(
       soloPlayedAt: meta.soloPlayedAt ? parseInt(meta.soloPlayedAt, 10) : undefined,
       slotStartAt: meta.slotStartAt ? parseInt(meta.slotStartAt, 10) : null,
       slotEndAt: meta.slotEndAt ? parseInt(meta.slotEndAt, 10) : null,
+      rematchWith: meta.rematchWith || null,
     });
   }
 
@@ -517,6 +518,32 @@ async function pairInQueue(
     // an innings to play. Standard mode starts empty, as before.
     const initialScores = initialScoresForChase(candidate.userId, chase);
 
+    // Both halves of the pin have to agree before this counts as the replay of
+    // a draw. `scorePair` already refuses to pair a pinned entry with anyone
+    // else, so a disagreement here means one side's entry was rewritten between
+    // the scoring pass and this insert — treat it as an ordinary match rather
+    // than closing out a rematch these two did not just play.
+    const rematchId =
+      p1Meta.rematchId &&
+      p1Meta.rematchId === p2Meta.rematchId &&
+      p1Meta.rematchWith === partner.userId &&
+      p2Meta.rematchWith === candidate.userId
+        ? p1Meta.rematchId
+        : null;
+
+    // Locked here rather than after the insert so two pairing passes cannot both
+    // claim the same draw: the loser of the race finds it no longer 'pending'
+    // and creates a plain match instead of a second replay of one draw.
+    let rematchSourceMatchId: string | null = null;
+    if (rematchId) {
+      const claim = await client.query(
+        `SELECT source_match_id FROM tournament_rematches
+         WHERE id = $1 AND status = 'pending' FOR UPDATE`,
+        [rematchId]
+      );
+      rematchSourceMatchId = claim.rows[0]?.source_match_id ?? null;
+    }
+
     const initialResult = {
       ...initialScores,
       winnerId: null,
@@ -525,6 +552,7 @@ async function pairInQueue(
       chaseTarget: chase.chaseTarget,
       chasePlayerId: chase.chasePlayerId,
       source: 'meta' as const,
+      ...(rematchSourceMatchId ? { rematchOfMatchId: rematchSourceMatchId } : {}),
     };
 
     const autoConfirm = !!tournamentId;
@@ -548,6 +576,15 @@ async function pairInQueue(
       ]
     );
     const matchId = matchResult.rows[0].id;
+
+    if (rematchId && rematchSourceMatchId) {
+      await client.query(
+        `UPDATE tournament_rematches
+         SET status = 'paired', match_id = $1, updated_at = NOW()
+         WHERE id = $2 AND status = 'pending'`,
+        [matchId, rematchId]
+      );
+    }
 
     // Only reserve venue capacity when the slot was picked for this match and
     // someone is actually attending it in person.

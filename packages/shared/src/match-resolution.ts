@@ -143,26 +143,6 @@ export function resolveMatchOutcome(
   return player1Score > player2Score ? 'player1_win' : 'player2_win';
 }
 
-/**
- * The `outcome` written onto a decided match's stored result.
- *
- * Every decided match used to store a flat `'win'`, whoever won. That reads as
- * a statement about whoever is holding the response — "you won" — but it is
- * stored once on the match from nobody's perspective, so an integrator asking
- * "did my player win?" of it was right half the time. The winner only ever
- * lived in `winnerId`, and a chase makes the trap easy to fall into: the chaser
- * posts their innings, the response comes back `"outcome": "win"`, and it means
- * the *setter* won on a score the chaser never beat.
- *
- * Naming the side makes the field answer the question it looks like it answers.
- * Matches decided before this change still read `'win'`.
- */
-export type PersistedOutcome = 'player1_win' | 'player2_win' | 'rematch';
-
-export function outcomeForWinner(winnerId: string, player1Id: string): PersistedOutcome {
-  return winnerId === player1Id ? 'player1_win' : 'player2_win';
-}
-
 export function winnerIdFromOutcome(
   outcome: MatchOutcome,
   player1Id: string,

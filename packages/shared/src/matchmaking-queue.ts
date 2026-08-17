@@ -32,6 +32,10 @@ export interface QueuePlayerHash {
   slotId: string;
   slotStartAt: string;
   slotEndAt: string;
+  /** Opponent this entry is pinned to after a draw — empty for an open entry. */
+  rematchWith: string;
+  /** The drawn match being replayed, so the new match can point back at it. */
+  rematchId: string;
 }
 
 export interface QueuePlayerMeta {
@@ -53,6 +57,8 @@ export interface QueuePlayerMeta {
   slotId: string | null;
   slotStartAt: number | null;
   slotEndAt: number | null;
+  rematchWith: string | null;
+  rematchId: string | null;
 }
 
 export interface BuildQueuePlayerHashInput {
@@ -74,6 +80,8 @@ export interface BuildQueuePlayerHashInput {
   slotId?: string | null;
   slotStartAt?: number | null;
   slotEndAt?: number | null;
+  rematchWith?: string | null;
+  rematchId?: string | null;
 }
 
 export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePlayerHash {
@@ -98,6 +106,8 @@ export function buildQueuePlayerHash(input: BuildQueuePlayerHashInput): QueuePla
     slotId: input.slotId ?? '',
     slotStartAt: input.slotStartAt != null ? String(input.slotStartAt) : '',
     slotEndAt: input.slotEndAt != null ? String(input.slotEndAt) : '',
+    rematchWith: input.rematchWith ?? '',
+    rematchId: input.rematchId ?? '',
   };
 }
 
@@ -122,5 +132,7 @@ export function parseQueuePlayerMeta(hash: Record<string, string>): QueuePlayerM
     slotId: hash.slotId || null,
     slotStartAt: hash.slotStartAt ? parseInt(hash.slotStartAt, 10) : null,
     slotEndAt: hash.slotEndAt ? parseInt(hash.slotEndAt, 10) : null,
+    rematchWith: hash.rematchWith || null,
+    rematchId: hash.rematchId || null,
   };
 }
