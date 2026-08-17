@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import {
+  outcomeForWinner,
   queuePlayerKey,
   QUEUE_MEMBER,
   queueTournamentKey,
@@ -60,7 +61,15 @@ export async function processExpireUnplayedSlotsJob(
           const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
           await client.query(
             `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
-            [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+            [
+              JSON.stringify({
+                ...result,
+                winnerId,
+                outcome: outcomeForWinner(winnerId, match.player1_id),
+                walkover: true,
+              }),
+              match.id,
+            ]
           );
           if (match.tournament_id) {
             await client.query(

@@ -122,20 +122,45 @@ export function resolveMatchOutcome(
   chase: Pick<MatchResultExtended, 'chaseTarget' | 'chasePlayerId'>
 ): MatchOutcome {
   if (chase.chaseTarget != null && chase.chasePlayerId) {
-    const chaseTarget = chase.chaseTarget;
     const chaserScore = chase.chasePlayerId === player1Id ? player1Score : player2Score;
     const setterId = chase.chasePlayerId === player1Id ? player2Id : player1Id;
     const setterScore = setterId === player1Id ? player1Score : player2Score;
 
+    // Both comparisons read the same number. They used to disagree: the tie was
+    // checked against the setter's score on the board, the win against
+    // `chaseTarget`. Those are the same value only because pairing seeds the
+    // setter's half *from* the target — let them drift by one correction and a
+    // chaser could be handed the match with fewer runs than the opponent the
+    // scoreline showed. The innings on the board decides; `chaseTarget` is the
+    // copy of it the chaser was shown while batting.
     if (chaserScore === setterScore) return 'rematch';
-    if (chaserScore > chaseTarget) {
-      return chase.chasePlayerId === player1Id ? 'player1_win' : 'player2_win';
-    }
-    return chase.chasePlayerId === player1Id ? 'player2_win' : 'player1_win';
+    const chaserWon = chaserScore > setterScore;
+    const chaserIsPlayer1 = chase.chasePlayerId === player1Id;
+    return chaserWon === chaserIsPlayer1 ? 'player1_win' : 'player2_win';
   }
 
   if (player1Score === player2Score) return 'rematch';
   return player1Score > player2Score ? 'player1_win' : 'player2_win';
+}
+
+/**
+ * The `outcome` written onto a decided match's stored result.
+ *
+ * Every decided match used to store a flat `'win'`, whoever won. That reads as
+ * a statement about whoever is holding the response — "you won" — but it is
+ * stored once on the match from nobody's perspective, so an integrator asking
+ * "did my player win?" of it was right half the time. The winner only ever
+ * lived in `winnerId`, and a chase makes the trap easy to fall into: the chaser
+ * posts their innings, the response comes back `"outcome": "win"`, and it means
+ * the *setter* won on a score the chaser never beat.
+ *
+ * Naming the side makes the field answer the question it looks like it answers.
+ * Matches decided before this change still read `'win'`.
+ */
+export type PersistedOutcome = 'player1_win' | 'player2_win' | 'rematch';
+
+export function outcomeForWinner(winnerId: string, player1Id: string): PersistedOutcome {
+  return winnerId === player1Id ? 'player1_win' : 'player2_win';
 }
 
 export function winnerIdFromOutcome(

@@ -5,6 +5,7 @@ import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
 import { removeFromQueue } from '../lib/queue-cleanup.js';
 import {
   knockoutDraw,
+  outcomeForWinner,
   playersToAdvance,
   queuePlayerKey,
   resolveAbandonedMatch,
@@ -391,7 +392,15 @@ async function settleOpenMatches(
            result = $1,
            updated_at = NOW()
        WHERE id = $2`,
-      [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+      [
+        JSON.stringify({
+          ...result,
+          winnerId,
+          outcome: outcomeForWinner(winnerId, match.player1_id),
+          walkover: true,
+        }),
+        match.id,
+      ]
     );
     await client.query(
       `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()

@@ -389,13 +389,22 @@ on the board when the match was created.
       "chaseTarget": 87,
       "chasePlayerId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
       "source": "meta",
-      "outcome": "win"
+      "outcome": "player1_win"
     }
   },
   "error": null,
   "meta": {}
 }
 ```
+
+> **`outcome` describes the match, not the caller.** `player1_win` / `player2_win`
+> name the winning side of the match — they are **not** relative to the `userId`
+> you posted. Submitting a losing chase returns `player2_win` (the setter's win)
+> to the chaser. To answer *"did my player win?"*, compare
+> `result.winnerId === userId`; never read `outcome` for that.
+>
+> Matches decided before this change store a flat `"outcome": "win"`, which names
+> no side at all — read `winnerId` for those.
 
 #### Error responses
 
@@ -600,11 +609,16 @@ in VR at the same moment.
 
 **Chase resolution (on the chaser's score):**
 
-| Condition | Result |
-|-----------|--------|
-| Chaser score **>** `chaseTarget` | Chaser wins |
-| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins |
-| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued |
+| Condition | Result | `result.outcome` |
+|-----------|--------|------------------|
+| Chaser score **>** `chaseTarget` | Chaser wins | `player1_win` / `player2_win` — whichever side the chaser is |
+| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins | `player1_win` / `player2_win` — whichever side the setter is |
+| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued | `rematch` |
+
+The target must be **exceeded**, not matched. A chaser posting `70` against a
+`chaseTarget` of `87` loses, and the response carries the **setter's** win — with
+`winnerId` set to the setter, and `chaseTarget`/`player1Score`/`player2Score`
+showing the full scoreline.
 
 If both players had solo targets, the **earlier** `soloPlayedAt` timestamp sets the chase; the other player chases — their own earlier solo target is not carried into the match, they play a live chase innings against the target.
 

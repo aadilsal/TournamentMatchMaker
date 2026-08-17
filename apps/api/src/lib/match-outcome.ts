@@ -3,6 +3,7 @@ import type { RedisClient } from './redis.js';
 import type { Env } from '../config/env.js';
 import type { MatchResultExtended } from '@vr-tournament/shared';
 import {
+  outcomeForWinner,
   resolveAbandonedMatch,
   resolveMatchOutcome,
   winnerIdFromOutcome,
@@ -121,7 +122,7 @@ export async function applyMatchWinner(
   const finalResult: MatchResultExtended = {
     ...result,
     winnerId,
-    outcome: 'win',
+    outcome: outcomeForWinner(winnerId, match.player1_id),
     source: result.source ?? 'meta',
   };
 
@@ -270,7 +271,15 @@ export async function settleOpenMatches(
 
     await client.query(
       `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
-      [JSON.stringify({ ...result, winnerId, outcome: 'win', walkover: true }), match.id]
+      [
+        JSON.stringify({
+          ...result,
+          winnerId,
+          outcome: outcomeForWinner(winnerId, match.player1_id),
+          walkover: true,
+        }),
+        match.id,
+      ]
     );
     await client.query(
       `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()

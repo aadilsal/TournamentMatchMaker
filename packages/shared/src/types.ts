@@ -1,3 +1,7 @@
+// Type-only, so the cycle with match-resolution.ts (which imports
+// MatchResultExtended from here) is erased at compile time.
+import type { PersistedOutcome } from './match-resolution.js';
+
 export type UserRole = 'player' | 'venue_admin' | 'tournament_admin' | 'superadmin';
 
 export type SlotStatus = 'available' | 'full' | 'locked';
@@ -298,7 +302,14 @@ export interface MatchResultExtended extends MatchResult {
   chaseTarget?: number | null;
   chasePlayerId?: string | null;
   source?: MatchScoreSource;
-  outcome?: 'win' | 'loss' | 'rematch' | 'solo_pending' | null;
+  /**
+   * How the match was decided, named from the match's own side — not the
+   * reader's. `'win'` is the legacy value on matches decided before the sides
+   * were named; it carries no information about which player won, so read
+   * `winnerId` for those. `'loss'` and `'solo_pending'` were declared here but
+   * never written by any code path, and are gone.
+   */
+  outcome?: PersistedOutcome | 'win' | null;
 }
 
 export interface MatchConfirmations {
