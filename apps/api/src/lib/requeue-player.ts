@@ -28,16 +28,6 @@ export interface RequeueOptions {
   slotEndAt?: number | null;
   /** Update queue metadata even when already in queue */
   refreshIfQueued?: boolean;
-  /** Opponent this entry is pinned to after a draw — it will pair with nobody else. */
-  rematchWith?: string | null;
-  rematchId?: string | null;
-  /**
-   * Queue a tournament player who holds no window for their round. Only the
-   * admin queue tools set this: every ordinary path reaches the queue through
-   * the slot picker, and skipping the check there is what produced entries that
-   * could be paired into a round the player had never scheduled themselves for.
-   */
-  allowWithoutSlot?: boolean;
 }
 
 export async function hasActiveMatch(pool: Pool, userId: string): Promise<boolean> {
@@ -125,21 +115,16 @@ export async function requeuePlayer(
   let soloTarget = options.soloTarget ?? null;
   let soloPlayedAt = options.soloPlayedAt ?? null;
 
-  // Every tournament entry owns a play window, and it belongs to one specific
-  // round. Recovering the newest row regardless of round let a player be queued
-  // for round 3 on the window they chose for round 2 — a date that had already
-  // passed — so the lookup now demands a window for *this* round that has not
-  // ended. A player without one is not queued at all: they are waiting on the
-  // slot picker, and an entry made on their behalf here is exactly the silent
-  // scheduling this flow exists to prevent.
+  // Every tournament entry owns a play window. Recover it from the round the
+  // player is in so requeues after a win/rematch keep a playable slot instead of
+  // producing a match with no time slot at all.
   if (tournamentId && !slotId) {
     const roundSlot = await pool.query(
       `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
        FROM tournament_round_slots rs
        JOIN time_slots ts ON ts.id = rs.time_slot_id
        WHERE rs.tournament_id = $1 AND rs.user_id = $2
-         AND rs.round_number = $3
-         AND ts.end_time > NOW()
+       ORDER BY (rs.round_number = $3) DESC, rs.round_number DESC
        LIMIT 1`,
       [tournamentId, userId, roundNumber]
     );
@@ -184,10 +169,6 @@ export async function requeuePlayer(
     }
   }
 
-  // Checked after the booking fallback, so a player whose window is recorded
-  // only as a confirmed booking still counts as having one.
-  if (tournamentId && !slotId && !options.allowWithoutSlot) return false;
-
   const joinedAt = Date.now();
   const queueKey = tournamentId ? queueTournamentKey(tournamentId) : QUEUE_GLOBAL;
 
@@ -210,8 +191,6 @@ export async function requeuePlayer(
     slotId,
     slotStartAt,
     slotEndAt,
-    rematchWith: options.rematchWith ?? null,
-    rematchId: options.rematchId ?? null,
   });
 
   const playerKey = queuePlayerKey(userId);

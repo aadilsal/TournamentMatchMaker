@@ -403,8 +403,6 @@ export const NOTIFICATION_FILTER_TYPE_OPTIONS = [
   { value: 'match_expired', label: 'Match expired' },
   { value: 'match_won', label: 'Match won' },
   { value: 'match_lost', label: 'Match lost' },
-  { value: 'slot_selection_required', label: 'Slot selection required' },
-  { value: 'rematch_required', label: 'Rematch required' },
   { value: 'opponent_withdrew_requeued', label: 'Opponent withdrew' },
   { value: 'tournament_registered', label: 'Tournament registered' },
   { value: 'buyback_completed', label: 'Buyback completed' },

@@ -75,20 +75,6 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
     }
   );
 
-  /**
-   * Whether this player has to pick a play window before they can be paired,
-   * and what to default it to. Drives the entry screen for a first entry, a
-   * round they have just advanced into, and a draw they owe a replay for.
-   */
-  router.get('/:id/entry-state', authenticate(env), async (req, res, next) => {
-    try {
-      const state = await service.getEntryState(req.params.id as string, req.user!.sub);
-      sendSuccess(res, state);
-    } catch (err) {
-      next(err);
-    }
-  });
-
   /** The slot the player already holds — used to preselect it on the next round. */
   router.get('/:id/my-slot', authenticate(env), async (req, res, next) => {
     try {

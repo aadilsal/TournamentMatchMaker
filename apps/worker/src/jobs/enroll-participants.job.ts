@@ -176,73 +176,18 @@ async function enrollTournament(
     [round.tournamentId, round.roundNumber]
   );
 
-  // Every draw still owed in this round, so a player who is halfway through
-  // replaying one is enrolled against their opponent rather than against the
-  // queue at large. Fetched once: this runs on a schedule over every live
-  // tournament, and a query per candidate would scale with the whole field.
-  const rematches = await pool.query(
-    `SELECT id, player1_id, player2_id, player1_slot_id, player2_slot_id
-     FROM tournament_rematches
-     WHERE tournament_id = $1 AND round_number = $2 AND status = 'pending'`,
-    [round.tournamentId, round.roundNumber]
-  );
-  const pins = new Map<string, { id: string; opponentId: string; hasChosen: boolean }>();
-  for (const r of rematches.rows) {
-    pins.set(r.player1_id, {
-      id: r.id,
-      opponentId: r.player2_id,
-      hasChosen: r.player1_slot_id !== null,
-    });
-    pins.set(r.player2_id, {
-      id: r.id,
-      opponentId: r.player1_id,
-      hasChosen: r.player2_slot_id !== null,
-    });
-  }
-
   let enrolled = 0;
 
   for (const player of candidates.rows) {
     if (await redis.sismember(QUEUE_MEMBER, player.user_id)) continue;
 
     const window = await resolvePlayWindow(pool, round, player.user_id);
-    const pin = pins.get(player.user_id);
     const joinedAt = Date.now();
 
-    // Told what is missing, whether or not they end up in the queue below — a
-    // player who has to pick a window needs to hear that more, not less, than
-    // one who is already searching.
-    await notificationQueue.add(
-      'dispatch',
-      {
-        userId: player.user_id,
-        type: 'tournament_live',
-        channels: ['in_app', 'email'],
-        payload: {
-          tournamentId: round.tournamentId,
-          tournamentName: round.tournamentName,
-          roundNumber: player.round_number,
-          roundEndsAt: round.endsAt.toISOString(),
-          needsSlot: !window || (pin != null && !pin.hasChosen),
-        },
-        idempotencyKey: `tournament-live:${round.tournamentId}:${player.round_number}:${player.user_id}`,
-      },
-      { jobId: `tournament-live~${round.tournamentId}~${player.round_number}~${player.user_id}` }
-    );
-
-    // A drawn player holds a perfectly good window — the one they used for the
-    // match that ended level — and it is exactly the window they are not
-    // allowed to be enrolled on. Replaying is a fresh pick, and enrolling them
-    // on the old one here would hand them to the general pairing pass before
-    // their opponent had a chance to come back.
-    if (pin && !pin.hasChosen) continue;
-
-    // No window, no queue entry. This used to enrol anyway and let pairing find
-    // a slot, which meant a player could be scheduled into a round they had
-    // never chosen a time for — including one they had already advanced past
-    // the date of. The slot picker is the only way in now.
-    if (!window) continue;
-
+    // Enrolled even without a window. Two players at home need only a time, and
+    // pairing picks one inside the round for them; a player who has to attend a
+    // venue is told what is missing through `queue:pair_failed` instead of
+    // waiting in a queue they were never in.
     const hash = buildQueuePlayerHash({
       userId: player.user_id,
       skillTier: player.skill_tier,
@@ -253,17 +198,15 @@ async function enrollTournament(
       longitude: toNumber(player.longitude),
       joinedAt,
       tournamentId: round.tournamentId,
-      preferredVenueId: window.venueId,
+      preferredVenueId: window?.venueId ?? null,
       roundNumber: player.round_number,
-      bookingId: window.bookingId,
+      bookingId: window?.bookingId ?? null,
       hasPlayedSolo: player.solo_target != null,
       soloTarget: player.solo_target,
       soloPlayedAt: player.solo_played_at ? new Date(player.solo_played_at).getTime() : null,
-      slotId: window.slotId,
-      slotStartAt: window.startAt,
-      slotEndAt: window.endAt,
-      rematchWith: pin?.opponentId ?? null,
-      rematchId: pin?.id ?? null,
+      slotId: window?.slotId ?? null,
+      slotStartAt: window?.startAt ?? null,
+      slotEndAt: window?.endAt ?? null,
     });
 
     const queueKey = queueTournamentKey(round.tournamentId);
@@ -288,6 +231,25 @@ async function enrollTournament(
       tournamentId: round.tournamentId,
     });
 
+    // Once per player per round: the tournament being live and them being in
+    // matchmaking for it is news exactly once.
+    await notificationQueue.add(
+      'dispatch',
+      {
+        userId: player.user_id,
+        type: 'tournament_live',
+        channels: ['in_app', 'email'],
+        payload: {
+          tournamentId: round.tournamentId,
+          tournamentName: round.tournamentName,
+          roundNumber: player.round_number,
+          roundEndsAt: round.endsAt.toISOString(),
+          needsSlot: !window,
+        },
+        idempotencyKey: `tournament-live:${round.tournamentId}:${player.round_number}:${player.user_id}`,
+      },
+      { jobId: `tournament-live~${round.tournamentId}~${player.round_number}~${player.user_id}` }
+    );
   }
 
   if (enrolled > 0) {

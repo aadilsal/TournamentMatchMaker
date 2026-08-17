@@ -28,8 +28,7 @@ import {
  * they had never played.
  */
 interface QueueSync {
-  tournamentId: string;
-  /** Still playing — they leave the queue until they pick a window for the new round. */
+  /** Still playing — carry them into the new round with a clean innings. */
   advanced: string[];
   /** Out of the tournament, or moved onto the bracket: nothing left to pair. */
   dequeued: string[];
@@ -107,37 +106,22 @@ async function announceBracketMatches(
   }
 }
 
-async function syncQueueAfterClose(
-  redis: Redis,
-  notificationQueue: NotificationQueue,
-  sync: QueueSync
-) {
+async function syncQueueAfterClose(redis: Redis, sync: QueueSync) {
   for (const userId of sync.dequeued) {
     await removeFromQueue(redis, userId);
   }
 
-  // Surviving the cut leaves a player in the same position as winning a match:
-  // through to a round they hold no window for. Their entry used to be carried
-  // over with the round number rewritten, which kept them queued against the
-  // window they picked for the round that had just closed — a date already
-  // behind them. They come out of the queue and go back through the slot
-  // picker, and the notification below is what tells them to.
   for (const userId of sync.advanced) {
-    await removeFromQueue(redis, userId);
-    await notificationQueue.add(
-      'dispatch',
-      {
-        userId,
-        type: 'slot_selection_required',
-        channels: ['in_app'],
-        payload: {
-          tournamentId: sync.tournamentId,
-          roundNumber: sync.nextRoundNumber,
-        },
-        idempotencyKey: `slot-required:${sync.tournamentId}:${userId}:${sync.nextRoundNumber}`,
-      },
-      { jobId: `slot-required~${sync.tournamentId}~${userId}~${sync.nextRoundNumber}` }
-    );
+    const key = queuePlayerKey(userId);
+    // Only touch a live entry. hset would otherwise resurrect a hash for a
+    // player who has already left the queue, and a partial one at that.
+    if (!(await redis.exists(key))) continue;
+    await redis.hset(key, {
+      roundNumber: String(sync.nextRoundNumber),
+      hasPlayedSolo: '0',
+      soloTarget: '',
+      soloPlayedAt: '',
+    });
   }
 }
 
@@ -162,7 +146,7 @@ export async function processCloseRoundJob(
     // Redis is brought in line only once the close has committed, so a rolled
     // back round can never leave the queue describing a round that never began.
     if (sync) {
-      await syncQueueAfterClose(redis, notificationQueue, sync);
+      await syncQueueAfterClose(redis, sync);
       await announceBracketMatches(pool, redis, notificationQueue, sync.bracketMatches);
     }
     // Closing a round advances or eliminates every player in it, and rebuilds
@@ -362,100 +346,6 @@ async function restartBracket(pool: Pool, tournamentId: string): Promise<Bracket
  * the cut like any other win. Ratings are deliberately left alone: an opponent
  * not turning up says nothing about how well anyone plays.
  */
-/**
- * Settle every draw in this round that was never replayed.
- *
- * A replay needs both players to come back and pick a window, and only one of
- * them may do so. Left alone that is indistinguishable from neither turning up:
- * the pair go into the standings on the record they had before the draw, and the
- * player who did their part is cut on the same footing as the one who ignored
- * it. So the same rule an abandoned match gets applies here — the side that
- * showed up takes the walkover.
- *
- * A match row is written for it rather than only bumping the counters, because
- * the players' match history is where they look to understand a result, and a
- * win that exists only as a number in the standings cannot be explained.
- * Ratings are left alone, as with any walkover.
- *
- * The API keeps its own copy of this in `match-outcome.ts` — the two apps do not
- * share a database layer — and the two must agree.
- */
-async function settleUnplayedRematches(
-  client: import('pg').PoolClient,
-  tournamentId: string,
-  roundNumber: number
-): Promise<void> {
-  const pending = await client.query(
-    `SELECT id, source_match_id, player1_id, player2_id, player1_slot_id, player2_slot_id
-     FROM tournament_rematches
-     WHERE tournament_id = $1 AND round_number = $2 AND status = 'pending'
-     FOR UPDATE`,
-    [tournamentId, roundNumber]
-  );
-
-  for (const rematch of pending.rows) {
-    const p1Ready = rematch.player1_slot_id !== null;
-    const p2Ready = rematch.player2_slot_id !== null;
-
-    // Both came back but were never paired, or neither did. Either way there is
-    // no basis for handing one of them a win, so the draw simply stands and the
-    // standings decide.
-    if (p1Ready === p2Ready) {
-      await client.query(
-        `UPDATE tournament_rematches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-        [rematch.id]
-      );
-      continue;
-    }
-
-    const winnerId = p1Ready ? rematch.player1_id : rematch.player2_id;
-    const loserId = p1Ready ? rematch.player2_id : rematch.player1_id;
-
-    const walkover = await client.query(
-      `INSERT INTO matches
-         (tournament_id, player1_id, player2_id, status, round_number, phase, result)
-       VALUES ($1, $2, $3, 'completed', $4, 'normal', $5)
-       RETURNING id`,
-      [
-        tournamentId,
-        rematch.player1_id,
-        rematch.player2_id,
-        roundNumber,
-        JSON.stringify({
-          player1Score: null,
-          player2Score: null,
-          winnerId,
-          outcome: 'win',
-          walkover: true,
-          rematchOfMatchId: rematch.source_match_id,
-        }),
-      ]
-    );
-
-    await client.query(
-      `UPDATE tournament_rematches
-       SET status = 'expired', match_id = $1, updated_at = NOW()
-       WHERE id = $2`,
-      [walkover.rows[0].id, rematch.id]
-    );
-    await client.query(
-      `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
-       WHERE tournament_id = $1 AND user_id = $2`,
-      [tournamentId, winnerId]
-    );
-    await client.query(
-      `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
-       WHERE tournament_id = $1 AND user_id = $2`,
-      [tournamentId, loserId]
-    );
-
-    console.log(
-      `Round ${roundNumber} of ${tournamentId} closed over an unplayed rematch: ` +
-        `${winnerId} takes it by walkover, ${loserId} never picked a window`
-    );
-  }
-}
-
 async function settleOpenMatches(
   client: import('pg').PoolClient,
   tournamentId: string,
@@ -548,7 +438,6 @@ async function closeRound(
     // be finished once the round shuts, and leaving it open locks both players
     // out of the next one.
     await settleOpenMatches(client, tournamentId, roundNumber);
-    await settleUnplayedRematches(client, tournamentId, roundNumber);
 
     // A solo innings belongs to the round it was played in. Carrying it across
     // the boundary is what made the next round unplayable: the target is what
@@ -591,7 +480,6 @@ async function closeRound(
     // Everyone who was in the closing round and is not carried into a new one
     // has nothing left to be paired for, so they are cleared out of the queue.
     const sync: QueueSync = {
-      tournamentId,
       advanced: [],
       dequeued: [],
       nextRoundNumber: roundNumber + 1,

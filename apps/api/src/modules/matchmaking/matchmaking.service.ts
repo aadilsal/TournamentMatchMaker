@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import type { JoinQueueInput, PendingRematch, QueueStatus } from '@vr-tournament/shared';
+import type { JoinQueueInput, QueueStatus } from '@vr-tournament/shared';
 import {
   buildQueuePlayerHash,
   parseQueuePlayerMeta,
@@ -16,7 +16,6 @@ import { AppError } from '../../lib/response.js';
 import { emitToUser } from '../../socket/emitters.js';
 import { emitQueueUpdated } from '../../socket/sync-events.js';
 import { hasActiveMatch } from '../../lib/requeue-player.js';
-import { getPendingRematch } from '../../lib/rematch.js';
 import { enqueuePairNow } from '../../lib/matchmaking-queue.js';
 import { assertNoOtherLiveTournament } from '../../lib/live-participation.js';
 import type { Env } from '../../config/env.js';
@@ -94,7 +93,6 @@ export class MatchmakingService {
     let slotEndAt: number | null = null;
     let bookingId: string | null = null;
     let preferredVenueId = input.preferredVenueId ?? null;
-    let pendingRematch: PendingRematch | null = null;
 
     if (input.tournamentId) {
       const pResult = await this.pool.query(
@@ -155,18 +153,6 @@ export class MatchmakingService {
       slotEndAt = new Date(rs.end_time).getTime();
       bookingId = rs.booking_id ?? null;
       preferredVenueId = preferredVenueId ?? rs.venue_id ?? null;
-
-      // Joining the queue directly must honour a draw the same way entering
-      // through the slot picker does — otherwise this endpoint is a way around
-      // the pin, and the player who uses it is handed a stranger.
-      pendingRematch = await getPendingRematch(this.pool, input.tournamentId, userId);
-      if (pendingRematch && !pendingRematch.hasChosenSlot) {
-        throw new AppError(
-          'BAD_REQUEST',
-          'Your last match was a draw — pick a new slot for the replay before entering',
-          400
-        );
-      }
     }
 
     const joinedAt = Date.now();
@@ -188,8 +174,6 @@ export class MatchmakingService {
       slotId,
       slotStartAt,
       slotEndAt,
-      rematchWith: pendingRematch?.opponentId ?? null,
-      rematchId: pendingRematch?.id ?? null,
     });
 
     const multi = this.redis.multi();

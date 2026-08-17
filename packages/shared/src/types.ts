@@ -282,48 +282,6 @@ export interface EnterTournamentResult {
   booking: Booking | null;
   roundSlot: TournamentRoundSlot | null;
   searching: boolean;
-  /** Set when this entry was the return leg of a draw. */
-  rematch: PendingRematch | null;
-}
-
-/** A draw the player still owes, from the perspective of the player asking. */
-export interface PendingRematch {
-  id: string;
-  tournamentId: string;
-  roundNumber: number;
-  sourceMatchId: string;
-  opponentId: string;
-  opponentName: string | null;
-  /** Whether this player has already picked their window for the replay. */
-  hasChosenSlot: boolean;
-  /** Whether the opponent has — the UI says "waiting for them" rather than "searching". */
-  opponentHasChosenSlot: boolean;
-}
-
-/**
- * Why the player is being asked to pick a play window, and what to default it
- * to. `reason` is what the screen leads with; the two flags below are the rules
- * the client would otherwise have to re-derive from the round number.
- */
-export type EntryReason = 'none' | 'first_entry' | 'new_round' | 'rematch';
-
-export interface TournamentEntryState {
-  roundNumber: number;
-  /** No playable window held for this round — nothing can be paired until there is one. */
-  needsSlot: boolean;
-  reason: EntryReason;
-  /**
-   * Whether to preselect the time of day the player last used. True when they
-   * advance a round — same time, new date. False after a draw, where the replay
-   * is a fresh pick, and false on a first entry, where there is nothing to
-   * carry.
-   */
-  carryPreviousTime: boolean;
-  /** The window they last held — the source of the carried time, never of the date. */
-  previousSlot: TournamentRoundSlot | null;
-  /** The window they hold for this round, once chosen. */
-  currentSlot: TournamentRoundSlot | null;
-  rematch: PendingRematch | null;
 }
 
 export type MatchScoreSource = 'meta' | 'manual';

@@ -93,16 +93,7 @@ export class AdminQueueService {
   }
 
   async addPlayer(actorId: string, userId: string, tournamentId?: string) {
-    // An admin putting a player into the queue by hand is overriding the slot
-    // picker on purpose — usually to rescue someone whose window lapsed — so
-    // this is the one path allowed to queue a tournament entry with no window.
-    await requeuePlayer(
-      this.pool,
-      this.redis,
-      userId,
-      { tournamentId, allowWithoutSlot: true },
-      this.env
-    );
+    await requeuePlayer(this.pool, this.redis, userId, { tournamentId }, this.env);
     await writeAudit(this.pool, {
       actorId,
       action: 'queue.add',
