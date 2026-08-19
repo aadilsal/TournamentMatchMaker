@@ -68,7 +68,26 @@ export class MetaIntegrationService {
       const result = (row.result ?? {}) as MatchResultExtended;
       const myScore = (isP1 ? result.player1Score : result.player2Score) ?? null;
       const opponentScore = (isP1 ? result.player2Score : result.player1Score) ?? null;
-      const chaseTarget = result.chaseTarget ?? null;
+      const persistedTarget = result.chaseTarget ?? null;
+      const persistedChaser = result.chasePlayerId ?? null;
+
+      // A standard match has no chaser recorded on it — the chase only becomes
+      // real once someone bats. Whoever puts the first score on the board is
+      // then defending it and the other player is chasing it, so derive both
+      // from the scores when the match was not set up as a chase.
+      //
+      // Without this, the moment either player scored BOTH sides were handed
+      // chaseTarget=null / amChasing=false / amSettingTarget=false — the one
+      // state in the contract that carries no instruction. Neither player was
+      // told to bat, defend or chase, which is what the headset reported as
+      // "something went wrong".
+      // Both halves must be present to count as a chase, matching
+      // resolveChaseOutcome — a chaser recorded without a target is not one.
+      const isChaseMatch = persistedTarget !== null && persistedChaser !== null;
+      const chaseTarget = persistedTarget ?? opponentScore ?? myScore;
+      const amChasing = isChaseMatch
+        ? persistedChaser === userId
+        : myScore === null && opponentScore !== null;
 
       return {
         inQueue: false,
@@ -82,9 +101,9 @@ export class MetaIntegrationService {
           startTime: row.slot_start?.toISOString() ?? null,
           endTime: row.slot_end?.toISOString() ?? null,
           chaseTarget,
-          amChasing: result.chasePlayerId === userId,
-          // Standard mode with nothing on the board yet: this player bats first,
-          // so whatever they submit becomes the score the opponent must beat.
+          amChasing,
+          // Nothing on the board at all: this player bats first, so whatever
+          // they submit becomes the score the opponent must chase.
           amSettingTarget: chaseTarget === null && myScore === null && opponentScore === null,
           myScore,
           opponentScore,

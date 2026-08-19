@@ -257,13 +257,22 @@ The three fields below are enough to pick the UI; you never need to infer state 
 | `chaseTarget` | `amChasing` | `amSettingTarget` | Show |
 |---|---|---|---|
 | number | `true` | `false` | **Chase** — beat `chaseTarget` to win. Submit one score; it completes the match |
-| number | `false` | `false` | **Defend** — opponent is chasing your target. Nothing to submit: `myScore` already holds your solo target. Poll until `match` goes `null` |
-| `null` | `false` | `true` | **Bat first** — your score sets the total |
-| `null` | `false` | `false` | **Standard** — highest score wins; check `opponentScore` |
+| number | `false` | `false` | **Defend** — opponent is chasing your total. Nothing to submit; poll until `match` goes `null` |
+| `null` | `false` | `true` | **Bat first** — nothing on the board yet; your score sets the total |
 
-A defending player must not be shown a score-entry screen: their innings was the
-solo one they already played, and `POST /matches/:id/scores` answers `409` for
-them. Only `amChasing` and `amSettingTarget`/standard players ever submit.
+These three are exhaustive: every playable match maps to exactly one of them, and
+`amChasing` and `amSettingTarget` are never both true. There is no fourth
+"neither" state to handle.
+
+This holds in an ordinary match too, not just one set up from a solo target. Nobody
+is marked as the chaser when two players are paired, so the roles are decided by who
+bats first: until either player scores both see **Bat first**; the moment one score
+lands that player sees **Defend** and the other sees **Chase** with `chaseTarget`
+set to the score they must beat.
+
+A defending player must not be shown a score-entry screen — their innings is already
+on the board, and `POST /matches/:id/scores` answers `409` for them. Only
+**Chase** and **Bat first** players submit.
 
 #### Polling recommendation
 
