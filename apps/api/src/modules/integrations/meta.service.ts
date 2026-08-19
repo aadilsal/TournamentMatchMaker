@@ -113,7 +113,10 @@ export class MetaIntegrationService {
           amChasing,
           // Nothing on the board at all: this player bats first, so whatever
           // they submit becomes the score the opponent must chase.
-          amSettingTarget: chaseTarget === null && myScore === null && opponentScore === null,
+          // Derived from the raw values, not the zero-coerced ones: chaseTarget
+          // is never null now, so testing it here would make this always false.
+          amSettingTarget:
+            rawChaseTarget === null && myScore === null && opponentScore === null,
           myScore: myScore ?? 0,
           opponentScore: opponentScore ?? 0,
         },
