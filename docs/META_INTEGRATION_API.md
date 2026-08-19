@@ -241,11 +241,15 @@ within seconds, the rest do not.
 | `venue` | string \| null | Venue name for display |
 | `startTime` | string \| null | Booked slot start (ISO 8601) |
 | `endTime` | string \| null | Booked slot end (ISO 8601) — scores must be submitted before this |
-| `chaseTarget` | number \| null | Runs to chase (null = standard highest-score-wins) |
+| `chaseTarget` | number | Runs to beat. `0` when there is no target yet; a real target of `0` is sent as `1` so a chase always has something above zero to aim at |
 | `amChasing` | boolean | `true` if **this player** must beat `chaseTarget` to win |
 | `amSettingTarget` | boolean | `true` if nothing is on the board yet and this player bats first — their score becomes the total the opponent must beat. Mutually exclusive with `amChasing`. |
-| `myScore` | number \| null | This player’s score, or null if their innings is still to play. In a chase the setter’s solo target is already here from the moment they are paired. |
-| `opponentScore` | number \| null | Opponent’s score — for a chaser, this is the setter’s target, present from the start |
+| `myScore` | number | This player’s score, `0` if their innings is still to play. In a chase the setter’s solo target is already here from the moment they are paired |
+| `opponentScore` | number | Opponent’s score, `0` if they have not batted — for a chaser this is the setter’s target, present from the start |
+
+> **These three numbers are never `null`.** An unplayed innings is `0`, so `0` alone
+> does not tell you whether a player scored nothing or has not batted — read
+> `amChasing` / `amSettingTarget` for that. Parse them as plain integers.
 
 `match` is non-null **only** while the match is playable. Once it completes, is cancelled
 (rematch), or expires, `match` becomes `null` again — there is no status field to inspect.
@@ -256,9 +260,9 @@ The three fields below are enough to pick the UI; you never need to infer state 
 
 | `chaseTarget` | `amChasing` | `amSettingTarget` | Show |
 |---|---|---|---|
-| number | `true` | `false` | **Chase** — beat `chaseTarget` to win. Submit one score; it completes the match |
-| number | `false` | `false` | **Defend** — opponent is chasing your total. Nothing to submit; poll until `match` goes `null` |
-| `null` | `false` | `true` | **Bat first** — nothing on the board yet; your score sets the total |
+| > 0 | `true` | `false` | **Chase** — beat `chaseTarget` to win. Submit one score; it completes the match |
+| > 0 | `false` | `false` | **Defend** — opponent is chasing your total. Nothing to submit; poll until `match` goes `null` |
+| `0` | `false` | `true` | **Bat first** — nothing on the board yet; your score sets the total |
 
 These three are exhaustive: every playable match maps to exactly one of them, and
 `amChasing` and `amSettingTarget` are never both true. There is no fourth

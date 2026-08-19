@@ -84,10 +84,19 @@ export class MetaIntegrationService {
       // Both halves must be present to count as a chase, matching
       // resolveChaseOutcome — a chaser recorded without a target is not one.
       const isChaseMatch = persistedTarget !== null && persistedChaser !== null;
-      const chaseTarget = persistedTarget ?? opponentScore ?? myScore;
+      const rawChaseTarget = persistedTarget ?? opponentScore ?? myScore;
       const amChasing = isChaseMatch
         ? persistedChaser === userId
         : myScore === null && opponentScore !== null;
+
+      // The headset parses these three straight into integers, and a null makes
+      // it fail before it can render anything. Send 0 for "no innings yet" and
+      // use amChasing/amSettingTarget to tell that apart from a genuine 0 — a
+      // score of 0 and an unplayed innings are no longer distinguishable here.
+      // A real target of 0 goes out as 1 so that a chase always has something
+      // above zero to aim at.
+      const chaseTarget =
+        rawChaseTarget === null ? 0 : rawChaseTarget === 0 ? 1 : rawChaseTarget;
 
       return {
         inQueue: false,
@@ -105,8 +114,8 @@ export class MetaIntegrationService {
           // Nothing on the board at all: this player bats first, so whatever
           // they submit becomes the score the opponent must chase.
           amSettingTarget: chaseTarget === null && myScore === null && opponentScore === null,
-          myScore,
-          opponentScore,
+          myScore: myScore ?? 0,
+          opponentScore: opponentScore ?? 0,
         },
       };
     }

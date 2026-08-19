@@ -219,12 +219,18 @@ export interface MetaCurrentMatchResponse {
     venue: string | null;
     startTime: string | null;
     endTime: string | null;
-    chaseTarget: number | null;
+    /**
+     * Runs to beat. 0 when there is no target yet; a real target of 0 is sent
+     * as 1 so a chase always has something above zero to aim at. Never null —
+     * the headset parses it as an integer.
+     */
+    chaseTarget: number;
     amChasing: boolean;
     /** No target set yet and this player bats first — their score becomes the target. */
     amSettingTarget: boolean;
-    myScore: number | null;
-    opponentScore: number | null;
+    /** 0 when the innings has not been played; use amSettingTarget to tell that from a genuine 0. */
+    myScore: number;
+    opponentScore: number;
   } | null;
 }
 
