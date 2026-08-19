@@ -59,6 +59,19 @@ const MATCH_SELECT = `
   LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
 `;
 
+/**
+ * Lifecycle rank for ordering. Live and upcoming tournaments must never be
+ * pushed off the page by finished ones, however many of those pile up, so the
+ * public list sorts on this before anything else. Higher sorts first, which
+ * keeps every ORDER BY key DESC and lets the cursor use a plain tuple compare.
+ */
+const statusRank = (alias: string) => `CASE ${alias}.status
+           WHEN 'in_progress' THEN 3
+           WHEN 'open' THEN 2
+           WHEN 'closed' THEN 1
+           ELSE 0
+         END`;
+
 const ROUND_SLOT_SELECT = `
   SELECT rs.*,
          ts.venue_id AS slot_venue_id, ts.start_time, ts.end_time,
@@ -132,7 +145,8 @@ export class TournamentsService {
 
   async list(query: TournamentListQuery) {
     const params: unknown[] = [];
-    let where = 'WHERE 1=1';
+    // Drafts are internal; admins see them through the admin list instead.
+    let where = "WHERE t.status <> 'draft'";
 
     if (query.status) {
       params.push(query.status);
@@ -143,8 +157,13 @@ export class TournamentsService {
       where += ` AND t.skill_tier = $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same tuple the rows are ordered by. The old cursor
+      // compared t.id, a random UUID unrelated to the sort, so pages overlapped
+      // and rows could be skipped entirely.
       params.push(query.cursor);
-      where += ` AND t.id < $${params.length}`;
+      where += ` AND (${statusRank('t')}, t.start_date, t.id) <
+                     (SELECT ${statusRank('c')}, c.start_date, c.id
+                      FROM tournaments c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);
@@ -155,7 +174,7 @@ export class TournamentsService {
               (SELECT COUNT(*)::int FROM tournament_registrations tr WHERE tr.tournament_id = t.id) AS registration_count
        FROM tournaments t
        ${where}
-       ORDER BY t.start_date ASC, t.id DESC
+       ORDER BY ${statusRank('t')} DESC, t.start_date DESC, t.id DESC
        LIMIT $${limitIdx}`,
       params
     );
