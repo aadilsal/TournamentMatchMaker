@@ -20,7 +20,7 @@ import {
 } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
-import { TournamentsService } from '../../tournaments/tournaments.service.js';
+import { TournamentsService, statusRank } from '../../tournaments/tournaments.service.js';
 
 export class AdminTournamentsService {
   private tournaments: TournamentsService;
@@ -54,8 +54,12 @@ export class AdminTournamentsService {
       where += ` AND (t.name ILIKE $${params.length} OR t.game ILIKE $${params.length})`;
     }
     if (query.cursor) {
+      // Keyset on the same tuple the rows are ordered by. Comparing t.id — a
+      // random UUID unrelated to the sort — let pages overlap and skip rows.
       params.push(query.cursor);
-      where += ` AND t.id < $${params.length}`;
+      where += ` AND (${statusRank('t')}, t.start_date, t.id) <
+                     (SELECT ${statusRank('c')}, c.start_date, c.id
+                      FROM tournaments c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);
@@ -66,7 +70,7 @@ export class AdminTournamentsService {
               (SELECT COUNT(*)::int FROM tournament_registrations tr WHERE tr.tournament_id = t.id) AS registration_count
        FROM tournaments t
        ${where}
-       ORDER BY t.start_date ASC, t.id DESC
+       ORDER BY ${statusRank('t')} DESC, t.start_date DESC, t.id DESC
        LIMIT $${limitIdx}`,
       params
     );

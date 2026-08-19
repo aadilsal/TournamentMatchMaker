@@ -68,8 +68,11 @@ export class AdminMatchesService {
       where += ` AND m.status = $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      where += ` AND m.id < $${params.length}`;
+      where += ` AND (m.created_at, m.id) <
+                     (SELECT c.created_at, c.id FROM matches c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);

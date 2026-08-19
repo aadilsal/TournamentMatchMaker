@@ -34,8 +34,11 @@ export class AdminBuybacksService {
       where += ` AND b.status = $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      where += ` AND b.id < $${params.length}`;
+      where += ` AND (b.created_at, b.id) <
+                     (SELECT c.created_at, c.id FROM buybacks c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);
@@ -173,8 +176,11 @@ export class AdminNotificationsService {
       where += ` AND n.status = $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      where += ` AND n.id < $${params.length}`;
+      where += ` AND (n.created_at, n.id) <
+                     (SELECT c.created_at, c.id FROM notifications c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);

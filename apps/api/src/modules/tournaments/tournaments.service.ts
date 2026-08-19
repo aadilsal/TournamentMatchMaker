@@ -65,10 +65,11 @@ const MATCH_SELECT = `
  * public list sorts on this before anything else. Higher sorts first, which
  * keeps every ORDER BY key DESC and lets the cursor use a plain tuple compare.
  */
-const statusRank = (alias: string) => `CASE ${alias}.status
-           WHEN 'in_progress' THEN 3
-           WHEN 'open' THEN 2
-           WHEN 'closed' THEN 1
+export const statusRank = (alias: string) => `CASE ${alias}.status
+           WHEN 'in_progress' THEN 4
+           WHEN 'open' THEN 3
+           WHEN 'closed' THEN 2
+           WHEN 'draft' THEN 1
            ELSE 0
          END`;
 

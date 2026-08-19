@@ -51,8 +51,12 @@ export class AdminVenuesService {
       );
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      conditions.push(`id < $${params.length}`);
+      conditions.push(
+        `(name, id) > (SELECT c.name, c.id FROM venues c WHERE c.id = $${params.length})`
+      );
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -63,7 +67,7 @@ export class AdminVenuesService {
     const result = await this.pool.query(
       `SELECT id, name, address, city, country, capacity, active, created_at, updated_at,
               ST_Y(location) AS latitude, ST_X(location) AS longitude
-       FROM venues ${where} ORDER BY name ASC, id DESC LIMIT $${limitIdx}`,
+       FROM venues ${where} ORDER BY name ASC, id ASC LIMIT $${limitIdx}`,
       params
     );
 

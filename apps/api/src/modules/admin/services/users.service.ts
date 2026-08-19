@@ -46,8 +46,11 @@ export class AdminUsersService {
       where += ` AND role = $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      where += ` AND id < $${params.length}`;
+      where += ` AND (created_at, id) <
+                     (SELECT c.created_at, c.id FROM users c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);

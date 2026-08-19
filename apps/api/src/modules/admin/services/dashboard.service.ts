@@ -125,8 +125,11 @@ export class AdminAuditService {
       where += ` AND al.action ILIKE $${params.length}`;
     }
     if (query.cursor) {
+      // Keyset on the same columns the rows are ordered by. Comparing ids
+      // alone (random UUIDs) let pages overlap and silently skip rows.
       params.push(query.cursor);
-      where += ` AND al.id < $${params.length}`;
+      where += ` AND (al.created_at, al.id) <
+                     (SELECT c.created_at, c.id FROM audit_logs c WHERE c.id = $${params.length})`;
     }
 
     params.push(query.limit + 1);
