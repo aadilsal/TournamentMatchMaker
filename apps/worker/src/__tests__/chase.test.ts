@@ -79,8 +79,28 @@ describe('chase resolution from the seeded scoreline', () => {
     expect(resolveMatchOutcome(P1, P2, 55, 54, chase)).toBe('player1_win');
   });
 
-  it('calls a rematch when the chaser only levels the target', () => {
+  it('calls a rematch when the chaser only levels the score', () => {
+    // A tie is replayed as a new match, not settled in this one. That does not
+    // reopen this match to either player: the innings record is per match, so
+    // both get a clean innings in whatever they are paired into next, and
+    // neither may ever bat twice here.
     expect(resolveMatchOutcome(P1, P2, 55, 55, chase)).toBe('rematch');
+  });
+
+  it('calls a rematch on a level score whichever side the chaser bats on', () => {
+    const p1Chases = { chaseTarget: 55, chasePlayerId: P1 };
+    expect(resolveMatchOutcome(P1, P2, 55, 55, p1Chases)).toBe('rematch');
+  });
+
+  it('decides every unequal scoreline and ties the rest', () => {
+    for (const [a, b] of [[3, 99], [99, 3], [56, 55]]) {
+      expect(['player1_win', 'player2_win']).toContain(
+        resolveMatchOutcome(P1, P2, a, b, chase)
+      );
+    }
+    for (const [a, b] of [[0, 0], [55, 55], [12, 12]]) {
+      expect(resolveMatchOutcome(P1, P2, a, b, chase)).toBe('rematch');
+    }
   });
 
   it('gives the win to the setter on the innings shown, not a stale target', () => {

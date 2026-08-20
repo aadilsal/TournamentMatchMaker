@@ -626,11 +626,19 @@ async function testMatchesAndVR() {
   await clearMatches(a.userId); await clearMatches(b.userId);
   mm = await chaseMatch();
   r = await meta('POST', `/integrations/meta/matches/${mm.matchId}/scores`, { userId: b.userId, score: 50 });
+  // A level score is a tie and the pair are re-queued for a new match — never a
+  // second innings in this one. Critically, this only happens once BOTH innings
+  // are on record; the first submission leaves the match in progress with no
+  // outcome at all.
   check('chase tie → cancelled + rematch',
     r.data?.status === 'cancelled' && r.data?.result?.outcome === 'rematch',
     `${r.data?.status}/${r.data?.result?.outcome}`);
   const post = await meta('GET', `/integrations/meta/matches/current?userId=${a.userId}`);
   check('after rematch match === null', post.data?.match === null, JSON.stringify(post.data?.match));
+  // The result reaches the player who batted first here, not at submit time.
+  check('tie surfaces on the poll as lastResult',
+    post.data?.lastResult?.outcome === 'tie' && post.data?.lastResult?.rematchQueued === true,
+    JSON.stringify(post.data?.lastResult));
 
   // --- expired slot
   await clearMatches(a.userId); await clearMatches(b.userId);

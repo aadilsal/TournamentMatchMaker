@@ -79,9 +79,18 @@ export function AdminUsersPage() {
             ]}
             rows={list.items.map((u) => ({
               username: (
-                <Link to={`/admin/users/${u.id}`} className="font-medium hover:underline">
-                  {u.username}
-                </Link>
+                <span className="flex items-center gap-2">
+                  <Link to={`/admin/users/${u.id}`} className="font-medium hover:underline">
+                    {u.username}
+                  </Link>
+                  {/* Bots carry ordinary usernames on purpose, so this badge is
+                      the only thing telling an admin what they are looking at. */}
+                  {u.isBot && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800">
+                      BOT
+                    </span>
+                  )}
+                </span>
               ),
               email: u.email,
               role: u.role,

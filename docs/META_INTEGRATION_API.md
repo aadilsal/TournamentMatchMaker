@@ -36,7 +36,7 @@ This document describes the **server-to-server HTTP API** your VR application sh
 3. **Optional — solo round:** While waiting in queue, player plays a solo innings in VR and submits their target score via `POST /solo-target`. This sets the chase target for when they are paired.
 4. When paired, poll `GET /matches/current` to get match details (opponent, venue, chase target, role).
 5. Each player submits **one score in total** via `POST /matches/:id/scores` — and a solo target already counts as that player's score. So a **chase** takes one submission (the chaser's; the setter's target is already on the board), while a **standard** match takes two.
-6. Once the second half of the scoreline is in, the server resolves the winner (including chase/rematch rules) and updates tournament standings.
+6. Once the second half of the scoreline is in, the server resolves the winner (see the chase rules in §6) and updates tournament standings. A level score is a tie and the pair are re-queued for a fresh match.
 
 ---
 
@@ -195,11 +195,12 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
       "venue": "VR Arena Karachi",
       "startTime": "2026-06-22T14:00:00.000Z",
       "endTime": "2026-06-22T15:00:00.000Z",
-      "chaseTarget": 87,
+      "chaseTarget": 88,
       "amChasing": true,
       "amSettingTarget": false,
-      "myScore": null,
-      "opponentScore": 87
+      "myScore": -1,
+      "opponentScore": 87,
+      "waitingForOpponent": false
     }
   },
   "error": null,
@@ -216,6 +217,29 @@ curl -s "https://api.pixelpaddle.example/api/v1/integrations/meta/matches/curren
 | `canSubmitSoloTarget` | boolean | `true` if player may call `POST /solo-target` now |
 | `soloTargetState` | string | Why `canSubmitSoloTarget` reads as it does — see below. `"available"` exactly when it is `true`. |
 | `match` | object \| null | Active match details, or `null` if none |
+| `lastResult` | object \| null | The player's most recently **decided** match, for 5 minutes after it ends. `null` while a match is in play, and `null` when nothing recent has finished. See below. |
+
+#### `lastResult` object (when present)
+
+How the player who batted first learns the outcome — their own submission
+returned while the match was still open, so the result reaches them here.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `matchId` | UUID | The match that was decided |
+| `opponent` | string | Opponent's username (display only) |
+| `myScore` | number | This player's final score |
+| `opponentScore` | number | Opponent's final score |
+| `outcome` | string | `"win"`, `"loss"` or `"tie"` |
+| `rematchQueued` | boolean | `true` on a tie — the player is already back in the queue for a fresh match |
+| `decidedAt` | string | ISO 8601 timestamp the match was decided |
+
+> **`lastResult` only ever describes a finished match.** It is `null` while an
+> innings is still outstanding, so it can never announce a tie — or any other
+> result — for a match that is still being played. Show the scoreline from it
+> before surfacing a rematch (§6.3).
+
+This field is **additive**: a client that ignores it behaves exactly as before.
 
 #### `soloTargetState` values
 
@@ -231,6 +255,7 @@ within seconds, the rest do not.
 | `not_participant` | Queued, but not as an active participant of a tournament round | Neutral idle state |
 | `already_played` | This round's innings is already recorded | "Waiting for an opponent" |
 | `round_closed` | The round window has ended; the next round opens shortly | "Round changing over" — keep polling |
+| `waiting_for_opponent` | Holding a match, but it is not this player's turn to bat — the opponent is batting now, or this player has already batted | "Waiting for your opponent" — keep polling, submit nothing |
 
 #### `match` object (when present)
 
@@ -241,42 +266,48 @@ within seconds, the rest do not.
 | `venue` | string \| null | Venue name for display |
 | `startTime` | string \| null | Booked slot start (ISO 8601) |
 | `endTime` | string \| null | Booked slot end (ISO 8601) — scores must be submitted before this |
-| `chaseTarget` | number | Runs to beat. `0` when there is no target yet; a real target of `0` is sent as `1` so a chase always has something above zero to aim at |
-| `amChasing` | boolean | `true` if **this player** must beat `chaseTarget` to win |
+| `chaseTarget` | number | Runs needed to **win** — always `opponentScore + 1`, so reaching it wins rather than ties. `-1` when there is no target yet |
+| `amChasing` | boolean | `true` if **this player** must reach `chaseTarget` to win |
 | `amSettingTarget` | boolean | `true` if nothing is on the board yet and this player bats first — their score becomes the total the opponent must beat. Mutually exclusive with `amChasing`. |
-| `myScore` | number | This player’s score, `0` if their innings is still to play. In a chase the setter’s solo target is already here from the moment they are paired |
-| `opponentScore` | number | Opponent’s score, `0` if they have not batted — for a chaser this is the setter’s target, present from the start |
+| `myScore` | number | This player’s score, `-1` if their innings is still to play. In a chase the setter’s solo target is already here from the moment they are paired |
+| `opponentScore` | number | Opponent’s score, `-1` if they have not batted — for a chaser this is the innings they must beat |
+| `waitingForOpponent` | boolean | `true` when there is nothing for this player to do right now: the opponent is batting, or this player has already batted. Submit nothing and keep polling |
 
-> **These three numbers are never `null`.** An unplayed innings is `0`, so `0` alone
-> does not tell you whether a player scored nothing or has not batted — read
-> `amChasing` / `amSettingTarget` for that. Parse them as plain integers.
+> **These three numbers are never `null`, and an unplayed innings is `-1`.**
+> The sentinel is negative so it can never be confused with a real innings — a
+> genuine duck is `0`, and an opponent out for a duck sets `chaseTarget: 1`.
+> Parse them as plain integers and treat any negative value as "not yet".
 
-`match` is non-null **only** while the match is playable. Once it completes, is cancelled
-(rematch), or expires, `match` becomes `null` again — there is no status field to inspect.
+`match` is non-null **only** while the match is playable. Once it completes or expires,
+`match` becomes `null` again — there is no status field to inspect.
 
 #### Which innings am I playing?
 
 The three fields below are enough to pick the UI; you never need to infer state from scores.
 
-| `chaseTarget` | `amChasing` | `amSettingTarget` | Show |
-|---|---|---|---|
-| > 0 | `true` | `false` | **Chase** — beat `chaseTarget` to win. Submit one score; it completes the match |
-| > 0 | `false` | `false` | **Defend** — opponent is chasing your total. Nothing to submit; poll until `match` goes `null` |
-| `0` | `false` | `true` | **Bat first** — nothing on the board yet; your score sets the total |
+| `chaseTarget` | `amChasing` | `amSettingTarget` | `waitingForOpponent` | Show |
+|---|---|---|---|---|
+| ≥ 1 | `true` | `false` | `false` | **Chase** — reach `chaseTarget` to win. Submit one score; it completes the match |
+| `-1` | `false` | `true` | `false` | **Bat first** — nothing on the board yet; your score sets the total |
+| any | `false` | `false` | `true` | **Wait** — not your turn, or you have already batted. Submit nothing; keep polling |
 
-These three are exhaustive: every playable match maps to exactly one of them, and
-`amChasing` and `amSettingTarget` are never both true. There is no fourth
-"neither" state to handle.
+These are exhaustive: every playable match maps to exactly one of them, and no two
+of the three flags are ever true together. There is no fourth "neither" state.
 
-This holds in an ordinary match too, not just one set up from a solo target. Nobody
-is marked as the chaser when two players are paired, so the roles are decided by who
-bats first: until either player scores both see **Bat first**; the moment one score
-lands that player sees **Defend** and the other sees **Chase** with `chaseTarget`
-set to the score they must beat.
+**Only one player may bat at a time.** Both players share a play window, so both
+can arrive at the same match at once. The server grants the match to whichever
+polls first: that player gets **Bat first** and their score becomes the target.
+The other gets **Wait**, and flips to **Chase** with a real target the moment the
+first player's score lands. Which of the two wins the race is not predictable —
+handle either.
 
-A defending player must not be shown a score-entry screen — their innings is already
-on the board, and `POST /matches/:id/scores` answers `409` for them. Only
-**Chase** and **Bat first** players submit.
+If the player holding the match walks away without submitting, the hold lapses
+after ten minutes and the waiting player is promoted to **Bat first**. This is
+rare, but it means **Wait** is not a dead end and must keep polling.
+
+A player showing **Wait** must not be given a score-entry screen —
+`POST /matches/:id/scores` answers `409` for them. Only **Chase** and
+**Bat first** players submit.
 
 #### Polling recommendation
 
@@ -347,10 +378,10 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 
 #### Behaviour
 
-1. **Chase match, chaser submits** → both halves of the scoreline are now in (the setter's half is their solo target), so the server resolves the match immediately: `completed`, or `cancelled` for a rematch tie. This is the **only** submission a chase match takes.
+1. **Chase match, chaser submits** → both halves of the scoreline are now in (the setter's half is their solo target), so the server resolves the match immediately to `completed`. This is the **only** submission a chase match takes.
 2. **Chase match, setter submits** → `409`. Their solo innings is already recorded as their score; they never bat twice.
 3. **Standard match, first score from either player** → match moves to `in_progress`. Response returns the full match object with one score set.
-4. **Standard match, second score** → server applies win/loss/rematch rules (see §6). Response returns match with final `status` (`completed` or `cancelled` for rematch).
+4. **Standard match, second score** → server applies the win/loss rules (see §6). Response returns match with final `status: completed`.
 5. **Duplicate submission** → `409` — each player may only submit once.
 6. **After booked slot end time** → `409` — `Match slot has ended — scores cannot be submitted`.
 
@@ -415,8 +446,9 @@ on the board when the match was created.
 > posted, and a losing chaser gets it too. To answer *"did my player win?"*,
 > compare `result.winnerId === userId`; never read `outcome` for that.
 >
-> On a draw there is no winner: `winnerId` stays `null`, `outcome` is `"rematch"`,
-> and the match `status` is `cancelled`.
+> **On a tie there is no winner:** `winnerId` stays `null`, `outcome` is
+> `"rematch"`, and `status` is `cancelled`. On any `completed` match `winnerId`
+> is always set.
 
 #### Error responses
 
@@ -424,7 +456,7 @@ on the board when the match was created.
 |------|------|---------|------|
 | `400` | `VALIDATION_ERROR` | `Invalid request data` | `matchId` or `userId` not a UUID, `score` not an integer `0`–`999`, malformed JSON |
 | `403` | `FORBIDDEN` | `User is not a participant in this match` | Wrong `userId` for this match |
-| `404` | `NOT_FOUND` | `Match not found` | Well-formed `matchId` that does not exist (e.g. cached across a rematch) |
+| `404` | `NOT_FOUND` | `Match not found` | Well-formed `matchId` that does not exist (e.g. cached across a round changeover) |
 | `409` | `CONFLICT` | `Match is not currently playable` | Status not `confirmed`/`in_progress` |
 | `409` | `CONFLICT` | `Player 1 score already submitted` / `Player 2 score already submitted` | Duplicate submit |
 | `409` | `CONFLICT` | `Your solo target is already recorded as your score for this match — only the chaser submits` | The target-setter tried to submit in a chase match |
@@ -610,7 +642,7 @@ When one or both players submitted a solo target before pairing:
 
 | Field | Meaning |
 |-------|---------|
-| `chaseTarget` | Runs the chaser must exceed to win |
+| `chaseTarget` | Runs the chaser must **reach** to win — always the setter's score + 1 |
 | `amChasing` | Whether the current player is the chaser |
 
 The format is **asynchronous**: the setter played their innings alone, before the
@@ -623,33 +655,82 @@ in VR at the same moment.
 
 | Condition | Result | `result.winnerId` | `result.outcome` |
 |-----------|--------|-------------------|------------------|
-| Chaser score **>** `chaseTarget` | Chaser wins | the chaser | `win` |
-| Chaser score **<** `chaseTarget` | Setter (non-chaser) wins | the setter | `win` |
-| Chaser score **=** `chaseTarget` | **Rematch** — match `cancelled`, both re-queued | `null` | `rematch` |
+| Chaser score **≥** `chaseTarget` | Chaser wins | the chaser | `win` |
+| Chaser score **=** `chaseTarget - 1` (level with the setter) | **Tie** — rematch, see §6.3 | `null` | `rematch` |
+| Chaser score **<** `chaseTarget - 1` | Setter (non-chaser) wins | the setter | `win` |
 
-The target must be **exceeded**, not matched. A chaser posting `70` against a
-`chaseTarget` of `87` loses, and the response carries the **setter's** win — with
+`chaseTarget` is the setter's innings plus one, so **reaching it wins**. Falling
+exactly one short means the two innings are level — that is a tie, not a loss.
+A chaser posting `70` against a `chaseTarget` of `88` loses outright, and the
+response carries the **setter's** win — with
 `winnerId` set to the setter, and `chaseTarget`/`player1Score`/`player2Score`
 showing the full scoreline.
+
+> **Display `chaseTarget` as given.** Do not add or subtract from it, and do not
+> compute "runs needed" from `opponentScore` yourself — the +1 is already
+> applied server-side, and applying it twice asks the player for one run more
+> than they need.
 
 If both players had solo targets, the **earlier** `soloPlayedAt` timestamp sets the chase; the other player chases — their own earlier solo target is not carried into the match, they play a live chase innings against the target.
 
 ### 6.2 Standard mode (no chase)
 
-When `chaseTarget` is `null`:
+When `chaseTarget` is `-1` — neither player has batted yet:
 
 | Condition | Result |
 |-----------|--------|
 | Higher score wins | Winner advanced, loser eliminated (normal rounds) |
-| Equal scores | **Rematch** — both re-queued |
+| Equal scores | **Tie** — rematch, see §6.3 |
 
-### 6.3 Rematch
+In practice this collapses into a chase as soon as anyone bats: the first player
+to bat sets the target, and the second is shown a real `chaseTarget` and chases
+it.
 
-On rematch (score submit returns `status: cancelled`, `result.outcome: rematch`):
+### 6.3 One innings per player, and rematches
 
-- Poll `GET /matches/current` again — `match` returns to `null` and `inQueue` becomes `true`.
-- A new match will be created when the pairing worker runs.
-- Submit scores only to the **new** `match.id`.
+**A player bats once per match.** Once a score is submitted for them — or, for a
+target-setter, once their solo target is carried into the match at pairing — that
+player is done. Every later `POST /matches/:id/scores` from them answers `409`,
+and `GET /matches/current` shows them `waitingForOpponent: true` with nothing to
+submit.
+
+A player who **loses** re-enters the round only by **buying a life back** through
+the web app. They never replay the match they lost.
+
+#### Ties
+
+A level score is a tie, and a tie is replayed — as a **brand new match**, never as
+a second innings in the old one. Both players are re-queued and paired again; each
+gets a clean innings in the match they land in next.
+
+`POST /matches/:id/scores` returns `status: cancelled` with
+`result.outcome: "rematch"` and `winnerId: null`.
+
+> **A rematch is only ever declared once both innings are on record.**
+>
+> This is the important ordering. When the first player submits, the match is
+> **not** decided — the server is still waiting on the opponent, the response
+> carries `status: in_progress`, and no tie, winner or rematch exists yet. Do not
+> show a result or a rematch prompt at that point; show the wait state (§5.1).
+>
+> The decision arrives only with the second innings.
+
+#### Showing the result before the rematch
+
+The player who bats **first** never learns the outcome from their own submission —
+it returned while the match was still open. They find out on their next poll, via
+the `lastResult` object on `GET /matches/current` (§5.1).
+
+Recommended sequence for a tie:
+
+1. Poll returns `lastResult.outcome: "tie"` with both scores and
+   `rematchQueued: true`.
+2. **Show the final scoreline first** — the player needs to see that they tied.
+3. Then surface the rematch: they are already back in the queue, and the next
+   poll with `match != null` is the new match.
+
+`lastResult` persists for **5 minutes** after the match is decided, so a headset
+taken off and put back on still catches it.
 
 ### 6.4 Time windows
 
@@ -709,7 +790,7 @@ round and simply keep polling until their next opponent is drawn.
               └──────────────┬────────────────┘
                              ▼
               Poll GET /matches/current until
-              match == null (finished / rematch / back in queue)
+              match == null (finished / back in queue)
 ```
 
 ### Score submission checklist
@@ -748,7 +829,7 @@ round and simply keep polling until their next opponent is drawn.
 | 7 | Duplicate score | Same player POST again | `409` |
 | 8 | Wrong user | POST score with non-participant userId | `403` |
 | 9 | Chase win | Chaser score > chaseTarget | Chaser in `winnerId` |
-| 10 | Chase tie | Chaser score == chaseTarget | `cancelled`, rematch / re-queue |
+| 10 | Chase tie | Chaser score == setter score (one short of `chaseTarget`) | `cancelled`, `outcome: rematch`, both re-queued |
 | 10b | Setter cannot bat twice | Setter POST score in a chase | `409` — solo target already stands as their score |
 | 11 | Stale match id | POST score to a malformed / unknown id | `400` then `404` — never `500` |
 | 12 | Multi-headset venue | 3 userIds × 30 polls/min from one IP | No `429` |

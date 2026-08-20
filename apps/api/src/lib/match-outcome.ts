@@ -43,6 +43,14 @@ export async function applyMatchOutcome(
     return { status: 'in_progress', result };
   }
 
+  // A tie is replayed as a brand new match, never as a second innings in this
+  // one. Both players have batted here and neither may bat again — the innings
+  // record is per match, so re-queueing them gives each a clean innings in the
+  // match they are paired into next.
+  //
+  // Reaching this at all means the scoreline was complete: `submitScore` only
+  // resolves once both players have an innings on record, so a tie can never be
+  // declared while one of them is still batting.
   if (outcome === 'rematch') {
     const client = await pool.connect();
     try {
@@ -61,7 +69,19 @@ export async function applyMatchOutcome(
 
     if (match.tournament_id) {
       const roundNumber = match.round_number ?? 1;
+
+      // A bot is not re-queued. It has no play window, no booking and no
+      // headset to poll, and putting one in the queue would let ordinary
+      // pairing hand it to a *different* player as though it were waiting to
+      // play. The human goes back in on their own; if they end up alone again,
+      // the last-resort fallback gives them a bot opponent the normal way.
+      const bots = await pool.query(`SELECT id FROM users WHERE id = ANY($1) AND is_bot = TRUE`, [
+        [match.player1_id, match.player2_id],
+      ]);
+      const botIds = new Set<string>(bots.rows.map((r) => r.id as string));
+
       for (const userId of [match.player1_id, match.player2_id]) {
+        if (botIds.has(userId)) continue;
         // requeuePlayer recovers the player's chosen play window for this round,
         // so a rematch keeps a playable slot for VR and venue players alike.
         await requeuePlayer(pool, redis, userId, {

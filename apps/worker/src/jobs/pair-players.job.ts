@@ -20,6 +20,7 @@ import { MATCHMAKING_PAIR_LOCK } from '../lib/queue-keys.js';
 import { acquireLock, releaseLock } from '../lib/redlock.js';
 import { lockSlot, finalizeMatchSlotBookings, SLOT_LOCK_TTL_SEC } from '../lib/slot-lock.js';
 import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
+import { pairLeftoversWithBot } from '../lib/bot-opponent.js';
 
 interface SlotSearchHint {
   lat?: number;
@@ -549,6 +550,29 @@ async function pairInQueue(
     );
     const matchId = matchResult.rows[0].id;
 
+    // The setter's innings, recorded as an innings rather than left implicit in
+    // the scoreline. They batted before this match existed — the solo target
+    // *is* their innings — and the row below is what stops them being offered a
+    // second one.
+    //
+    // This has to be written here because the very next statement clears
+    // `solo_target`, which until now was the only durable record that they had
+    // played. A match paired without its chase fields therefore carried no
+    // trace of it at all, and the player was invited to bat again knowing the
+    // score to beat.
+    if (chase.chaseTarget !== null && chase.chasePlayerId) {
+      const setterId =
+        chase.chasePlayerId === candidate.userId ? partner.userId : candidate.userId;
+      const setterTarget =
+        setterId === candidate.userId ? chase.player1Target : chase.player2Target;
+      await client.query(
+        `INSERT INTO match_innings (match_id, user_id, score, source)
+         VALUES ($1, $2, $3, 'solo')
+         ON CONFLICT (match_id, user_id) DO NOTHING`,
+        [matchId, setterId, setterTarget ?? chase.chaseTarget]
+      );
+    }
+
     // Only reserve venue capacity when the slot was picked for this match and
     // someone is actually attending it in person.
     if (slotId && !usedExistingBooking && needsVenue) {
@@ -747,6 +771,22 @@ async function drainQueue(
     paired++;
     if (paired >= 50) break;
   }
+
+  // Only now, with every pair a real opponent could have made already made:
+  // whoever is still in this queue is genuinely the odd one out. Even here the
+  // fallback holds off until their round is nearly over — see
+  // `pairLeftoversWithBot`, which does nothing while there is still time for
+  // someone to join.
+  if (tournamentId) {
+    paired += await pairLeftoversWithBot(
+      pool,
+      redis,
+      tournamentId,
+      queueKey,
+      notificationQueue
+    );
+  }
+
   return paired;
 }
 

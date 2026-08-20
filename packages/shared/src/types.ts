@@ -63,6 +63,14 @@ export interface User {
   ratingPoints?: number;
   role: UserRole;
   hasProfilePicture?: boolean;
+  /**
+   * A bot opponent, not a person.
+   *
+   * Bots carry ordinary usernames on purpose — a player facing one should see a
+   * normal match — so this flag is the only thing that distinguishes them, and
+   * the admin surfaces are where it must always be visible.
+   */
+  isBot?: boolean;
   createdAt: string;
   updatedAt: string;
   /**
@@ -204,7 +212,12 @@ export type MetaSoloTargetState =
   /** This round's innings is already on the board. */
   | 'already_played'
   /** The round window has ended; the next round opens shortly. */
-  | 'round_closed';
+  | 'round_closed'
+  /**
+   * Holding a match, but the opponent is batting right now. Keep polling —
+   * this turns into a normal chase as soon as their score lands.
+   */
+  | 'waiting_for_opponent';
 
 export interface MetaCurrentMatchResponse {
   inQueue: boolean;
@@ -220,18 +233,69 @@ export interface MetaCurrentMatchResponse {
     startTime: string | null;
     endTime: string | null;
     /**
-     * Runs to beat. 0 when there is no target yet; a real target of 0 is sent
-     * as 1 so a chase always has something above zero to aim at. Never null —
-     * the headset parses it as an integer.
+     * Runs needed to win — always one more than the opponent scored, so
+     * reaching it wins rather than ties.
+     *
+     * `-1` when there is no target yet. Never null: the headset parses it as an
+     * integer. The sentinel is negative rather than 0 so it can never be
+     * confused with a genuine innings — an opponent bowled out for a duck sets
+     * a target of 1, and 0 stays available as a real score.
      */
     chaseTarget: number;
     amChasing: boolean;
     /** No target set yet and this player bats first — their score becomes the target. */
     amSettingTarget: boolean;
-    /** 0 when the innings has not been played; use amSettingTarget to tell that from a genuine 0. */
+    /**
+     * `-1` when the innings has not been played. A genuine duck is 0, and the
+     * two are now distinguishable without consulting any other field.
+     */
     myScore: number;
     opponentScore: number;
+    /**
+     * The opponent is batting right now and this player must wait. Nothing is
+     * submittable while this is true; keep polling and it clears to a chase
+     * with a real target once their innings lands.
+     */
+    waitingForOpponent: boolean;
   } | null;
+  /**
+   * The player's most recently decided match, for a few minutes after it ends.
+   * `null` when there is nothing recent to report, or while a match is still
+   * being played. Additive — a client that ignores it behaves exactly as before.
+   */
+  lastResult: MetaMatchDecision | null;
+}
+
+/** No innings yet. Negative so it can never collide with a real score. */
+export const NO_SCORE = -1;
+
+/**
+ * A match that has just been decided, carried on the poll so the headset can
+ * show the outcome.
+ *
+ * The player who bats first learns nothing from their own submission — it
+ * returns while the match is still open, waiting on the opponent — so this is
+ * the only way the result reaches them. It appears once the match is fully
+ * decided and never before: while an innings is still outstanding there is no
+ * decision to report, and in particular no tie.
+ */
+export interface MetaMatchDecision {
+  matchId: string;
+  opponent: string;
+  myScore: number;
+  opponentScore: number;
+  /** `'tie'` means level scores — see `rematchQueued`. */
+  outcome: 'win' | 'loss' | 'tie';
+  /**
+   * The match was tied and both players have been put back in the queue for a
+   * fresh match. Show the result first; the rematch is what happens next, not
+   * an alternative to seeing how the match ended.
+   *
+   * Never true while a match is still being played — a tie cannot be declared
+   * until both innings are on record.
+   */
+  rematchQueued: boolean;
+  decidedAt: string;
 }
 
 export interface Buyback {
@@ -307,8 +371,11 @@ export interface MatchResultExtended extends MatchResult {
   /**
    * How the match ended. It names no side: `'win'` is written on every decided
    * match whoever won, so it cannot answer "did my player win?" — read
-   * `winnerId` for that, and treat a null `winnerId` on a `'rematch'` as "no
-   * winner yet, the pair plays again".
+   * `winnerId` for that.
+   *
+   * `'rematch'` means the scores were level and the pair have been re-queued
+   * for a new match. It is only ever written once both innings are on record —
+   * a tie cannot be declared while one player is still batting.
    */
   outcome?: 'win' | 'loss' | 'rematch' | 'solo_pending' | null;
 }

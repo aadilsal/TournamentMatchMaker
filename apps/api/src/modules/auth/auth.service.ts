@@ -103,6 +103,15 @@ export class AuthService {
       throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);
     }
 
+    // A bot is not an account. Its stored hash is not a bcrypt digest, so the
+    // comparison below could never succeed anyway — this refuses before that,
+    // so no future change to how bots are seeded can turn one into a way in.
+    // Phrased as a bad credential like every other failure, giving away
+    // nothing about which addresses exist.
+    if (row.is_bot) {
+      throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);
+    }
+
     const valid = await bcrypt.compare(password, row.password_hash);
     if (!valid) {
       throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);

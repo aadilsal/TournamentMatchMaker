@@ -112,8 +112,37 @@ export function resolveAbandonedMatch(
   return 'abandoned';
 }
 
+/**
+ * The number a chaser is shown, and must reach, to win.
+ *
+ * A chase is won by *beating* the innings on the board, so the runs required
+ * are always one more than the setter made. Showing the setter's raw score
+ * instead asked the chaser to "reach" a number that, on reaching, only tied.
+ *
+ * This is the display value. Resolution below still compares the two innings
+ * directly — the target is derived from the setter's score, so the two can
+ * never disagree about who won.
+ */
+export function chaseTargetFor(setterScore: number): number {
+  return setterScore + 1;
+}
+
 export type MatchOutcome = 'player1_win' | 'player2_win' | 'rematch' | 'incomplete';
 
+/**
+ * Who won, given both innings.
+ *
+ * A level score is a tie, and a tie is replayed: the pair are re-queued and
+ * play a *new* match. That does not conflict with one-innings-per-player — the
+ * innings record is per match, so a fresh match gives both players a fresh
+ * innings. What neither of them may ever do is bat twice in the *same* match.
+ *
+ * This must only ever be reached with both innings genuinely recorded. Calling
+ * it against a half-filled scoreline would declare a tie between a real score
+ * and a placeholder, and re-queue two players in the middle of a match one of
+ * them was still batting. `submitScore` gates on the innings table for exactly
+ * that reason.
+ */
 export function resolveMatchOutcome(
   player1Id: string,
   player2Id: string,
@@ -122,20 +151,16 @@ export function resolveMatchOutcome(
   chase: Pick<MatchResultExtended, 'chaseTarget' | 'chasePlayerId'>
 ): MatchOutcome {
   if (chase.chaseTarget != null && chase.chasePlayerId) {
-    const chaserScore = chase.chasePlayerId === player1Id ? player1Score : player2Score;
-    const setterId = chase.chasePlayerId === player1Id ? player2Id : player1Id;
-    const setterScore = setterId === player1Id ? player1Score : player2Score;
+    const chaserIsPlayer1 = chase.chasePlayerId === player1Id;
+    const chaserScore = chaserIsPlayer1 ? player1Score : player2Score;
+    const setterScore = chaserIsPlayer1 ? player2Score : player1Score;
 
-    // Both comparisons read the same number. They used to disagree: the tie was
-    // checked against the setter's score on the board, the win against
-    // `chaseTarget`. Those are the same value only because pairing seeds the
-    // setter's half *from* the target — let them drift by one correction and a
-    // chaser could be handed the match with fewer runs than the opponent the
-    // scoreline showed. The innings on the board decides; `chaseTarget` is the
-    // copy of it the chaser was shown while batting.
+    // The innings on the board decides. `chaseTarget` is the copy of it the
+    // chaser was shown while batting, one run higher; comparing against the
+    // score itself keeps the two from drifting apart under any later
+    // correction to the stored target.
     if (chaserScore === setterScore) return 'rematch';
     const chaserWon = chaserScore > setterScore;
-    const chaserIsPlayer1 = chase.chasePlayerId === player1Id;
     return chaserWon === chaserIsPlayer1 ? 'player1_win' : 'player2_win';
   }
 

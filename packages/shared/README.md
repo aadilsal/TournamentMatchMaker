@@ -28,7 +28,9 @@ Core TypeScript interfaces: `User`, `Venue`, `Tournament`, `Match`, `Buyback`, `
 | Module | Purpose |
 |---|---|
 | `pairing.ts` | Player pairing — tier tolerance, same-city preference, wait-time widening |
-| `match-resolution.ts` | Chase/rematch score resolution, winner determination |
+| `match-resolution.ts` | Chase score resolution, chase target arithmetic, winner determination |
+| `match-turn.ts` | The turn lock — one player bats at a time, and when a hold lapses |
+| `bot-player.ts` | Bot opponents — six-ball innings generation, usernames, last-resort timing |
 | `round-advancement.ts` | Knockout threshold (50% field), round numbers (RO16=100 … Final=103) |
 | `round-duration.ts` | Round duration units and validation |
 | `rating.ts` | ELO-like points (+30 win, −18 loss), tier thresholds |

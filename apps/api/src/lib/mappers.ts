@@ -35,6 +35,7 @@ interface UserRow {
   skill_tier: number;
   rating_points?: number;
   role: string;
+  is_bot?: boolean;
   profile_picture?: Buffer | null;
   created_at: Date;
   updated_at: Date;
@@ -89,6 +90,7 @@ export function mapUser(row: UserRow): User {
     ratingPoints: row.rating_points ?? 650,
     role: row.role as UserRole,
     hasProfilePicture: !!row.profile_picture?.length,
+    isBot: row.is_bot ?? false,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
