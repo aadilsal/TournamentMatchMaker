@@ -37,7 +37,17 @@ const notificationQueue = new Queue(BULLMQ_NOTIFICATIONS_QUEUE, {
   },
 });
 
-const matchmakingQueue = new Queue(BULLMQ_MATCHMAKING_QUEUE, { connection });
+// Every repeat below re-enqueues on a timer — the 2s pairing sweep alone is
+// ~43k jobs a day. BullMQ keeps completed jobs unless told otherwise, and
+// without these caps the queue grew to 2.08M retained jobs and 2.7GB of Redis
+// on a 3.9GB box, which the OOM killer eventually resolved by killing Redis.
+const matchmakingQueue = new Queue(BULLMQ_MATCHMAKING_QUEUE, {
+  connection,
+  defaultJobOptions: {
+    removeOnComplete: 200,
+    removeOnFail: 500,
+  },
+});
 
 const REPEAT_JOBS = [
   { name: MATCHMAKING_JOB_PAIR_REPEAT, every: 2000, jobId: 'matchmaking-pair-repeat' },
