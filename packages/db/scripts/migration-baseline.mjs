@@ -43,6 +43,7 @@ const MIGRATION_MARKERS = {
   '1738000000015_registration-window': {
     column: { table: 'tournaments', name: 'registration_opens_at' },
   },
+  '1738000000016_innings-turn-lock-and-bots': { table: 'match_innings' },
 };
 
 async function tableExists(client, table) {
