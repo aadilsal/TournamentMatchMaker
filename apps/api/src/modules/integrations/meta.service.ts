@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type {
   MatchResultExtended,
   MetaCurrentMatchResponse,
+  MetaMatchResponseData,
   MetaMatchDecision,
   MetaSoloTargetInput,
   MetaSoloTargetState,
@@ -41,6 +42,67 @@ const MATCH_SELECT = `
   LEFT JOIN venues v ON v.id = m.venue_id
   LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
 `;
+
+/**
+ * The match row as the Meta client deserialises it.
+ *
+ * Every field is always present. Their model declares the scores, targets and
+ * round number as `int` and the rest as objects, so a null anywhere either
+ * fails the parse or lands as a null reference — the sentinels stand in instead:
+ * `-1` for a number, `"-1"` for a string, and a filled-in object rather than a
+ * missing one.
+ */
+function toMetaMatchResponse(row: Record<string, unknown>): MetaMatchResponseData {
+  const result = (row.result ?? {}) as MatchResultExtended;
+  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : NOT_APPLICABLE);
+  const str = (v: unknown) => (v == null ? NOT_APPLICABLE : String(v));
+  const num = (v: unknown) => (v == null ? NO_SCORE : Number(v));
+
+  return {
+    id: String(row.id),
+    tournamentId: str(row.tournament_id),
+    player1Id: str(row.player1_id),
+    player2Id: str(row.player2_id),
+    venueId: str(row.venue_id),
+    timeSlotId: str(row.time_slot_id),
+    status: String(row.status),
+    result: {
+      source: str(result.source),
+      winnerId: str(result.winnerId),
+      chaseTarget: num(result.chaseTarget),
+      player1Score: num(result.player1Score),
+      player2Score: num(result.player2Score),
+      chasePlayerId: str(result.chasePlayerId),
+      player1Target: num(result.player1Target),
+      player2Target: num(result.player2Target),
+      outcome: str(result.outcome),
+    },
+    scheduledAt: iso(row.scheduled_at),
+    roundNumber: num(row.round_number),
+    phase: str(row.phase),
+    bracketSlot: str(row.bracket_slot),
+    rematchOfMatchId: str(row.rematch_of_match_id),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    player1: {
+      id: str(row.player1_id),
+      username: str(row.p1_username),
+      skillTier: row.p1_skill_tier == null ? NO_SCORE : Number(row.p1_skill_tier),
+      hasVrHeadset: row.p1_has_vr === true,
+    },
+    player2: {
+      id: str(row.player2_id),
+      username: str(row.p2_username),
+      skillTier: row.p2_skill_tier == null ? NO_SCORE : Number(row.p2_skill_tier),
+      hasVrHeadset: row.p2_has_vr === true,
+    },
+    slot: {
+      id: str(row.time_slot_id),
+      startTime: iso(row.slot_start),
+      endTime: iso(row.slot_end),
+    },
+  };
+}
 
 export class MetaIntegrationService {
   constructor(
@@ -218,6 +280,8 @@ export class MetaIntegrationService {
 
     return {
       matchId: row.id,
+      // A tie has no winner, so the sentinel rather than a null.
+      winnerId: (result.winnerId as string | null) ?? NOT_APPLICABLE,
       opponent: row.opponent_username,
       myScore: (isP1 ? result.player1Score : result.player2Score) ?? NO_SCORE,
       opponentScore: (isP1 ? result.player2Score : result.player1Score) ?? NO_SCORE,
@@ -644,11 +708,8 @@ export class MetaIntegrationService {
     // has an innings to play there is nothing to decide, and in particular no
     // tie to declare. The first submission always returns here.
     if (!bothInningsIn || p1 === null || p2 === null) {
-      // Answer in the same shape as the poll. The headset already parses that
-      // payload, so submitting a score needs no second parser and no special
-      // case: the match comes back with this innings recorded and
-      // `waitingForOpponent` set, exactly as the next poll would report it.
-      return this.getCurrentMatch(userId);
+      const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
+      return toMetaMatchResponse(full.rows[0]);
     }
 
     await applyMatchOutcome(
@@ -671,10 +732,8 @@ export class MetaIntegrationService {
       p2
     );
 
-    // Same shape again. The match is decided, so `match` is null and the
-    // outcome arrives on `lastResult` — the same way the poll would deliver it
-    // a moment later.
-    return this.getCurrentMatch(userId);
+    const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
+    return toMetaMatchResponse(full.rows[0]);
   }
 
   async submitSoloTarget(input: MetaSoloTargetInput) {

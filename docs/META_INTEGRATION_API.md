@@ -395,18 +395,16 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 5. **Duplicate submission** → `409` — each player may only submit once.
 6. **After booked slot end time** → `409` — `Match slot has ended — scores cannot be submitted`.
 
-> **The response is the same payload as `GET /matches/current`.** Submitting a
-> score answers with the poll shape — `inQueue`, `tournamentId`,
-> `canSubmitSoloTarget`, `soloTargetState`, `match`, `lastResult` — so the client
-> parses one structure everywhere and needs no separate handling for a submit.
+> **Nothing in this response is ever `null`.** Every field is always present,
+> including `result`, `player1`, `player2` and `slot`. Anything that has no
+> value carries a sentinel instead: `-1` for a number (`chaseTarget`,
+> `player1Score`, `player2Score`, `player1Target`, `player2Target`,
+> `roundNumber`, `skillTier`) and the string `"-1"` for everything else
+> (`winnerId`, `chasePlayerId`, `outcome`, `source`, `venueId`, `timeSlotId`,
+> `tournamentId`, `phase`, `bracketSlot`, `rematchOfMatchId`, `scheduledAt`).
 >
-> - **First innings in:** `match` comes back with your score recorded and
->   `waitingForOpponent: true`.
-> - **Innings that decides the match:** `match` is `null` and the outcome is on
->   `lastResult`, exactly as the next poll would report it.
->
-> Nothing in the payload is ever `null` except `match` and `lastResult`
-> themselves, which are the two "there is nothing here" signals.
+> `result.winnerId` is the authoritative winner. It is `"-1"` while the match is
+> undecided and on a tie, where there is no winner.
 
 #### Example response — waiting for opponent’s score (standard match; a chase never reaches this state)
 

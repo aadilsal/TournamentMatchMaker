@@ -281,6 +281,61 @@ export interface MetaCurrentMatchResponse {
   lastResult: MetaMatchDecision | null;
 }
 
+/**
+ * The match object `POST /matches/:id/scores` answers with.
+ *
+ * This mirrors the shape the Meta client deserialises field for field, so every
+ * member is always present: their `int` fields cannot take a null, and a missing
+ * object would leave a null reference. Anything that has no value carries the
+ * sentinel instead — `-1` for numbers, `"-1"` for strings.
+ */
+export interface MetaMatchPlayer {
+  id: string;
+  username: string;
+  skillTier: number;
+  hasVrHeadset: boolean;
+}
+
+export interface MetaSlotData {
+  id: string;
+  startTime: string;
+  endTime: string;
+}
+
+export interface MetaMatchResult {
+  source: string;
+  /** The winner's id, or `"-1"` while the match is undecided or tied. */
+  winnerId: string;
+  chaseTarget: number;
+  player1Score: number;
+  player2Score: number;
+  chasePlayerId: string;
+  player1Target: number;
+  player2Target: number;
+  outcome: string;
+}
+
+export interface MetaMatchResponseData {
+  id: string;
+  tournamentId: string;
+  player1Id: string;
+  player2Id: string;
+  venueId: string;
+  timeSlotId: string;
+  status: string;
+  result: MetaMatchResult;
+  scheduledAt: string;
+  roundNumber: number;
+  phase: string;
+  bracketSlot: string;
+  rematchOfMatchId: string;
+  createdAt: string;
+  updatedAt: string;
+  player1: MetaMatchPlayer;
+  player2: MetaMatchPlayer;
+  slot: MetaSlotData;
+}
+
 /** No innings yet. Negative so it can never collide with a real score. */
 export const NO_SCORE = -1;
 
@@ -306,6 +361,13 @@ export const NOT_APPLICABLE = '-1';
  */
 export interface MetaMatchDecision {
   matchId: string;
+  /**
+   * Who won, by id. `outcome` already answers "did I win?" from this player's
+   * point of view, but a client that wants to name the winner needs the id —
+   * and it is the authoritative field the rest of the platform decides on.
+   * `"-1"` on a tie, where there is no winner.
+   */
+  winnerId: string;
   opponent: string;
   myScore: number;
   opponentScore: number;
