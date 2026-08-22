@@ -52,8 +52,13 @@ const MATCH_SELECT = `
  * `-1` for a number, `"-1"` for a string, and a filled-in object rather than a
  * missing one.
  */
-function toMetaMatchResponse(row: Record<string, unknown>): MetaMatchResponseData {
+function toMetaMatchResponse(
+  row: Record<string, unknown>,
+  viewerId: string
+): MetaMatchResponseData {
   const result = (row.result ?? {}) as MatchResultExtended;
+  const viewerIsPlayer1 = row.player1_id === viewerId;
+  const opponentScore = viewerIsPlayer1 ? result.player2Score : result.player1Score;
   const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : NOT_APPLICABLE);
   const str = (v: unknown) => (v == null ? NOT_APPLICABLE : String(v));
   const num = (v: unknown) => (v == null ? NO_SCORE : Number(v));
@@ -69,7 +74,14 @@ function toMetaMatchResponse(row: Record<string, unknown>): MetaMatchResponseDat
     result: {
       source: str(result.source),
       winnerId: str(result.winnerId),
-      chaseTarget: num(result.chaseTarget),
+      // Runs *this* player needs to win, which is one more than the opponent
+      // made — the same meaning `chaseTarget` carries on the poll, so one client
+      // model reads both. The stored value is the first batter's own score, and
+      // returning that raw made the player who had just batted read their own
+      // total as a target they had failed to beat: "you made 28" and "you lost",
+      // on a match nobody had finished. `-1` while the opponent has not batted.
+      chaseTarget:
+        opponentScore == null ? NO_SCORE : chaseTargetFor(opponentScore),
       player1Score: num(result.player1Score),
       player2Score: num(result.player2Score),
       chasePlayerId: str(result.chasePlayerId),
@@ -709,7 +721,7 @@ export class MetaIntegrationService {
     // tie to declare. The first submission always returns here.
     if (!bothInningsIn || p1 === null || p2 === null) {
       const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
-      return toMetaMatchResponse(full.rows[0]);
+      return toMetaMatchResponse(full.rows[0], userId);
     }
 
     await applyMatchOutcome(
@@ -733,7 +745,7 @@ export class MetaIntegrationService {
     );
 
     const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
-    return toMetaMatchResponse(full.rows[0]);
+    return toMetaMatchResponse(full.rows[0], userId);
   }
 
   async submitSoloTarget(input: MetaSoloTargetInput) {
