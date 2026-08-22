@@ -66,6 +66,15 @@ function parseDateTimeLocal(value: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** Same calendar day in the admin's own timezone, which is what the picker shows. */
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 export const adminUserFormSchema = z.object({
   email: z.string().email('Enter a valid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters').max(128),
@@ -132,6 +141,15 @@ export const adminTournamentFormSchema = z
         code: z.ZodIssueCode.custom,
         path: ['endDate'],
         message: 'End date must be after start date',
+      });
+    } else if (start && end && isSameLocalDay(start, end)) {
+      // Rounds are whole days, so a window that opens and closes on one calendar
+      // day cannot hold a single round — the tournament would end before its
+      // first round could be played.
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endDate'],
+        message: 'End date must be on a later day than the start date',
       });
     }
 

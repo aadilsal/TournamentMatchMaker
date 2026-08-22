@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 const defaultForm: {
@@ -53,11 +53,38 @@ const defaultForm: {
   roundDurationDays: '2',
 };
 
+/**
+ * Cross-field rules report on one end of a pair, so editing the *other* end has
+ * to reveal that error too — otherwise moving Start past End leaves the End
+ * field silently invalid until the admin submits.
+ */
+/**
+ * Earliest End the picker will accept: midnight the day after Start, so the
+ * native calendar refuses a same-day window before the validator has to.
+ */
+function minEndDateTimeLocal(startDate: string): string | undefined {
+  if (!startDate) return undefined;
+  const start = new Date(startDate);
+  if (Number.isNaN(start.getTime())) return undefined;
+  const nextDay = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1, 0, 0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${nextDay.getFullYear()}-${pad(nextDay.getMonth() + 1)}-${pad(nextDay.getDate())}T00:00`;
+}
+
+const REVEALED_BY: Record<string, string[]> = {
+  endDate: ['startDate'],
+  registrationClosesAt: ['registrationOpensAt', 'startDate'],
+};
+
 export function AdminTournamentFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id && id !== 'new';
   const navigate = useNavigate();
-  const [errors, setErrors] = useState<FieldErrors>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  // Errors that no amount of typing can produce — currently the illegal status
+  // transition, which is only known once the form is submitted.
+  const [submitErrors, setSubmitErrors] = useState<FieldErrors>({});
   const [form, setForm] = useState(defaultForm);
 
   const { data: tournament } = useQuery({
@@ -102,33 +129,54 @@ export function AdminTournamentFormPage() {
     ? allowedTournamentStatuses(currentStatus)
     : ['draft'];
 
+  // Validated on every keystroke so the admin sees a rule break as they make it.
+  const liveErrors = useMemo<FieldErrors>(() => {
+    const result = validateAdminForm(adminTournamentFormSchema, form);
+    return result.ok ? {} : result.errors;
+  }, [form]);
+
+  // A pristine create form is invalid everywhere; showing all of it up front is
+  // noise. A field speaks up once it has been edited, or once submit was tried.
+  const errors = useMemo<FieldErrors>(() => {
+    const visible: FieldErrors = {};
+    for (const [key, message] of Object.entries(liveErrors)) {
+      const revealed =
+        submitAttempted ||
+        touched[key] ||
+        (REVEALED_BY[key] ?? []).some((related) => touched[related]);
+      if (revealed) visible[key] = message;
+    }
+    return { ...visible, ...submitErrors };
+  }, [liveErrors, touched, submitAttempted, submitErrors]);
+
   const set = (key: keyof typeof form, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
-    setErrors((e) => {
+    setTouched((t) => (t[key] ? t : { ...t, [key]: true }));
+    setSubmitErrors((e) => {
+      if (!(key in e)) return e;
       const next = { ...e };
       delete next[key];
-      delete next.roundDurationDays;
       return next;
     });
   };
 
   const handleSubmit = () => {
+    setSubmitAttempted(true);
     const result = validateAdminForm(adminTournamentFormSchema, form);
     if (!result.ok) {
-      setErrors(result.errors);
       return;
     }
     // Defence in depth: the dropdown only offers legal moves, but a stale form
     // (tournament advanced in another tab) must not push an illegal transition.
     if (isEdit && !isValidTournamentTransition(currentStatus, result.data.status as TournamentStatusValue)) {
-      setErrors({
+      setSubmitErrors({
         status: `Cannot move from ${TOURNAMENT_STATUS_LABELS[currentStatus]} to ${
           TOURNAMENT_STATUS_LABELS[result.data.status as TournamentStatusValue]
         }. Reload the page and use the tournament action bar.`,
       });
       return;
     }
-    setErrors({});
+    setSubmitErrors({});
     save.mutate(toTournamentApiBody(result.data));
   };
 
@@ -201,6 +249,8 @@ export function AdminTournamentFormPage() {
               <Input
                 type="datetime-local"
                 aria-required="true"
+                min={minEndDateTimeLocal(form.startDate)}
+                aria-invalid={Boolean(errors.endDate)}
                 value={form.endDate}
                 onChange={(e) => set('endDate', e.target.value)}
               />
