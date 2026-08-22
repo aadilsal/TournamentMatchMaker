@@ -262,10 +262,13 @@ within seconds, the rest do not.
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | UUID | Match ID — use in `POST /matches/:id/scores` |
+| `status` | string | `pending_confirmation`, `confirmed` or `in_progress` |
 | `opponent` | string | Opponent’s username (display only) |
-| `venue` | string \| null | Venue name for display |
-| `startTime` | string \| null | Booked slot start (ISO 8601) |
-| `endTime` | string \| null | Booked slot end (ISO 8601) — scores must be submitted before this |
+| `venueId` | string | Venue id, or `"-1"` for a headset owner playing from home |
+| `venue` | string | Venue name for display, or `"-1"` |
+| `timeSlotId` | string | The booked play window’s id, or `"-1"` if the match has no slot |
+| `startTime` | string | Booked slot start (ISO 8601), or `"-1"` |
+| `endTime` | string | Booked slot end (ISO 8601) — scores must be submitted before this. `"-1"` if there is no slot |
 | `chaseTarget` | number | Runs needed to **win** — always `opponentScore + 1`, so reaching it wins rather than ties. `-1` when there is no target yet |
 | `amChasing` | boolean | `true` if **this player** must reach `chaseTarget` to win |
 | `amSettingTarget` | boolean | `true` if nothing is on the board yet and this player bats first — their score becomes the total the opponent must beat. Mutually exclusive with `amChasing`. |
@@ -277,6 +280,13 @@ within seconds, the rest do not.
 > The sentinel is negative so it can never be confused with a real innings — a
 > genuine duck is `0`, and an opponent out for a duck sets `chaseTarget: 1`.
 > Parse them as plain integers and treat any negative value as "not yet".
+
+> **Nothing in `match` is ever `null`.** A player without a headset books a venue
+> and a slot, so `venueId`, `venue` and `timeSlotId` are all real. A headset owner
+> plays from home: they still hold a slot, but there is no venue, so `venueId` and
+> `venue` come back as the string `"-1"`. Both flows return the same fields, so one
+> code path reads either — test for `"-1"` rather than for a missing value. No real
+> id can collide with it: every id in this API is a UUID.
 
 `match` is non-null **only** while the match is playable. Once it completes or expires,
 `match` becomes `null` again — there is no status field to inspect.
@@ -384,6 +394,19 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/matche
 4. **Standard match, second score** → server applies the win/loss rules (see §6). Response returns match with final `status: completed`.
 5. **Duplicate submission** → `409` — each player may only submit once.
 6. **After booked slot end time** → `409` — `Match slot has ended — scores cannot be submitted`.
+
+> **The response is the same payload as `GET /matches/current`.** Submitting a
+> score answers with the poll shape — `inQueue`, `tournamentId`,
+> `canSubmitSoloTarget`, `soloTargetState`, `match`, `lastResult` — so the client
+> parses one structure everywhere and needs no separate handling for a submit.
+>
+> - **First innings in:** `match` comes back with your score recorded and
+>   `waitingForOpponent: true`.
+> - **Innings that decides the match:** `match` is `null` and the outcome is on
+>   `lastResult`, exactly as the next poll would report it.
+>
+> Nothing in the payload is ever `null` except `match` and `lastResult`
+> themselves, which are the two "there is nothing here" signals.
 
 #### Example response — waiting for opponent’s score (standard match; a chase never reaches this state)
 

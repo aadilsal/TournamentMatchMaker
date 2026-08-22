@@ -11,6 +11,7 @@ import {
   MATCH_RESULT_VISIBILITY_MS,
   MATCH_TURN_HOLD_MS,
   NO_SCORE,
+  NOT_APPLICABLE,
   QUEUE_MEMBER,
   chaseTargetFor,
   generateBotScore,
@@ -239,6 +240,7 @@ export class MetaIntegrationService {
     const activeMatch = await this.pool.query(
       `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.status, m.result,
               m.active_player_id, m.active_player_since,
+              m.venue_id, m.time_slot_id,
               opp.username AS opponent_username,
               v.name AS venue_name,
               ts.start_time AS slot_start, ts.end_time AS slot_end
@@ -319,10 +321,17 @@ export class MetaIntegrationService {
         soloTargetState: waitingForOpponent ? 'waiting_for_opponent' : 'in_match',
         match: {
           id: row.id,
+          status: row.status as string,
           opponent: row.opponent_username,
-          venue: row.venue_name ?? null,
-          startTime: row.slot_start?.toISOString() ?? null,
-          endTime: row.slot_end?.toISOString() ?? null,
+          // A headset owner plays from home, so they hold a slot but no venue.
+          // Both flows return the same fields either way; NOT_APPLICABLE stands
+          // in for what a player of that kind does not have, so the client never
+          // meets a null here.
+          venueId: row.venue_id ?? NOT_APPLICABLE,
+          venue: row.venue_name ?? NOT_APPLICABLE,
+          timeSlotId: row.time_slot_id ?? NOT_APPLICABLE,
+          startTime: row.slot_start?.toISOString() ?? NOT_APPLICABLE,
+          endTime: row.slot_end?.toISOString() ?? NOT_APPLICABLE,
           chaseTarget,
           amChasing,
           amSettingTarget,
@@ -635,11 +644,14 @@ export class MetaIntegrationService {
     // has an innings to play there is nothing to decide, and in particular no
     // tie to declare. The first submission always returns here.
     if (!bothInningsIn || p1 === null || p2 === null) {
-      const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
-      return mapMatch(full.rows[0]);
+      // Answer in the same shape as the poll. The headset already parses that
+      // payload, so submitting a score needs no second parser and no special
+      // case: the match comes back with this innings recorded and
+      // `waitingForOpponent` set, exactly as the next poll would report it.
+      return this.getCurrentMatch(userId);
     }
 
-    const { status, result } = await applyMatchOutcome(
+    await applyMatchOutcome(
       this.pool,
       this.redis,
       this.env,
@@ -659,9 +671,10 @@ export class MetaIntegrationService {
       p2
     );
 
-    const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
-    const mapped = mapMatch(full.rows[0]);
-    return { ...mapped, status: status as typeof mapped.status, result };
+    // Same shape again. The match is decided, so `match` is null and the
+    // outcome arrives on `lastResult` — the same way the poll would deliver it
+    // a moment later.
+    return this.getCurrentMatch(userId);
   }
 
   async submitSoloTarget(input: MetaSoloTargetInput) {
