@@ -2,6 +2,7 @@ import type { Job } from 'bullmq';
 import type { Pool, PoolClient } from 'pg';
 import type { Redis } from 'ioredis';
 import { emitBroadcast } from '../lib/socket-bridge.js';
+import { resolveMatchOutcome, winnerIdFromOutcome } from '@vr-tournament/shared';
 
 /**
  * Drives a tournament through its lifecycle on its own schedule:
@@ -198,6 +199,92 @@ export async function processTournamentLifecycleJob(
       } finally {
         client.release();
       }
+    }
+  }
+
+  await releaseMatchesFromCompletedTournaments(pool);
+}
+
+/**
+ * A match belonging to a finished tournament must never still be open.
+ *
+ * Completion expires whatever is unresolved, but a score arriving around that
+ * moment can put a match back to `in_progress` — the write commits before the
+ * check that would have rejected it, so the match is left open with both
+ * innings recorded and no outcome. Nothing revisits it: `close-round` only
+ * settles the round it is closing, and that round is already shut.
+ *
+ * The player pays for it indefinitely. Every "current match" lookup counts that
+ * match, so they are treated as mid-game forever: no pairing, no matchmaking,
+ * and a dead match card pinned to their screen.
+ *
+ * So sweep them here. A complete scoreline is decided on its merits — both
+ * players batted, the result is not in doubt — and anything else is abandoned.
+ */
+async function releaseMatchesFromCompletedTournaments(pool: Pool): Promise<void> {
+  const stranded = await pool.query(
+    `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.result
+     FROM matches m
+     JOIN tournaments t ON t.id = m.tournament_id
+     WHERE t.status = 'completed'
+       AND m.status IN ('pending_confirmation', 'confirmed', 'in_progress')`
+  );
+  if (stranded.rowCount === 0) return;
+
+  for (const match of stranded.rows) {
+    const result = (match.result ?? {}) as {
+      player1Score?: number | null;
+      player2Score?: number | null;
+      chaseTarget?: number | null;
+      chasePlayerId?: string | null;
+    };
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      if (result.player1Score != null && result.player2Score != null) {
+        const outcome = resolveMatchOutcome(
+          match.player1_id,
+          match.player2_id,
+          result.player1Score,
+          result.player2Score,
+          { chaseTarget: result.chaseTarget ?? null, chasePlayerId: result.chasePlayerId ?? null }
+        );
+        const winnerId = winnerIdFromOutcome(outcome, match.player1_id, match.player2_id);
+        await client.query(
+          `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+          [JSON.stringify({ ...result, winnerId, outcome }), match.id]
+        );
+        if (winnerId) {
+          const loserId = winnerId === match.player1_id ? match.player2_id : match.player1_id;
+          await client.query(
+            `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+             WHERE tournament_id = $1 AND user_id = $2`,
+            [match.tournament_id, winnerId]
+          );
+          await client.query(
+            `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+             WHERE tournament_id = $1 AND user_id = $2`,
+            [match.tournament_id, loserId]
+          );
+        }
+        console.log(
+          `Released stranded match ${match.id} in a completed tournament: ${result.player1Score}-${result.player2Score} (${outcome})`
+        );
+      } else {
+        await client.query(
+          `UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+          [match.id]
+        );
+        console.log(`Expired stranded match ${match.id} in a completed tournament`);
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error(`Failed to release stranded match ${match.id}:`, err);
+    } finally {
+      client.release();
     }
   }
 }

@@ -122,18 +122,39 @@ export const adminTournamentListQuerySchema = z.object({
   cursor: z.string().uuid().optional(),
 });
 
-export const adminCreateRoundSchema = z.object({
-  roundNumber: z.number().int().positive(),
-  startsAt: z.string().datetime(),
-  endsAt: z.string().datetime(),
-  status: z.enum(['active', 'closed']).optional(),
-});
+/**
+ * A round has to be long enough to play in.
+ *
+ * A round whose window is empty — or inverted — is expired from the moment it
+ * exists, so every match paired into it is unplayable: the score check reads
+ * the round deadline and rejects the innings, while the pairing that created
+ * the match knew nothing about it. One such round produced a match that took
+ * both players' innings and could never be resolved, which then held them out
+ * of matchmaking entirely.
+ */
+const roundWindowOrdered = <T extends { startsAt?: string; endsAt?: string }>(v: T) =>
+  !v.startsAt || !v.endsAt || new Date(v.endsAt).getTime() > new Date(v.startsAt).getTime();
+const roundWindowMessage = {
+  path: ['endsAt'],
+  message: 'A round must end after it starts — give it a window players can actually play in',
+};
 
-export const adminUpdateRoundSchema = z.object({
-  startsAt: z.string().datetime().optional(),
-  endsAt: z.string().datetime().optional(),
-  status: z.enum(['active', 'closed']).optional(),
-});
+export const adminCreateRoundSchema = z
+  .object({
+    roundNumber: z.number().int().positive(),
+    startsAt: z.string().datetime(),
+    endsAt: z.string().datetime(),
+    status: z.enum(['active', 'closed']).optional(),
+  })
+  .refine(roundWindowOrdered, roundWindowMessage);
+
+export const adminUpdateRoundSchema = z
+  .object({
+    startsAt: z.string().datetime().optional(),
+    endsAt: z.string().datetime().optional(),
+    status: z.enum(['active', 'closed']).optional(),
+  })
+  .refine(roundWindowOrdered, roundWindowMessage);
 
 export const adminCreateRegistrationSchema = z.object({
   userId: z.string().uuid(),

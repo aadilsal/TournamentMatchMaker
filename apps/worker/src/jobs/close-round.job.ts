@@ -8,6 +8,8 @@ import {
   playersToAdvance,
   queuePlayerKey,
   resolveAbandonedMatch,
+  resolveMatchOutcome,
+  winnerIdFromOutcome,
   resolveFieldSize,
   shouldStartKnockout,
 } from '@vr-tournament/shared';
@@ -346,13 +348,21 @@ async function restartBracket(pool: Pool, tournamentId: string): Promise<Bracket
  * the cut like any other win. Ratings are deliberately left alone: an opponent
  * not turning up says nothing about how well anyone plays.
  */
+/**
+ * How long a complete-but-unresolved scoreline is left alone before this sweep
+ * decides it. Long enough that a resolution still in flight is never
+ * overwritten, short enough that a match stranded by a failed one is cleared
+ * on the next pass rather than holding its players out of matchmaking.
+ */
+const RESOLUTION_GRACE_MS = 2 * 60 * 1000;
+
 async function settleOpenMatches(
   client: import('pg').PoolClient,
   tournamentId: string,
   roundNumber: number
 ): Promise<void> {
   const open = await client.query(
-    `SELECT id, player1_id, player2_id, result
+    `SELECT id, player1_id, player2_id, result, updated_at
      FROM matches
      WHERE tournament_id = $1 AND round_number = $2
        AND status IN ('pending_confirmation', 'confirmed', 'in_progress')
@@ -364,13 +374,63 @@ async function settleOpenMatches(
     const result = (match.result ?? {}) as {
       player1Score?: number | null;
       player2Score?: number | null;
+      winnerId?: string | null;
+      outcome?: string | null;
+      chaseTarget?: number | null;
+      chasePlayerId?: string | null;
     };
 
-    // A complete scoreline is already on its way to being resolved: the score
+    // A complete scoreline is usually on its way to being resolved: the score
     // that filled it commits before `applyMatchOutcome` runs, so there is a
-    // moment where the match is finished but not yet marked. Expiring it in
+    // moment where the match is finished but not yet marked, and expiring it in
     // that window would overwrite a real result with an abandonment.
-    if (result.player1Score != null && result.player2Score != null) continue;
+    //
+    // But `applyMatchOutcome` can fail to run at all — it is called after that
+    // commit, so anything that throws in between (a round that closed while the
+    // score was in flight) leaves both innings recorded and no outcome. Skipping
+    // on the scoreline alone made that permanent: the match stayed open forever,
+    // and its players stayed "in a match" and could never be paired again.
+    //
+    // So only defer to a resolution that could still be in flight. Once the row
+    // has been untouched for a couple of minutes there is no race left to lose,
+    // and the scoreline decides the match here.
+    if (result.player1Score != null && result.player2Score != null) {
+      const settled = result.winnerId != null || result.outcome != null;
+      const age = Date.now() - new Date(match.updated_at as string).getTime();
+      if (settled || age < RESOLUTION_GRACE_MS) continue;
+
+      const decided = resolveMatchOutcome(
+        match.player1_id,
+        match.player2_id,
+        result.player1Score,
+        result.player2Score,
+        { chaseTarget: result.chaseTarget ?? null, chasePlayerId: result.chasePlayerId ?? null }
+      );
+      const decidedWinner = winnerIdFromOutcome(decided, match.player1_id, match.player2_id);
+
+      await client.query(
+        `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify({ ...result, winnerId: decidedWinner, outcome: decided }), match.id]
+      );
+      if (decidedWinner) {
+        const decidedLoser =
+          decidedWinner === match.player1_id ? match.player2_id : match.player1_id;
+        await client.query(
+          `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2`,
+          [tournamentId, decidedWinner]
+        );
+        await client.query(
+          `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2`,
+          [tournamentId, decidedLoser]
+        );
+      }
+      console.log(
+        `Settled stranded match ${match.id} from its recorded innings: ${result.player1Score}-${result.player2Score} (${decided})`
+      );
+      continue;
+    }
 
     const outcome = resolveAbandonedMatch(result.player1Score, result.player2Score);
 
