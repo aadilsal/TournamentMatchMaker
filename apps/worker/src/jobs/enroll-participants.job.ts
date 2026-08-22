@@ -184,6 +184,18 @@ async function enrollTournament(
     const window = await resolvePlayWindow(pool, round, player.user_id);
     const joinedAt = Date.now();
 
+    // Only an innings played inside *this* round counts as already batted.
+    // `solo_target` carries no round of its own, so one left behind by an
+    // earlier round would otherwise be enrolled as this round's innings and
+    // seeded onto the scoreline of the next match this player is paired into.
+    // Same rule as `requeuePlayer` on the API side.
+    const soloPlayedAt = player.solo_played_at ? new Date(player.solo_played_at) : null;
+    const playedThisRound =
+      player.solo_target != null &&
+      !!soloPlayedAt &&
+      soloPlayedAt >= round.startsAt &&
+      soloPlayedAt < round.endsAt;
+
     // Enrolled even without a window. Two players at home need only a time, and
     // pairing picks one inside the round for them; a player who has to attend a
     // venue is told what is missing through `queue:pair_failed` instead of
@@ -201,9 +213,9 @@ async function enrollTournament(
       preferredVenueId: window?.venueId ?? null,
       roundNumber: player.round_number,
       bookingId: window?.bookingId ?? null,
-      hasPlayedSolo: player.solo_target != null,
-      soloTarget: player.solo_target,
-      soloPlayedAt: player.solo_played_at ? new Date(player.solo_played_at).getTime() : null,
+      hasPlayedSolo: playedThisRound,
+      soloTarget: playedThisRound ? player.solo_target : null,
+      soloPlayedAt: playedThisRound ? soloPlayedAt!.getTime() : null,
       slotId: window?.slotId ?? null,
       slotStartAt: window?.startAt ?? null,
       slotEndAt: window?.endAt ?? null,

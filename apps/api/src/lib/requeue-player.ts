@@ -139,17 +139,45 @@ export async function requeuePlayer(
   }
 
   if (tournamentId) {
+    // A solo innings belongs to the round it was played in, but nothing on the
+    // row says which round that was — `solo_target` is per participant, not per
+    // round. Reviving it unconditionally is what put a score on the board for a
+    // player who had only just registered: a target left behind by an earlier
+    // round (one that was never paired, so nothing consumed it) came back the
+    // next time they entered, and pairing seeded it as their innings.
+    //
+    // `solo_played_at` inside the active round's window is what makes it this
+    // round's innings. Anything else is a leftover, and it is erased rather
+    // than merely ignored so the next entry cannot revive it either.
     const pRow = await pool.query(
-      `SELECT solo_target, solo_played_at FROM tournament_participants
-       WHERE tournament_id = $1 AND user_id = $2`,
-      [tournamentId, userId]
+      `SELECT tp.solo_target, tp.solo_played_at, tr.id IS NOT NULL AS is_current_round
+       FROM tournament_participants tp
+       LEFT JOIN tournament_rounds tr
+         ON tr.tournament_id = tp.tournament_id
+        AND tr.round_number = $3
+        AND tr.status = 'active'
+        AND tp.solo_played_at >= tr.starts_at
+        AND tp.solo_played_at < tr.ends_at
+       WHERE tp.tournament_id = $1 AND tp.user_id = $2`,
+      [tournamentId, userId, roundNumber]
     );
-    if (pRow.rows[0]?.solo_target != null) {
+    const pastInnings = pRow.rows[0];
+    if (pastInnings?.solo_target != null && pastInnings.is_current_round) {
       hasPlayedSolo = true;
-      soloTarget = pRow.rows[0].solo_target;
-      soloPlayedAt = pRow.rows[0].solo_played_at
-        ? new Date(pRow.rows[0].solo_played_at).getTime()
-        : soloPlayedAt;
+      soloTarget = pastInnings.solo_target;
+      soloPlayedAt = new Date(pastInnings.solo_played_at).getTime();
+    } else if (pastInnings?.solo_target != null && options.hasPlayedSolo !== true) {
+      // Not the caller's own innings — `submitSoloTarget` passes its target in
+      // explicitly and must never have it cleared out from under it.
+      await pool.query(
+        `UPDATE tournament_participants
+         SET solo_target = NULL, solo_played_at = NULL, updated_at = NOW()
+         WHERE tournament_id = $1 AND user_id = $2`,
+        [tournamentId, userId]
+      );
+      hasPlayedSolo = false;
+      soloTarget = null;
+      soloPlayedAt = null;
     }
   }
 
