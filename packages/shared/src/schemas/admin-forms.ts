@@ -12,9 +12,14 @@ import { tournamentStatusSchema } from './tournament.js';
 import {
   MAX_ROUND_DURATION_DAYS,
   MIN_ROUND_DURATION_DAYS,
+  MINUTES_PER_DAY,
   isValidRoundDurationDays,
   roundDurationDaysToMinutes,
 } from '../round-duration.js';
+import {
+  SCHEDULED_NORMAL_ROUNDS,
+  minTournamentDaysForRoundDuration,
+} from '../round-advancement.js';
 
 export type FieldErrors = Record<string, string>;
 
@@ -64,6 +69,12 @@ function parseDateTimeLocal(value: string): Date | null {
   if (!value) return null;
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** `1 day`, `1.5 days` — enough precision to explain a window without noise. */
+function formatDays(days: number): string {
+  const rounded = Math.round(days * 10) / 10;
+  return `${rounded} ${rounded === 1 ? 'day' : 'days'}`;
 }
 
 /** Same calendar day in the admin's own timezone, which is what the picker shows. */
@@ -186,6 +197,28 @@ export const adminTournamentFormSchema = z
         path: ['roundDurationDays'],
         message: `Round duration must be between ${MIN_ROUND_DURATION_DAYS} and ${MAX_ROUND_DURATION_DAYS} days`,
       });
+    } else if (start && end && end > start) {
+      // Rounds run back to back from the start date, so the normal phase needs
+      // room for all of them. Too short a window and a round begins at or after
+      // the end date, where the end-date sweep completes the tournament and
+      // expires its matches before anyone can play them.
+      const windowDays = (end.getTime() - start.getTime()) / (MINUTES_PER_DAY * 60_000);
+      const requiredDays = minTournamentDaysForRoundDuration(days);
+      // A minute of slack, so a window that is exactly N days is not lost to
+      // floating point or a DST hour.
+      if (windowDays < requiredDays - 1 / MINUTES_PER_DAY) {
+        const have = formatDays(windowDays);
+        const fits = Math.floor(windowDays / SCHEDULED_NORMAL_ROUNDS);
+        const remedy =
+          fits >= MIN_ROUND_DURATION_DAYS
+            ? `Shorten the round to ${fits} ${fits === 1 ? 'day' : 'days'}, or move the end date to at least ${requiredDays} days after the start.`
+            : `Move the end date to at least ${SCHEDULED_NORMAL_ROUNDS} days after the start.`;
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['roundDurationDays'],
+          message: `${days}-day rounds need ${requiredDays} days of tournament — ${SCHEDULED_NORMAL_ROUNDS} normal rounds run back to back before the knockout — but this window is ${have}. ${remedy}`,
+        });
+      }
     }
   });
 

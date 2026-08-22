@@ -71,9 +71,27 @@ function minEndDateTimeLocal(startDate: string): string | undefined {
   return `${nextDay.getFullYear()}-${pad(nextDay.getMonth() + 1)}-${pad(nextDay.getDate())}T00:00`;
 }
 
+/** Field labels as the form shows them, for the summary under the button. */
+const FIELD_LABELS: Record<string, string> = {
+  name: 'Name',
+  game: 'Game',
+  registrationOpensAt: 'Registration opens',
+  registrationClosesAt: 'Registration closes',
+  startDate: 'Start',
+  endDate: 'End',
+  roundDurationDays: 'Normal round duration',
+  maxPlayers: 'Max players',
+  skillTier: 'Skill tier',
+  buybackPriceCents: 'Buyback price',
+  status: 'Status',
+};
+
 const REVEALED_BY: Record<string, string[]> = {
   endDate: ['startDate'],
   registrationClosesAt: ['registrationOpensAt', 'startDate'],
+  // Whether the round fits depends on the window, so moving either date has to
+  // surface it — the admin is looking at the dates, not the duration field.
+  roundDurationDays: ['startDate', 'endDate'],
 };
 
 export function AdminTournamentFormPage() {
@@ -148,6 +166,20 @@ export function AdminTournamentFormPage() {
     }
     return { ...visible, ...submitErrors };
   }, [liveErrors, touched, submitAttempted, submitErrors]);
+
+  // The button stays off until the whole form would pass, so an admin never
+  // submits into a rejection. The summary says what is still missing, since a
+  // dead button with no reason is worse than an error.
+  const isComplete = Object.keys(liveErrors).length === 0;
+  const blockingSummary = useMemo(() => {
+    const keys = Object.keys(liveErrors);
+    if (keys.length === 0) return '';
+    // Naming the fields beats a bare count: an error the admin has not revealed
+    // yet is invisible, so the button would otherwise be dead for no stated
+    // reason.
+    const labels = keys.map((key) => FIELD_LABELS[key] ?? key);
+    return `Still to fix: ${labels.join(', ')}.`;
+  }, [liveErrors]);
 
   const set = (key: keyof typeof form, value: string) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -328,9 +360,14 @@ export function AdminTournamentFormPage() {
             <AdminFieldError message={errors.status} />
           </div>
           <AdminFieldError message={errors._form} />
-          <Button onClick={handleSubmit} disabled={save.isPending}>
+          <Button onClick={handleSubmit} disabled={save.isPending || !isComplete}>
             {save.isPending ? 'Saving…' : isEdit ? 'Save changes' : 'Create tournament'}
           </Button>
+          {!isComplete && !save.isPending && (
+            <p className="text-xs text-[var(--color-muted-foreground)]">
+              {blockingSummary}
+            </p>
+          )}
         </AdminCard>
 
         <AdminCard className="p-6 lg:sticky lg:top-6">

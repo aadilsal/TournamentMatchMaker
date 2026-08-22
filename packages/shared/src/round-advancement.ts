@@ -14,6 +14,32 @@ export function shouldStartKnockout(activeCount: number, fieldSize: number): boo
   return activeCount <= knockoutThreshold(fieldSize);
 }
 
+/**
+ * How many normal rounds a tournament schedules before the knockout.
+ *
+ * It falls out of the rules above rather than being configured. Closing round 1
+ * advances `floor(N / 2)` of a field of N, which is exactly
+ * `knockoutThreshold(N)` — so when round 2 closes `shouldStartKnockout` is
+ * already true and the bracket takes over. Two rounds, whatever N is.
+ *
+ * Buybacks can push the field back above the threshold and buy a third normal
+ * round, so treat this as the number always scheduled, not a maximum.
+ */
+export const SCHEDULED_NORMAL_ROUNDS = 2;
+
+/**
+ * The shortest tournament that can actually run its normal rounds.
+ *
+ * Rounds run back to back from the tournament start (each new round begins
+ * where the last one ended), so the normal phase occupies
+ * `SCHEDULED_NORMAL_ROUNDS × roundDurationDays`. A window shorter than that
+ * leaves a round starting at or past the end date: the end-date sweep completes
+ * the tournament and expires its matches, so the round can never be played.
+ */
+export function minTournamentDaysForRoundDuration(roundDurationDays: number): number {
+  return roundDurationDays * SCHEDULED_NORMAL_ROUNDS;
+}
+
 export function playersToAdvance(activeCount: number, fieldSize: number): number {
   if (shouldStartKnockout(activeCount, fieldSize)) return activeCount;
   return Math.floor(activeCount / 2);
