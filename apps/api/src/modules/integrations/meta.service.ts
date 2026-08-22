@@ -12,7 +12,6 @@ import {
   MATCH_RESULT_VISIBILITY_MS,
   MATCH_TURN_HOLD_MS,
   NO_SCORE,
-  NOT_APPLICABLE,
   QUEUE_MEMBER,
   chaseTargetFor,
   generateBotScore,
@@ -59,15 +58,17 @@ function toMetaMatchResponse(
   const result = (row.result ?? {}) as MatchResultExtended;
   const viewerIsPlayer1 = row.player1_id === viewerId;
   const opponentScore = viewerIsPlayer1 ? result.player2Score : result.player1Score;
-  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : NOT_APPLICABLE);
-  const str = (v: unknown) => (v == null ? NOT_APPLICABLE : String(v));
+  // Strings carry null when there is nothing to report; only numbers use -1,
+  // because the client's number fields cannot hold a null.
+  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : null);
+  const str = (v: unknown) => (v == null ? null : String(v));
   const num = (v: unknown) => (v == null ? NO_SCORE : Number(v));
 
   return {
     id: String(row.id),
     tournamentId: str(row.tournament_id),
-    player1Id: str(row.player1_id),
-    player2Id: str(row.player2_id),
+    player1Id: String(row.player1_id),
+    player2Id: String(row.player2_id),
     venueId: str(row.venue_id),
     timeSlotId: str(row.time_slot_id),
     status: String(row.status),
@@ -94,17 +95,17 @@ function toMetaMatchResponse(
     phase: str(row.phase),
     bracketSlot: str(row.bracket_slot),
     rematchOfMatchId: str(row.rematch_of_match_id),
-    createdAt: iso(row.created_at),
-    updatedAt: iso(row.updated_at),
+    createdAt: iso(row.created_at) ?? '',
+    updatedAt: iso(row.updated_at) ?? '',
     player1: {
-      id: str(row.player1_id),
-      username: str(row.p1_username),
+      id: String(row.player1_id),
+      username: str(row.p1_username) ?? '',
       skillTier: row.p1_skill_tier == null ? NO_SCORE : Number(row.p1_skill_tier),
       hasVrHeadset: row.p1_has_vr === true,
     },
     player2: {
-      id: str(row.player2_id),
-      username: str(row.p2_username),
+      id: String(row.player2_id),
+      username: str(row.p2_username) ?? '',
       skillTier: row.p2_skill_tier == null ? NO_SCORE : Number(row.p2_skill_tier),
       hasVrHeadset: row.p2_has_vr === true,
     },
@@ -293,7 +294,7 @@ export class MetaIntegrationService {
     return {
       matchId: row.id,
       // A tie has no winner, so the sentinel rather than a null.
-      winnerId: (result.winnerId as string | null) ?? NOT_APPLICABLE,
+      winnerId: (result.winnerId as string | null) ?? null,
       opponent: row.opponent_username,
       myScore: (isP1 ? result.player1Score : result.player2Score) ?? NO_SCORE,
       opponentScore: (isP1 ? result.player2Score : result.player1Score) ?? NO_SCORE,
@@ -400,14 +401,13 @@ export class MetaIntegrationService {
           status: row.status as string,
           opponent: row.opponent_username,
           // A headset owner plays from home, so they hold a slot but no venue.
-          // Both flows return the same fields either way; NOT_APPLICABLE stands
-          // in for what a player of that kind does not have, so the client never
-          // meets a null here.
-          venueId: row.venue_id ?? NOT_APPLICABLE,
-          venue: row.venue_name ?? NOT_APPLICABLE,
-          timeSlotId: row.time_slot_id ?? NOT_APPLICABLE,
-          startTime: row.slot_start?.toISOString() ?? NOT_APPLICABLE,
-          endTime: row.slot_end?.toISOString() ?? NOT_APPLICABLE,
+          // Both flows carry the same fields either way; the ones that do not
+          // apply are null. Only numbers use the -1 sentinel.
+          venueId: row.venue_id ?? null,
+          venue: row.venue_name ?? null,
+          timeSlotId: row.time_slot_id ?? null,
+          startTime: row.slot_start?.toISOString() ?? null,
+          endTime: row.slot_end?.toISOString() ?? null,
           chaseTarget,
           amChasing,
           amSettingTarget,

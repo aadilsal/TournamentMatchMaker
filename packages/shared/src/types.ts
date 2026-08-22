@@ -232,21 +232,16 @@ export interface MetaCurrentMatchResponse {
     status: string;
     opponent: string;
     /**
-     * Venue and slot are the same shape whether or not the player owns a
-     * headset, so one code path reads both.
-     *
-     * A player without a headset books a venue and a slot, and both ids are
-     * real. A headset owner plays from home: they still hold a slot — it is the
-     * window their match is scheduled in — but there is no venue, so
-     * `venueId` and `venue` come back as `"-1"`. `"-1"` is the string form of
-     * the same "not applicable" sentinel the scores use, so nothing in this
-     * object is ever null and every field parses without a null check.
+     * A player without a headset books a venue and a slot, so both ids are real.
+     * A headset owner plays from home: they still hold a slot — the window their
+     * match is scheduled in — but there is no venue, so `venueId` and `venue`
+     * are `null`. Both flows carry the same fields either way.
      */
-    venueId: string;
-    venue: string;
-    timeSlotId: string;
-    startTime: string;
-    endTime: string;
+    venueId: string | null;
+    venue: string | null;
+    timeSlotId: string | null;
+    startTime: string | null;
+    endTime: string | null;
     /**
      * Runs needed to win — always one more than the opponent scored, so
      * reaching it wins rather than ties.
@@ -297,38 +292,43 @@ export interface MetaMatchPlayer {
 }
 
 export interface MetaSlotData {
-  id: string;
-  startTime: string;
-  endTime: string;
+  id: string | null;
+  startTime: string | null;
+  endTime: string | null;
 }
 
 export interface MetaMatchResult {
-  source: string;
-  /** The winner's id, or `"-1"` while the match is undecided or tied. */
-  winnerId: string;
+  source: string | null;
+  /**
+   * The winner's id, or `null` while the match is undecided or tied.
+   *
+   * `null` here means "not decided", not "you lost" — check `status` before
+   * reading a result from it.
+   */
+  winnerId: string | null;
   chaseTarget: number;
   player1Score: number;
   player2Score: number;
-  chasePlayerId: string;
+  chasePlayerId: string | null;
   player1Target: number;
   player2Target: number;
-  outcome: string;
+  outcome: string | null;
 }
 
 export interface MetaMatchResponseData {
   id: string;
-  tournamentId: string;
+  tournamentId: string | null;
   player1Id: string;
   player2Id: string;
-  venueId: string;
-  timeSlotId: string;
+  venueId: string | null;
+  timeSlotId: string | null;
   status: string;
   result: MetaMatchResult;
-  scheduledAt: string;
+  scheduledAt: string | null;
   roundNumber: number;
-  phase: string;
-  bracketSlot: string;
-  rematchOfMatchId: string;
+  phase: string | null;
+  bracketSlot: string | null;
+  rematchOfMatchId: string | null;
   createdAt: string;
   updatedAt: string;
   player1: MetaMatchPlayer;
@@ -339,15 +339,8 @@ export interface MetaMatchResponseData {
 /** No innings yet. Negative so it can never collide with a real score. */
 export const NO_SCORE = -1;
 
-/**
- * The string form of the same idea, for fields that carry an id or a timestamp.
- *
- * A headset owner has no venue, so `venueId` and `venue` have nothing real to
- * report — but the field is still sent, with this value, so both flows return
- * the same shape and the client parses one payload rather than two. It cannot
- * be mistaken for a real id: every id in this API is a UUID.
- */
-export const NOT_APPLICABLE = '-1';
+// Strings carry `null` when there is nothing to report — only numbers use the
+// -1 sentinel, because a number field cannot hold a null on the client.
 
 /**
  * A match that has just been decided, carried on the poll so the headset can
@@ -363,11 +356,10 @@ export interface MetaMatchDecision {
   matchId: string;
   /**
    * Who won, by id. `outcome` already answers "did I win?" from this player's
-   * point of view, but a client that wants to name the winner needs the id —
-   * and it is the authoritative field the rest of the platform decides on.
-   * `"-1"` on a tie, where there is no winner.
+   * point of view, but a client that wants to name the winner needs the id.
+   * `null` on a tie, where there is no winner.
    */
-  winnerId: string;
+  winnerId: string | null;
   opponent: string;
   myScore: number;
   opponentScore: number;
