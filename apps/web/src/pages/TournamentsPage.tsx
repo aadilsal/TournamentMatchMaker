@@ -1,7 +1,13 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import type { QueuePairFailedEvent, QueueStatus, Tournament, User } from '@vr-tournament/shared';
+import type {
+  QueuePairFailedEvent,
+  QueueStatus,
+  QueueUpdatedEvent,
+  Tournament,
+  User,
+} from '@vr-tournament/shared';
 import { apiGet, getAccessToken } from '@/lib/api';
 import {
   LIVE_QUERY_KEYS,
@@ -23,6 +29,7 @@ type TournamentView = 'active' | 'completed';
 
 export function TournamentsPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   // Finished seasons are noise on the default view — they stay one click away.
@@ -66,6 +73,18 @@ export function TournamentsPage() {
 
   useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
     setQueueNotice(data.message);
+  });
+
+  // Leaving the queue happens to the player, not because of anything they did
+  // here — the round closed, or the tournament finished. Take the server's word
+  // for it immediately instead of leaving "Finding opponent…" on screen until
+  // the next safety poll.
+  useSocketEvent('queue:updated', (data: QueueUpdatedEvent) => {
+    queryClient.setQueryData(LIVE_QUERY_KEYS.matchmakingStatus, (prev: QueueStatus | undefined) =>
+      prev ? { ...prev, ...data } : prev
+    );
+    if (!data.inQueue) setQueueNotice(null);
+    void queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matchmakingStatus });
   });
 
   const handleJoin = (tournamentId: string) => {

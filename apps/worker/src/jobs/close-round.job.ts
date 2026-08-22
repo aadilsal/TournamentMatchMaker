@@ -111,6 +111,17 @@ async function announceBracketMatches(
 async function syncQueueAfterClose(redis: Redis, sync: QueueSync) {
   for (const userId of sync.dequeued) {
     await removeFromQueue(redis, userId);
+    // Tell them straight away. Leaving the queue is something that happens *to*
+    // a player — their round closed, or the tournament finished — so nothing on
+    // their screen has any reason to re-read it. Without this the browser keeps
+    // showing "Finding opponent…" for a player who is no longer queued, until
+    // the next safety poll happens to notice.
+    await emitToUser(redis, userId, 'queue:updated', {
+      inQueue: false,
+      position: null,
+      queueSize: 0,
+      tournamentId: null,
+    });
   }
 
   for (const userId of sync.advanced) {
@@ -227,7 +238,7 @@ async function restartBracket(pool: Pool, tournamentId: string): Promise<Bracket
 
     // Re-read under a lock: the bracket may have moved between the scan and now.
     const locked = await client.query(
-      `SELECT phase, status FROM tournaments WHERE id = $1 FOR UPDATE`,
+      `SELECT phase, status, round_duration_minutes FROM tournaments WHERE id = $1 FOR UPDATE`,
       [tournamentId]
     );
     if (locked.rows[0]?.phase !== 'knockout' || locked.rows[0]?.status !== 'in_progress') {
@@ -320,6 +331,13 @@ async function restartBracket(pool: Pool, tournamentId: string): Promise<Bracket
       opened.push({ matchId: created.rows[0].id, player1Id: p1, player2Id: p2 });
     }
 
+    await openRoundWindow(
+      client,
+      tournamentId,
+      roundNumber,
+      (locked.rows[0]?.round_duration_minutes as number | null) ?? 180
+    );
+
     await client.query('COMMIT');
     console.log(
       `Restarted stalled knockout for ${tournamentId}: ${opened.length} match(es) for ${players.length} player(s) at round ${roundNumber}${bye ? ` (${bye} has a bye)` : ''}`
@@ -348,6 +366,35 @@ async function restartBracket(pool: Pool, tournamentId: string): Promise<Bracket
  * the cut like any other win. Ratings are deliberately left alone: an opponent
  * not turning up says nothing about how well anyone plays.
  */
+/**
+ * A knockout round needs a window like any other round.
+ *
+ * Group rounds get a `tournament_rounds` row when the next one opens; the
+ * knockout branch never created one, so rounds 100-103 had no window at all.
+ * Both checks that read it are written as "enforce if a round exists", so with
+ * no row they silently pass: a slot could be booked at any time whatsoever, a
+ * score had no round deadline to miss, and nothing could close the round on
+ * time — the bracket only moved when the stalled-knockout recovery noticed it.
+ */
+async function openRoundWindow(
+  client: import('pg').PoolClient,
+  tournamentId: string,
+  roundNumber: number,
+  durationMinutes: number
+): Promise<void> {
+  const startsAt = new Date();
+  const endsAt = new Date(startsAt.getTime() + durationMinutes * 60_000);
+  await client.query(
+    `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
+     VALUES ($1, $2, $3, $4, 'active')
+     ON CONFLICT (tournament_id, round_number) DO UPDATE
+       SET starts_at = EXCLUDED.starts_at,
+           ends_at = EXCLUDED.ends_at,
+           status = 'active'`,
+    [tournamentId, roundNumber, startsAt, endsAt]
+  );
+}
+
 /**
  * How long a complete-but-unresolved scoreline is left alone before this sweep
  * decides it. Long enough that a resolution still in flight is never
@@ -613,9 +660,15 @@ async function closeRound(
         sync.bracketMatches.push({ matchId: created.rows[0].id, player1Id: p1, player2Id: p2 });
       }
 
+      await openRoundWindow(client, tournamentId, bracketRound, roundDurationMinutes);
+
       await client.query(
         `UPDATE tournaments SET phase = 'knockout', updated_at = NOW() WHERE id = $1`,
         [tournamentId]
+      );
+      await client.query(
+        `UPDATE tournaments SET current_round_number = $1, updated_at = NOW() WHERE id = $2`,
+        [bracketRound, tournamentId]
       );
     } else {
       const keepCount = playersToAdvance(activeCount, fieldSize);

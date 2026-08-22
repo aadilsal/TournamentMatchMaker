@@ -6,6 +6,8 @@ import {
   QUEUE_MEMBER,
   queueTournamentKey,
   resolveAbandonedMatch,
+  resolveMatchOutcome,
+  winnerIdFromOutcome,
 } from '@vr-tournament/shared';
 import { releaseSlotLock } from '../lib/slot-lock.js';
 import { emitToUser } from '../lib/socket-bridge.js';
@@ -32,7 +34,20 @@ export async function processExpireUnplayedSlotsJob(
            (ts.id IS NOT NULL AND ts.end_time < NOW())
            OR (m.time_slot_id IS NULL AND m.created_at < NOW() - INTERVAL '2 hours')
          )
-         AND (m.result IS NULL OR m.result->>'player1Score' IS NULL OR m.result->>'player2Score' IS NULL)`
+         AND (
+           m.result IS NULL
+           OR m.result->>'player1Score' IS NULL
+           OR m.result->>'player2Score' IS NULL
+           -- A complete scoreline is normally left alone: the score that filled
+           -- it commits before the match is resolved, and expiring it in that
+           -- window would throw away a real result. But the resolution can fail
+           -- to run at all, and excluding every complete scoreline made that
+           -- permanent — the match stayed open for good, and both players stayed
+           -- "in a match" and could never be paired again. Once the row has been
+           -- untouched this long there is no resolution still in flight, so it is
+           -- decided below from the innings already on the board.
+           OR m.updated_at < NOW() - INTERVAL '5 minutes'
+         )`
     );
 
     for (const match of expiredMatches.rows) {
@@ -41,11 +56,56 @@ export async function processExpireUnplayedSlotsJob(
         const result = (match.result ?? {}) as {
           player1Score?: number | null;
           player2Score?: number | null;
+          winnerId?: string | null;
+          chaseTarget?: number | null;
+          chasePlayerId?: string | null;
         };
         // One player having batted is not the same as nobody turning up. In a
         // chase the setter batted before the pair even existed, so expiring the
         // match threw away a real innings and handed the no-show the same
         // outcome as the player who played. Whoever is on the board takes it.
+        // Both innings are on the board and nothing resolved them. The result is
+        // not in doubt — decide it from the scores rather than abandoning a
+        // match that was actually played.
+        if (result.player1Score != null && result.player2Score != null) {
+          const decided = resolveMatchOutcome(
+            match.player1_id,
+            match.player2_id,
+            result.player1Score,
+            result.player2Score,
+            { chaseTarget: result.chaseTarget ?? null, chasePlayerId: result.chasePlayerId ?? null }
+          );
+          const decidedWinner =
+            (result.winnerId as string | null) ??
+            winnerIdFromOutcome(decided, match.player1_id, match.player2_id);
+          await client.query(
+            `UPDATE matches SET status = 'completed', result = $1, updated_at = NOW() WHERE id = $2`,
+            [JSON.stringify({ ...result, winnerId: decidedWinner, outcome: decided }), match.id]
+          );
+          if (match.tournament_id && decidedWinner) {
+            const decidedLoser =
+              decidedWinner === match.player1_id ? match.player2_id : match.player1_id;
+            await client.query(
+              `UPDATE tournament_participants SET wins = wins + 1, updated_at = NOW()
+               WHERE tournament_id = $1 AND user_id = $2`,
+              [match.tournament_id, decidedWinner]
+            );
+            await client.query(
+              `UPDATE tournament_participants SET losses = losses + 1, updated_at = NOW()
+               WHERE tournament_id = $1 AND user_id = $2`,
+              [match.tournament_id, decidedLoser]
+            );
+          }
+          await client.query('COMMIT');
+          for (const playerId of [match.player1_id, match.player2_id]) {
+            await emitToUser(redis, playerId, 'match:updated', { matchId: match.id });
+          }
+          console.log(
+            `Settled stranded match ${match.id} from its recorded innings: ${result.player1Score}-${result.player2Score} (${decided})`
+          );
+          continue;
+        }
+
         const outcome = resolveAbandonedMatch(result.player1Score, result.player2Score);
         const status = outcome === 'abandoned' ? 'expired' : 'completed';
 

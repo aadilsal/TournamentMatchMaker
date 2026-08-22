@@ -7,6 +7,7 @@ import type {
   BuybackOption,
   QueueStatus,
   QueuePairFailedEvent,
+  QueueUpdatedEvent,
 } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
@@ -93,6 +94,18 @@ export function MatchesPage() {
   const [queueNotice, setQueueNotice] = useState<string | null>(null);
   useSocketEvent('queue:pair_failed', (data: QueuePairFailedEvent) => {
     setQueueNotice(data.message);
+  });
+
+  // Leaving the queue happens to the player, not because of anything they did
+  // here — the round closed, or the tournament finished. Take the server's word
+  // for it immediately instead of leaving "Finding opponent…" on screen until
+  // the next safety poll.
+  useSocketEvent('queue:updated', (data: QueueUpdatedEvent) => {
+    queryClient.setQueryData(LIVE_QUERY_KEYS.matchmakingStatus, (prev: QueueStatus | undefined) =>
+      prev ? { ...prev, ...data } : prev
+    );
+    if (!data.inQueue) setQueueNotice(null);
+    void queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matchmakingStatus });
   });
 
   const confirmMutation = useMutation({
