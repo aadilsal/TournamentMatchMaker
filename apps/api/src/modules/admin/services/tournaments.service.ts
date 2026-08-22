@@ -10,7 +10,10 @@ import type {
   AdminUpdateRoundInput,
   AdminUpdateTournamentInput,
   CreateTournamentInput,
+  RoundWindow,
+  Tournament,
 } from '@vr-tournament/shared';
+import { roundWindowViolation, roundsOutsideWindow } from '@vr-tournament/shared';
 import {
   mapBuyback,
   mapParticipant,
@@ -103,6 +106,7 @@ export class AdminTournamentsService {
 
   async update(actorId: string, id: string, input: AdminUpdateTournamentInput) {
     const before = await this.getById(id);
+    await this.assertWindowStillHoldsRounds(id, before, input);
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -233,7 +237,106 @@ export class AdminTournamentsService {
     return this.tournaments.getRounds(id);
   }
 
+  /**
+   * The other half of the round-fits-tournament rule: an edit that moves the
+   * tournament's own window must not strand a round outside it.
+   *
+   * Checked against what the rounds *will* be, not what they are. `update`
+   * calls `syncOpeningRoundWindow` straight afterwards, which rewrites the
+   * current round from the new start date and round length — so validating the
+   * stored window would reject an edit that is about to fix that very round.
+   */
+  private async assertWindowStillHoldsRounds(
+    id: string,
+    before: Tournament,
+    input: AdminUpdateTournamentInput
+  ) {
+    const movesWindow = input.startDate !== undefined || input.endDate !== undefined;
+    const movesRounds =
+      input.startDate !== undefined || input.roundDurationMinutes !== undefined;
+    if (!movesWindow && !movesRounds) return;
+
+    const startDate = input.startDate ?? before.startDate;
+    const endDate = input.endDate ?? before.endDate;
+    const status = input.status ?? before.status;
+    const currentRoundNumber = input.currentRoundNumber ?? before.currentRoundNumber;
+    const durationMinutes = input.roundDurationMinutes ?? before.roundDurationMinutes;
+
+    const rounds = await this.pool.query(
+      `SELECT tr.round_number, tr.starts_at, tr.ends_at, tr.status,
+              EXISTS (
+                SELECT 1 FROM matches m
+                WHERE m.tournament_id = tr.tournament_id
+                  AND m.round_number = tr.round_number
+              ) AS has_matches
+       FROM tournament_rounds tr
+       WHERE tr.tournament_id = $1
+       ORDER BY tr.round_number`,
+      [id]
+    );
+
+    // Mirrors `realignOpeningRound`'s own WHERE clause. Kept in step with it by
+    // hand because that query lives in the other service and runs after this
+    // one — if the two drift, the failure is a rejected edit rather than a
+    // corrupt window, which is the safe direction.
+    const willRealign = (r: { round_number: number; status: string; has_matches: boolean }) =>
+      movesRounds &&
+      r.round_number === currentRoundNumber &&
+      r.status === 'active' &&
+      !r.has_matches &&
+      ['draft', 'open', 'closed'].includes(status);
+
+    const realignedEnd = new Date(
+      new Date(startDate).getTime() + durationMinutes * 60_000
+    );
+
+    const projected: RoundWindow[] = rounds.rows.map((r) =>
+      willRealign(r)
+        ? { roundNumber: r.round_number, startsAt: startDate, endsAt: realignedEnd }
+        : { roundNumber: r.round_number, startsAt: r.starts_at, endsAt: r.ends_at }
+    );
+
+    const outside = roundsOutsideWindow(projected, { startDate, endDate });
+    if (outside.length === 0) return;
+
+    const names = outside.map((o) => `round ${o.round.roundNumber}`).join(', ');
+    const { violation } = outside[0]!;
+    throw new AppError(
+      'VALIDATION',
+      `These dates would leave ${names} outside the tournament: ${violation.message}`,
+      400,
+      { field: violation.path === 'startsAt' ? 'startDate' : 'endDate' }
+    );
+  }
+
+  /**
+   * The tournament's own window, for the round checks below. Read fresh rather
+   * than passed in: a round is created and edited through its own endpoints,
+   * which never carry the tournament's dates.
+   */
+  private async loadWindow(tournamentId: string) {
+    const result = await this.pool.query(
+      `SELECT start_date, end_date FROM tournaments WHERE id = $1`,
+      [tournamentId]
+    );
+    const row = result.rows[0];
+    if (!row) throw new AppError('NOT_FOUND', 'Tournament not found', 404);
+    return { startDate: row.start_date as Date, endDate: row.end_date as Date };
+  }
+
+  private async assertRoundFits(
+    tournamentId: string,
+    round: { startsAt: string | Date; endsAt: string | Date }
+  ) {
+    const violation = roundWindowViolation(round, await this.loadWindow(tournamentId));
+    if (violation) {
+      throw new AppError('VALIDATION', violation.message, 400, { field: violation.path });
+    }
+  }
+
   async createRound(actorId: string, tournamentId: string, input: AdminCreateRoundInput) {
+    await this.assertRoundFits(tournamentId, input);
+
     const result = await this.pool.query(
       `INSERT INTO tournament_rounds (tournament_id, round_number, starts_at, ends_at, status)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -257,6 +360,21 @@ export class AdminTournamentsService {
   }
 
   async updateRound(actorId: string, id: string, input: AdminUpdateRoundInput) {
+    if (input.startsAt !== undefined || input.endsAt !== undefined) {
+      const existing = await this.pool.query(
+        `SELECT tournament_id, starts_at, ends_at FROM tournament_rounds WHERE id = $1`,
+        [id]
+      );
+      const row = existing.rows[0];
+      if (!row) throw new AppError('NOT_FOUND', 'Round not found', 404);
+      // Merged over what is already stored: moving one end of the round still
+      // has to leave the whole window inside the tournament.
+      await this.assertRoundFits(row.tournament_id as string, {
+        startsAt: input.startsAt ?? (row.starts_at as Date),
+        endsAt: input.endsAt ?? (row.ends_at as Date),
+      });
+    }
+
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;

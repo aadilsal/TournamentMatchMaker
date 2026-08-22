@@ -9,6 +9,7 @@ import type {
   TournamentRegistration,
   TournamentRound,
 } from '@vr-tournament/shared';
+import { roundWindowViolation } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
 import {
   AdminQueryError,
@@ -338,6 +339,21 @@ export function AdminTournamentDetailPage() {
     }
     if (rounds.some((r) => r.roundNumber === n)) {
       errors.roundNumber = `Round ${n} already exists`;
+    }
+    // The round has to fit inside the tournament's own window. The API enforces
+    // it either way; checking here means the admin sees which end is out of
+    // bounds against the boundary itself, rather than a rejected submit.
+    if (newRoundStart && newRoundEnd && !errors.startsAt && !errors.endsAt) {
+      const violation = roundWindowViolation(
+        { startsAt: new Date(newRoundStart), endsAt: new Date(newRoundEnd) },
+        tournament
+      );
+      if (violation) {
+        errors[violation.path] =
+          violation.path === 'startsAt'
+            ? `Round starts before the tournament does (${violation.limit.toLocaleString()})`
+            : `Round ends after the tournament does (${violation.limit.toLocaleString()})`;
+      }
     }
     if (Object.keys(errors).length > 0) {
       setRoundErrors(errors);

@@ -1,42 +1,32 @@
-export type RoundDurationUnit = 'minutes' | 'hours' | 'days';
+/**
+ * Rounds are configured in whole days only. Anything shorter than a day cannot
+ * contain a venue time slot (slots are hour-long windows on the hour), so a
+ * sub-day round leaves players with no pickable slot at all.
+ */
+export const MINUTES_PER_DAY = 24 * 60;
 
-export const ROUND_DURATION_UNIT_OPTIONS: { value: RoundDurationUnit; label: string }[] = [
-  { value: 'minutes', label: 'Minutes' },
-  { value: 'hours', label: 'Hours' },
-  { value: 'days', label: 'Days' },
-];
+export const MIN_ROUND_DURATION_DAYS = 1;
+export const MAX_ROUND_DURATION_DAYS = 30;
 
-export const MIN_ROUND_DURATION_MINUTES = 15;
-export const MAX_ROUND_DURATION_MINUTES = 30 * 24 * 60;
+export const MIN_ROUND_DURATION_MINUTES = MIN_ROUND_DURATION_DAYS * MINUTES_PER_DAY;
+export const MAX_ROUND_DURATION_MINUTES = MAX_ROUND_DURATION_DAYS * MINUTES_PER_DAY;
 
-export function roundDurationToMinutes(value: number, unit: RoundDurationUnit): number {
-  switch (unit) {
-    case 'minutes':
-      return value;
-    case 'hours':
-      return value * 60;
-    case 'days':
-      return value * 24 * 60;
-  }
+export function roundDurationDaysToMinutes(days: number): number {
+  return days * MINUTES_PER_DAY;
 }
 
-export function minutesToRoundDurationParts(minutes: number): {
-  value: string;
-  unit: RoundDurationUnit;
-} {
-  if (minutes >= 24 * 60 && minutes % (24 * 60) === 0) {
-    return { value: String(minutes / (24 * 60)), unit: 'days' };
-  }
-  if (minutes >= 60 && minutes % 60 === 0) {
-    return { value: String(minutes / 60), unit: 'hours' };
-  }
-  return { value: String(minutes), unit: 'minutes' };
+/**
+ * Days to show for a stored duration. Legacy tournaments may hold sub-day or
+ * part-day values, so round up — the admin sees the next whole day rather than
+ * a zero, and re-saving lengthens the round instead of silently shrinking it.
+ */
+export function minutesToRoundDurationDays(minutes: number): string {
+  const days = Math.ceil(minutes / MINUTES_PER_DAY);
+  return String(Math.min(Math.max(days, MIN_ROUND_DURATION_DAYS), MAX_ROUND_DURATION_DAYS));
 }
 
-export function isValidRoundDurationMinutes(minutes: number): boolean {
+export function isValidRoundDurationDays(days: number): boolean {
   return (
-    Number.isInteger(minutes) &&
-    minutes >= MIN_ROUND_DURATION_MINUTES &&
-    minutes <= MAX_ROUND_DURATION_MINUTES
+    Number.isInteger(days) && days >= MIN_ROUND_DURATION_DAYS && days <= MAX_ROUND_DURATION_DAYS
   );
 }

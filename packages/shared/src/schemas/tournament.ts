@@ -51,6 +51,76 @@ export function applyTournamentWindowRules<T extends z.ZodTypeAny>(schema: T) {
   );
 }
 
+export interface RoundWindow {
+  roundNumber: number;
+  startsAt: string | Date;
+  endsAt: string | Date;
+}
+
+export interface RoundWindowViolation {
+  /** Which end of the round is out of bounds, matching the form field name. */
+  path: 'startsAt' | 'endsAt';
+  /** The tournament boundary the round crossed. */
+  limit: Date;
+  message: string;
+}
+
+/**
+ * Every round has to sit inside the tournament's own window.
+ *
+ * The two are edited from different places — rounds on the Rounds tab, the
+ * window on the edit form — so either side can be moved out from under the
+ * other, and nothing used to stop it. A round outside the window is not
+ * cosmetic: the end-date sweep completes the tournament and expires every open
+ * match the moment `end_date` passes, so a round hanging past the end date is
+ * shut by the lifecycle before it can be played, and a round starting before
+ * `start_date` is unreachable because the slot picker only offers slots inside
+ * the round *and* inside the tournament.
+ *
+ * This is the single definition — the admin API enforces it on both sides of
+ * the boundary and the form checks it up front, so the button and the API
+ * cannot disagree.
+ */
+export function roundWindowViolation(
+  round: Pick<RoundWindow, 'startsAt' | 'endsAt'>,
+  tournament: { startDate: string | Date; endDate: string | Date }
+): RoundWindowViolation | null {
+  const roundStart = new Date(round.startsAt);
+  const roundEnd = new Date(round.endsAt);
+  const start = new Date(tournament.startDate);
+  const end = new Date(tournament.endDate);
+
+  if (roundStart.getTime() < start.getTime()) {
+    return {
+      path: 'startsAt',
+      limit: start,
+      message: `Round starts before the tournament does (${start.toISOString()}) — move the round later, or bring the tournament start date forward`,
+    };
+  }
+  if (roundEnd.getTime() > end.getTime()) {
+    return {
+      path: 'endsAt',
+      limit: end,
+      message: `Round ends after the tournament does (${end.toISOString()}) — shorten the round, or push the tournament end date back`,
+    };
+  }
+  return null;
+}
+
+/**
+ * The reverse check, for an edit that moves the tournament's own window: every
+ * round that would be left outside it, so the error can name them.
+ */
+export function roundsOutsideWindow(
+  rounds: RoundWindow[],
+  tournament: { startDate: string | Date; endDate: string | Date }
+): Array<{ round: RoundWindow; violation: RoundWindowViolation }> {
+  return rounds.flatMap((round) => {
+    const violation = roundWindowViolation(round, tournament);
+    return violation ? [{ round, violation }] : [];
+  });
+}
+
 /**
  * The plain object, un-refined, so callers that need `.partial()` or `.extend()`
  * can build on it and re-apply the window rules themselves.

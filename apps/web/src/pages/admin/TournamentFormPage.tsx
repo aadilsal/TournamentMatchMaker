@@ -1,9 +1,10 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { RoundDurationUnit, Tournament, TournamentStatus } from '@vr-tournament/shared';
+import type { Tournament, TournamentStatus } from '@vr-tournament/shared';
 import {
-  minutesToRoundDurationParts,
-  ROUND_DURATION_UNIT_OPTIONS,
+  MAX_ROUND_DURATION_DAYS,
+  MIN_ROUND_DURATION_DAYS,
+  minutesToRoundDurationDays,
   TOURNAMENT_STATUS_LABELS,
   TOURNAMENT_STATUS_TRANSITIONS,
   allowedTournamentStatuses,
@@ -37,8 +38,7 @@ const defaultForm: {
   maxPlayers: string;
   skillTier: string;
   buybackPriceCents: string;
-  roundDurationValue: string;
-  roundDurationUnit: RoundDurationUnit;
+  roundDurationDays: string;
 } = {
   name: '',
   game: 'VR Cricket',
@@ -50,8 +50,7 @@ const defaultForm: {
   maxPlayers: '',
   skillTier: '3',
   buybackPriceCents: '500',
-  roundDurationValue: '2',
-  roundDurationUnit: 'days',
+  roundDurationDays: '2',
 };
 
 export function AdminTournamentFormPage() {
@@ -69,7 +68,7 @@ export function AdminTournamentFormPage() {
 
   useEffect(() => {
     if (tournament) {
-      const duration = minutesToRoundDurationParts(tournament.roundDurationMinutes);
+      const roundDurationDays = minutesToRoundDurationDays(tournament.roundDurationMinutes);
       setForm({
         name: tournament.name,
         game: tournament.game,
@@ -81,8 +80,7 @@ export function AdminTournamentFormPage() {
         maxPlayers: tournament.maxPlayers?.toString() ?? '',
         skillTier: String(tournament.skillTier),
         buybackPriceCents: String(tournament.buybackPriceCents),
-        roundDurationValue: duration.value,
-        roundDurationUnit: duration.unit,
+        roundDurationDays,
       });
     }
   }, [tournament]);
@@ -109,8 +107,7 @@ export function AdminTournamentFormPage() {
     setErrors((e) => {
       const next = { ...e };
       delete next[key];
-      delete next.roundDurationValue;
-      delete next.roundDurationUnit;
+      delete next.roundDurationDays;
       return next;
     });
   };
@@ -211,30 +208,23 @@ export function AdminTournamentFormPage() {
             </div>
           </div>
           <div>
-            <Label required>Normal round duration</Label>
-            <div className="grid grid-cols-2 gap-3 mt-1">
+            <Label required>Normal round duration (days)</Label>
+            <div className="mt-1 flex items-center gap-3">
               <Input
                 type="number"
-                min={1}
-                value={form.roundDurationValue}
-                onChange={(e) => set('roundDurationValue', e.target.value)}
+                min={MIN_ROUND_DURATION_DAYS}
+                max={MAX_ROUND_DURATION_DAYS}
+                aria-label="Round duration in days"
+                value={form.roundDurationDays}
+                onChange={(e) => set('roundDurationDays', e.target.value)}
               />
-              <Select
-                aria-label="Round duration unit"
-                value={form.roundDurationUnit}
-                onChange={(e) => set('roundDurationUnit', e.target.value)}
-              >
-                {ROUND_DURATION_UNIT_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
+              <span className="text-sm text-[var(--color-muted-foreground)]">days</span>
             </div>
             <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
               How long each normal round runs before it closes and winners advance (e.g. 2 days).
+              Rounds are set in whole days so every round is long enough to contain a playable slot.
             </p>
-            <AdminFieldError message={errors.roundDurationValue || errors.roundDurationUnit} />
+            <AdminFieldError message={errors.roundDurationDays} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>

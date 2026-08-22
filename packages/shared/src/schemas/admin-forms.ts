@@ -10,9 +10,10 @@ import {
 import { createVenueSchema } from './venue.js';
 import { tournamentStatusSchema } from './tournament.js';
 import {
-  isValidRoundDurationMinutes,
-  roundDurationToMinutes,
-  type RoundDurationUnit,
+  MAX_ROUND_DURATION_DAYS,
+  MIN_ROUND_DURATION_DAYS,
+  isValidRoundDurationDays,
+  roundDurationDaysToMinutes,
 } from '../round-duration.js';
 
 export type FieldErrors = Record<string, string>;
@@ -95,15 +96,13 @@ export function toAdminCreateUserInput(form: AdminUserFormInput) {
   });
 }
 
-const roundDurationUnitSchema = z.enum(['minutes', 'hours', 'days']);
-
-const roundDurationValueString = z
+const roundDurationDaysString = z
   .string()
   .min(1, 'Round duration is required')
   .refine((v: string) => {
     const n = parseInt(v, 10);
-    return Number.isInteger(n) && n >= 1;
-  }, 'Enter a whole number of at least 1');
+    return Number.isInteger(n) && n >= MIN_ROUND_DURATION_DAYS;
+  }, 'Enter a whole number of days, at least 1');
 
 export const adminTournamentFormSchema = z
   .object({
@@ -117,8 +116,7 @@ export const adminTournamentFormSchema = z
     maxPlayers: positiveIntString('Max players'),
     skillTier: skillTierString,
     buybackPriceCents: nonNegativeIntString('Buyback price'),
-    roundDurationValue: roundDurationValueString,
-    roundDurationUnit: roundDurationUnitSchema,
+    roundDurationDays: roundDurationDaysString,
   })
   .superRefine((data, ctx) => {
     const start = parseDateTimeLocal(data.startDate);
@@ -163,13 +161,12 @@ export const adminTournamentFormSchema = z
       });
     }
 
-    const value = parseInt(data.roundDurationValue, 10);
-    const minutes = roundDurationToMinutes(value, data.roundDurationUnit as RoundDurationUnit);
-    if (!isValidRoundDurationMinutes(minutes)) {
+    const days = parseInt(data.roundDurationDays, 10);
+    if (!isValidRoundDurationDays(days)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['roundDurationValue'],
-        message: 'Round duration must be between 15 minutes and 30 days',
+        path: ['roundDurationDays'],
+        message: `Round duration must be between ${MIN_ROUND_DURATION_DAYS} and ${MAX_ROUND_DURATION_DAYS} days`,
       });
     }
   });
@@ -188,10 +185,7 @@ export function toTournamentApiBody(form: AdminTournamentFormInput) {
     maxPlayers: form.maxPlayers.trim() ? parseInt(form.maxPlayers, 10) : undefined,
     skillTier: parseInt(form.skillTier, 10),
     buybackPriceCents: parseInt(form.buybackPriceCents, 10),
-    roundDurationMinutes: roundDurationToMinutes(
-      parseInt(form.roundDurationValue, 10),
-      form.roundDurationUnit
-    ),
+    roundDurationMinutes: roundDurationDaysToMinutes(parseInt(form.roundDurationDays, 10)),
   };
 }
 
