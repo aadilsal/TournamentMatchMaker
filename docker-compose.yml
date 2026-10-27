@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: vrtournament
       POSTGRES_DB: vrtournament
     ports:
-      - "15432:5432"
+      - "${POSTGRES_HOST_PORT:-15432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,6 +27,23 @@ services:
       timeout: 5s
       retries: 5
 
+  # One-shot: migrate + reset demo data on every `up`, then exit.
+  seed:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    working_dir: /app
+    command: ["pnpm", "seed"]
+    environment:
+      DATABASE_URL: postgresql://vrtournament:vrtournament@postgres:5432/vrtournament
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   api:
     build:
       context: .
@@ -46,14 +63,9 @@ services:
       CORS_ORIGIN: http://localhost:5173
       META_API_KEY: c992d7bd6b13bf4220bde1e52d6b76c05abb2170ad3eaed4
       META_SSH_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQtYp3sfaQfsRelTWXbdnikbVItI91dIu4lvnpcK0Od meta-integration@vrtournament
-    volumes:
-      - ./apps/api:/app/apps/api
-      - ./packages:/app/packages
-      - /app/node_modules
-      - /app/apps/api/node_modules
     depends_on:
-      postgres:
-        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -68,14 +80,9 @@ services:
       NODE_ENV: development
       APP_URL: http://localhost:5173
       NOTIFICATION_EMAIL_ENABLED: "true"
-    volumes:
-      - ./apps/worker:/app/apps/worker
-      - ./packages:/app/packages
-      - /app/node_modules
-      - /app/apps/worker/node_modules
     depends_on:
-      postgres:
-        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
@@ -88,11 +95,6 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:3000
-    volumes:
-      - ./apps/web:/app/apps/web
-      - ./packages:/app/packages
-      - /app/node_modules
-      - /app/apps/web/node_modules
     depends_on:
       - api
 

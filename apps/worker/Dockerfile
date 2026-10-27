@@ -7,6 +7,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/worker/package.json ./apps/worker/
 COPY packages/shared/package.json ./packages/shared/
 RUN pnpm install --frozen-lockfile
+COPY tsconfig.base.json ./
 COPY packages/shared ./packages/shared
 COPY apps/worker ./apps/worker
 RUN pnpm --filter @vr-tournament/shared build
@@ -15,6 +16,7 @@ CMD ["pnpm", "--filter", "@vr-tournament/worker", "dev"]
 FROM base AS build
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/worker ./apps/worker
+COPY tsconfig.base.json ./
 COPY packages/shared ./packages/shared
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @vr-tournament/shared build

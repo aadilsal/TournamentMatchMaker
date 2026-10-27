@@ -41,6 +41,14 @@ pnpm dev          # API :3000, Web :5173, Worker (shared package rebuilds on cha
 
 Open **http://localhost:5173** for the web app and **http://localhost:3000/health** for API health.
 
+### Demo: everything in Docker
+
+```bash
+docker compose up -d --build   # postgres, redis, seed (migrate + demo data), api, worker, web
+```
+
+Open **http://localhost:5173**. The `seed` step resets demo data on every `up`. Port 5173 must be free on the host, and if 15432 is taken run `POSTGRES_HOST_PORT=25432 docker compose up -d --build`. Stop with `docker compose down` (add `-v` to wipe the database).
+
 ### Test Accounts (after `pnpm seed`)
 
 Password for all accounts: **`password123`**
