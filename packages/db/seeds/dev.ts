@@ -151,7 +151,13 @@ interface MatchSeed {
   venueId?: string | null;
   timeSlotId?: string | null;
   status: string;
-  result?: { player1Score: number; player2Score: number; winnerId: string | null } | null;
+  result?: {
+    player1Score: number | null;
+    player2Score: number | null;
+    winnerId: string | null;
+    chaseTarget?: number;
+    chasePlayerId?: string;
+  } | null;
   scheduledAt?: Date;
   roundNumber?: number;
   phase?: 'normal' | 'knockout';
@@ -430,7 +436,19 @@ async function insertMatch(client: PoolClient, m: MatchSeed) {
       m.bracketSlot ?? null,
     ]
   );
-  return result.rows[0].id as string;
+  const matchId = result.rows[0].id as string;
+  // Every score on the board is an innings played, as the app records it.
+  for (const [userId, score] of [
+    [m.player1Id, m.result?.player1Score],
+    [m.player2Id, m.result?.player2Score],
+  ] as const) {
+    if (score == null) continue;
+    await client.query(
+      `INSERT INTO match_innings (match_id, user_id, score, source) VALUES ($1, $2, $3, 'meta')`,
+      [matchId, userId, score]
+    );
+  }
+  return matchId;
 }
 
 function completedResult(p1: string, p2: string, p1Score: number, p2Score: number) {
@@ -441,8 +459,9 @@ function completedResult(p1: string, p2: string, p1Score: number, p2Score: numbe
   };
 }
 
-function inProgressResult(p1Score: number, p2Score: number) {
-  return { player1Score: p1Score, player2Score: p2Score, winnerId: null };
+/** Player 1 has batted and set the target; player 2 is still to chase it. */
+function inProgressResult(p2: string, p1Score: number) {
+  return { player1Score: p1Score, player2Score: null, winnerId: null, chaseTarget: p1Score, chasePlayerId: p2 };
 }
 
 /** Seeds RO16 → QF → SF (+ optional Final) for a 16-player knockout bracket demo. */
@@ -498,7 +517,7 @@ async function seedKnockoutBracket(
       roundNumber: KNOCKOUT.qf,
       phase: 'knockout',
       bracketSlot: slot,
-      result: completed ? completedResult(p1, p2, 24, 20) : inProgressResult(10, 8),
+      result: completed ? completedResult(p1, p2, 24, 20) : inProgressResult(p2, 10),
     });
   }
 
@@ -927,7 +946,7 @@ async function seed() {
           status === 'completed'
             ? completedResult(p1, p2, 22, 19)
             : status === 'in_progress'
-              ? { player1Score: 8, player2Score: 6, winnerId: p1 }
+              ? inProgressResult(p2, 8)
               : null,
       });
     }
@@ -975,7 +994,7 @@ async function seed() {
       currentRoundNumber: 1,
     });
 
-    await upsertRound(client, karachiOpenId, 1, inDays(13), inDays(15), 'active');
+    await upsertRound(client, karachiOpenId, 1, inDays(14), inDays(16), 'active');
 
     const karachiPlayers = [playerIds[2], playerIds[4], ...playerIds.slice(20, 25)];
     for (const pid of karachiPlayers) {
@@ -1099,7 +1118,7 @@ async function seed() {
     });
 
     // Round window must overlap generated venue slots (next 7 days).
-    await upsertRound(client, islamabadLeagueId, 1, inDays(0), inDays(6), 'active');
+    await upsertRound(client, islamabadLeagueId, 1, inDays(2), inDays(9), 'active');
 
     // --- Casual matchmaking matches for test accounts ---
     const testUserIds = playerIds.slice(0, 3);
@@ -1130,7 +1149,7 @@ async function seed() {
           cfg.status === 'completed'
             ? completedResult(p1, p2, 21, 17)
             : cfg.status === 'in_progress'
-              ? { player1Score: 5, player2Score: 4, winnerId: p1 }
+              ? inProgressResult(p2, 5)
               : null,
       });
     }
@@ -1145,12 +1164,18 @@ async function seed() {
       const bookingResult = await client.query(
         `INSERT INTO bookings (user_id, time_slot_id, status)
          VALUES ($1, $2, $3)
-         ON CONFLICT (user_id, time_slot_id) DO UPDATE SET status = EXCLUDED.status
+         ON CONFLICT (user_id, time_slot_id) WHERE status <> 'cancelled' DO UPDATE SET status = EXCLUDED.status
          RETURNING id`,
-        [userId, slot.id, i % 2 === 0 ? 'confirmed' : 'pending']
+        [userId, slot.id, 'confirmed']
       );
       bookingIds.push(bookingResult.rows[0].id);
     }
+    // Seat counts follow the confirmed bookings, as the app derives them.
+    await client.query(
+      `UPDATE time_slots ts SET booked_count = c.n
+       FROM (SELECT time_slot_id, COUNT(*)::int AS n FROM bookings WHERE status = 'confirmed' GROUP BY time_slot_id) c
+       WHERE c.time_slot_id = ts.id AND ts.booked_count <> c.n`
+    );
 
     if (bookingIds[0]) {
       await client.query(
@@ -1167,12 +1192,12 @@ async function seed() {
     );
 
     const notificationSeeds = [
-      { userId: testUserIds[0], type: 'match_found', payload: { matchId: 'demo', opponent: 'player2_vr' } },
-      { userId: testUserIds[0], type: 'match_confirmed', payload: { venue: 'VR Arena Lahore' } },
-      { userId: testUserIds[0], type: 'tournament_round_closed', payload: { tournament: 'Lahore VR Championship', round: 1 } },
-      { userId: testUserIds[1], type: 'match_found', payload: { opponent: 'player1' }, read: true },
-      { userId: testUserIds[1], type: 'queue_joined', payload: { position: 3 } },
-      { userId: testUserIds[2], type: 'booking_confirmed', payload: { venue: 'Karachi VR Center' } },
+      // Same payload shape the app sends: a readable message and an in-app link.
+      { userId: testUserIds[0], type: 'match_found', payload: { opponentUsername: 'player2_vr', message: 'You have a new match against player2_vr. Confirm it on My Matches.', link: '/matches' } },
+      { userId: testUserIds[0], type: 'match_confirmed', payload: { opponentUsername: 'player3_khi', message: 'Your match against player3_khi is confirmed.', link: '/matches' } },
+      { userId: testUserIds[0], type: 'tournament_registered', payload: { tournamentName: 'Lahore VR Championship', message: "You're registered for Lahore VR Championship.", link: '/tournaments' } },
+      { userId: testUserIds[1], type: 'match_found', payload: { opponentUsername: 'player1', message: 'You have a new match against player1. Confirm it on My Matches.', link: '/matches' }, read: true },
+      { userId: testUserIds[2], type: 'booking_confirmed', payload: { venue: 'Karachi VR Center', message: 'Your booking at Karachi VR Center is confirmed.', link: '/bookings' } },
     ];
 
     for (const n of notificationSeeds) {

@@ -44,6 +44,10 @@ const MIGRATION_MARKERS = {
     column: { table: 'tournaments', name: 'registration_opens_at' },
   },
   '1738000000016_innings-turn-lock-and-bots': { table: 'match_innings' },
+  '1738000000017_password-resets': { table: 'password_resets' },
+  '1738000000018_booking-rebook-and-buyback-guards': {
+    column: { table: 'buybacks', name: 'refunded_at' },
+  },
 };
 
 async function tableExists(client, table) {
