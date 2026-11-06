@@ -135,7 +135,8 @@ export const tournamentFieldsSchema = z.object({
   status: tournamentStatusSchema.optional(),
   maxPlayers: z.number().int().positive().optional(),
   skillTier: z.number().int().min(1).max(5).optional(),
-  buybackPriceCents: z.number().int().min(0).optional(),
+  // Stripe's minimum charge is 50 cents; 0 means buybacks are off.
+  buybackPriceCents: z.number().int().min(0).refine((v) => v === 0 || v >= 50, 'Buyback price must be 0 (off) or at least 50 cents').optional(),
   roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60).optional(),
 });
 

@@ -87,3 +87,7 @@ export function isLiveParticipation(
 /** SQL form of {@link isLiveParticipation}, for queries that join the two tables. */
 export const LIVE_PARTICIPATION_SQL =
   `tp.status <> '${TERMINAL_PARTICIPANT_STATUS}' AND t.status <> 'completed'`;
+
+/** Effective round start (aliases `t`, `tr`): until a tournament is live, play never opens before its start date. */
+export const ROUND_PLAY_STARTS_AT_SQL =
+  `CASE WHEN t.status = 'in_progress' THEN tr.starts_at ELSE GREATEST(tr.starts_at, t.start_date) END`;

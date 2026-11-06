@@ -137,6 +137,8 @@ export interface Booking {
   createdAt: string;
   slot?: TimeSlot;
   venue?: Venue;
+  /** Tournament this seat was booked for; null for a casual booking. Present on `GET /bookings/me`. */
+  tournament?: Pick<Tournament, 'id' | 'name'> | null;
 }
 
 export interface AuthTokens {
@@ -615,6 +617,7 @@ export interface AdminUserDetail extends User {
 
 export interface AdminIntegrationsConfig {
   meta: { configured: boolean; apiKeyPreview: string | null };
-  email: { enabled: boolean; provider: string; from: string | null };
+  /** providers = the fallback chain actually configured, in send order; empty = nothing can send. */
+  email: { enabled: boolean; provider: string; from: string | null; providers: string[] };
   stripe: { configured: boolean; mode: string };
 }

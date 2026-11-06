@@ -25,4 +25,5 @@ export * from './slot-utils.js';
 export * from './match-resolution.js';
 export * from './match-turn.js';
 export * from './bot-player.js';
+export * from './notification-copy.js';
 export * from './types.js';

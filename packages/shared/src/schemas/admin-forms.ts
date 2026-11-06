@@ -8,6 +8,8 @@ import {
   userRoleSchema,
 } from './admin.js';
 import { createVenueSchema } from './venue.js';
+import { MAX_SLOTS_PER_REQUEST } from './slot.js';
+import { passwordSchema } from './auth.js';
 import { tournamentStatusSchema } from './tournament.js';
 import {
   MAX_ROUND_DURATION_DAYS,
@@ -88,7 +90,7 @@ function isSameLocalDay(a: Date, b: Date): boolean {
 
 export const adminUserFormSchema = z.object({
   email: z.string().email('Enter a valid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(128),
+  password: passwordSchema,
   username: z
     .string()
     .min(3, 'Username must be at least 3 characters')
@@ -139,6 +141,10 @@ export const adminTournamentFormSchema = z
     roundDurationDays: roundDurationDaysString,
   })
   .superRefine((data, ctx) => {
+    const price = Number(data.buybackPriceCents);
+    if (price > 0 && price < 50) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['buybackPriceCents'], message: 'Enter 0 (off) or at least $0.50' });
+    }
     const start = parseDateTimeLocal(data.startDate);
     const end = parseDateTimeLocal(data.endDate);
     if (!start) {
@@ -466,8 +472,11 @@ export const adminBroadcastFormSchema = z.object({
 
 export type AdminBroadcastFormInput = z.infer<typeof adminBroadcastFormSchema>;
 
-/** Max span a single slot-generation run may cover, to avoid runaway inserts. */
-export const MAX_SLOT_GENERATION_DAYS = 31;
+/** Hourly slots per day the venue page generates (10am–8pm). */
+export const SLOT_GENERATION_HOURS_PER_DAY = 10;
+
+/** Max days per run so the API's per-request slot cap is never exceeded. */
+export const MAX_SLOT_GENERATION_DAYS = Math.floor(MAX_SLOTS_PER_REQUEST / SLOT_GENERATION_HOURS_PER_DAY);
 
 function parseDateOnly(value: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
@@ -480,8 +489,6 @@ export const adminSlotGenerationFormSchema = z
   .object({
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
-    registrationOpensAt: z.string().min(1, 'Registration open date is required'),
-    registrationClosesAt: z.string().min(1, 'Registration close date is required'),
   })
   .superRefine((data, ctx) => {
     const start = parseDateOnly(data.startDate);

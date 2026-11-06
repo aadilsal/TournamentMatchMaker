@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { createVenueSchema } from './venue.js';
-import { createSlotsSchema } from './slot.js';
+import { MAX_SLOT_CAPACITY, MAX_SLOTS_PER_REQUEST, timeZoneSchema } from './slot.js';
+import { passwordSchema } from './auth.js';
 import {
   createTournamentSchema,
   tournamentFieldsSchema,
@@ -9,6 +10,13 @@ import {
 } from './tournament.js';
 
 export const userRoleSchema = z.enum(['player', 'venue_admin', 'tournament_admin', 'superadmin']);
+
+/** Player lookup open to every admin role: public fields only, for pickers. */
+export const adminUserLookupQuerySchema = z.object({
+  search: z.string().max(100).optional(),
+  id: z.string().uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(20).default(20),
+});
 
 export const adminListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -19,7 +27,7 @@ export const adminListQuerySchema = z.object({
 
 export const adminCreateUserSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(128),
+  password: passwordSchema,
   username: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_]+$/),
   country: z.string().max(100).optional().nullable(),
   city: z.string().max(100).optional().nullable(),
@@ -48,7 +56,7 @@ export const adminUpdateUserSchema = z.object({
 });
 
 export const adminResetPasswordSchema = z.object({
-  password: z.string().min(8).max(128),
+  password: passwordSchema,
 });
 
 export type AdminResetPasswordInput = z.infer<typeof adminResetPasswordSchema>;
@@ -58,6 +66,7 @@ export const adminUpdateVenueSchema = createVenueSchema.partial();
 export const adminSlotListQuerySchema = z.object({
   venueId: z.string().uuid().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  tz: timeZoneSchema.optional(),
   status: z.enum(['available', 'full', 'locked']).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(100),
 });
@@ -65,7 +74,7 @@ export const adminSlotListQuerySchema = z.object({
 export const adminUpdateSlotSchema = z.object({
   startTime: z.string().datetime().optional(),
   endTime: z.string().datetime().optional(),
-  maxCapacity: z.number().int().min(1).optional(),
+  maxCapacity: z.number().int().min(1).max(MAX_SLOT_CAPACITY).optional(),
   status: z.enum(['available', 'full', 'locked']).optional(),
   bookedCount: z.number().int().min(0).optional(),
 });
@@ -75,8 +84,25 @@ export const adminGenerateSlotsSchema = z.object({
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startHour: z.number().int().min(0).max(23).default(10),
   endHour: z.number().int().min(1).max(24).default(20),
-  maxCapacity: z.number().int().min(1).optional(),
-});
+  maxCapacity: z.number().int().min(1).max(MAX_SLOT_CAPACITY).optional(),
+  // Hours are wall-clock hours in this zone (the admin's), not UTC.
+  timeZone: timeZoneSchema.default('UTC'),
+})
+  .refine((d) => d.endHour > d.startHour, {
+    message: 'End hour must be after start hour',
+    path: ['endHour'],
+  })
+  .refine((d) => d.endDate >= d.startDate, {
+    message: 'End date must be on or after start date',
+    path: ['endDate'],
+  })
+  .refine(
+    (d) =>
+      ((Date.parse(d.endDate) - Date.parse(d.startDate)) / 86_400_000 + 1) *
+        (d.endHour - d.startHour) <=
+      MAX_SLOTS_PER_REQUEST,
+    { message: `That range would create more than ${MAX_SLOTS_PER_REQUEST} slots`, path: ['endDate'] }
+  );
 
 export const adminCreateBookingSchema = z.object({
   userId: z.string().uuid(),
@@ -204,6 +230,9 @@ export const adminCreateMatchSchema = z.object({
     'cancelled',
     'expired',
   ]).optional(),
+}).refine((m) => m.player1Id !== m.player2Id, {
+  message: 'Players must be different',
+  path: ['player2Id'],
 });
 
 export const adminUpdateMatchSchema = z.object({
@@ -223,6 +252,9 @@ export const adminUpdateMatchSchema = z.object({
   roundNumber: z.number().int().positive().optional().nullable(),
   phase: z.enum(['normal', 'knockout']).optional().nullable(),
   bracketSlot: z.number().int().optional().nullable(),
+}).refine((m) => !m.player1Id || m.player1Id !== m.player2Id, {
+  message: 'Players must be different',
+  path: ['player2Id'],
 });
 
 export const adminMatchResultSchema = z.object({
