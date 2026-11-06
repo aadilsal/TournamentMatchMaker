@@ -136,6 +136,54 @@ pm2 logs tournament-api --lines 30 --nostream
 
 ---
 
+## One-time: email delivery
+
+The API and worker try **Resend → SMTP → SES** and use the first that accepts the
+message. Nothing configured = nothing is sent (password resets included), and
+the admin **Integrations** page says so in red.
+
+1. **Resend (primary).** In the Resend dashboard → Domains, add `pixelpaddle.com`,
+   add the DNS records it lists (SPF/DKIM) at the DNS host, wait for
+   *Verified*. Then in the VM's `.env`: `RESEND_API_KEY=re_…` and
+   `RESEND_FROM_EMAIL=notifications@pixelpaddle.com`. Resend refuses any
+   unverified sender domain.
+2. **SMTP (fallback).** Any mailbox that allows SMTP, e.g. Google Workspace:
+   `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`,
+   `SMTP_USER=` / `SMTP_PASS=` (an app password), `SMTP_FROM_EMAIL=` (same
+   address or an alias of it).
+3. `pm2 restart tournament-api tournament-worker --update-env`, then admin →
+   Integrations → **Send test to me**. It reports which provider delivered, or
+   each provider's error.
+
+## One-time: security headers for the player site
+
+The API sends helmet's headers, but nginx serves the SPA bare. Add this to the
+`server` block for `tournament.pixelpaddle.com` (443) in
+`/etc/nginx/sites-enabled/`, and `server_tokens off;` in the `http` block of
+`/etc/nginx/nginx.conf`. `always` keeps the headers on error pages too.
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Frame-Options "DENY" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=(self \"https://js.stripe.com\")" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.tournament.pixelpaddle.com https://*.stripe.com; font-src 'self' data:; connect-src 'self' https://api.tournament.pixelpaddle.com wss://api.tournament.pixelpaddle.com https://api.stripe.com; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+```
+
+A `location` block that has its own `add_header` drops these — repeat them there
+if one exists. Then:
+
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+curl -sI https://tournament.pixelpaddle.com/ | grep -iE 'strict-transport|content-security|x-frame|nosniff|^server'
+```
+
+Open the site, log in, open a buyback payment form and watch the browser console
+for `Content-Security-Policy` violations before calling it done.
+
+---
+
 ## Logs
 
 ```bash

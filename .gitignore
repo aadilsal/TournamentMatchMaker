@@ -8,3 +8,6 @@ build/
 coverage/
 .turbo/
 *.tsbuildinfo
+
+# Demo recordings (large binaries; repo is public)
+videos/

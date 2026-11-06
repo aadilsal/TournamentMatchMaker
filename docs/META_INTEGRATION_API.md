@@ -72,7 +72,7 @@ Every request **must** include at least one of the shared authentication headers
 ```http
 GET /api/v1/integrations/meta/matches/current?userId=8fe6f2c1-ea04-41a8-a076-8754a696bd16 HTTP/1.1
 Host: api.pixelpaddle.example
-x-meta-api-key: c992d7bd6b13bf4220bde1e52d6b76c05abb2170ad3eaed4
+x-meta-api-key: <your-meta-api-key>
 x-meta-ssh-public-key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQtYp3sfaQfsRelTWXbdnikbVItI91dIu4lvnpcK0Od meta-integration@vrtournament
 Accept: application/json
 ```
@@ -652,6 +652,74 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/identi
 
 ---
 
+### 5.5 Live tournaments — enable the Tournament button
+
+Tells the Quest app whether any tournament is live on the web, so the **Tournament** button can be
+enabled or disabled. A tournament is live while players can still act on it: registration is
+**open**, or it is **in progress**. Drafts, tournaments waiting to start with registration closed,
+and finished tournaments are not live.
+
+```
+GET /tournaments/live
+```
+
+No query parameters and no `userId` — the answer is the same for every player. Requires the standard
+`x-meta-api-key` / `x-meta-ssh-public-key` headers.
+
+#### Example response — one tournament in progress, one open for registration
+
+```json
+{
+  "success": true,
+  "data": {
+    "hasLiveTournament": true,
+    "tournaments": [
+      {
+        "id": "0c160535-eddf-45ab-a1f9-0040316b4f63",
+        "name": "Lahore VR Championship",
+        "status": "in_progress",
+        "startDate": "2026-11-15T12:00:00.000Z",
+        "endDate": "2026-11-22T18:00:00.000Z",
+        "registrationOpen": false
+      },
+      {
+        "id": "cbcec24d-30e1-4bd8-b4be-c37c45068d30",
+        "name": "Islamabad VR League",
+        "status": "open",
+        "startDate": "2026-11-20T12:00:00.000Z",
+        "endDate": "2026-11-27T18:00:00.000Z",
+        "registrationOpen": true
+      }
+    ]
+  },
+  "error": null,
+  "meta": {}
+}
+```
+
+When nothing is live: `"hasLiveTournament": false, "tournaments": []`.
+
+#### Response fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `hasLiveTournament` | boolean | **Drive the button from this.** `true` → enabled, `false` → disabled. |
+| `tournaments` | array | Live tournaments, in-progress first, then by start date. At most 20. |
+| `tournaments[].status` | `"open"` \| `"in_progress"` | `open` = registration phase; `in_progress` = matches are being played. |
+| `tournaments[].registrationOpen` | boolean | `true` while a new player can still register. |
+| `tournaments[].startDate` / `endDate` | ISO-8601 UTC | Show in the headset's local time. |
+
+#### Recommended VR handling
+
+- Call it when the main menu opens, then at most **once every 60 seconds** while the menu is showing.
+  It only changes when an admin publishes, starts or completes a tournament.
+- On a network error or non-`200`, keep the button's **last known state**; on first launch with no
+  answer yet, show it disabled.
+- When enabled, the existing flow is unchanged: `GET /matches/current` still decides what the player
+  can do next.
+
+---
+
 ## 6. Game rules (for VR logic & UI)
 
 ### 6.1 Chase mode
@@ -906,6 +974,7 @@ get `409`, or it did not and the retry succeeds.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.4 | November 2026 | **Added** §5.5 `GET /tournaments/live` so the Quest app can enable its Tournament button only while a tournament is open for registration or in progress. Additive; no existing endpoint changed. |
 | 2.3 | August 2026 | **Added** §6.5 walkovers and §6.6 knockout matches. A match that runs out of time with one score on the board now completes as a walkover for the player who batted, instead of expiring and discarding a played innings. Knockout matches are created confirmed, so they reach the headset through `GET /matches/current` — previously the bracket was only visible on the web, and a bracket match was expired five minutes after it was created, unannounced, so no tournament could finish its bracket. An odd field now gives a bye rather than dropping the extra player out of the draw. |
 | 2.2 | August 2026 | **Fixed:** a chase now completes on the chaser's score alone. The target-setter's solo innings is recorded as their score when the pair is made, so the scoreline is half-filled from the start (`myScore` for the setter, `opponentScore` for the chaser). Previously both scores were left null, and the match sat unresolved until the setter submitted a *second* innings that the "defend" UI never asks for — in practice until the round or slot expired. A setter who does submit now gets a `409` naming the reason. Chase matches created before this change still resolve on the chaser's submission. |
 | 1.0 | June 2026 | Initial Meta integration: current match, score submit, solo target |

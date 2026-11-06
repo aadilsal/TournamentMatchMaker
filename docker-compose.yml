@@ -10,7 +10,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vrtournament"]
+      # TCP, not the socket: the first-boot init server answers on the socket only, then restarts.
+      test: ["CMD-SHELL", "pg_isready -U vrtournament -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -61,7 +62,8 @@ services:
       NODE_ENV: development
       PORT: 3000
       CORS_ORIGIN: http://localhost:5173
-      META_API_KEY: c992d7bd6b13bf4220bde1e52d6b76c05abb2170ad3eaed4
+      # Real key lives only in the gitignored .env; never commit it here.
+      META_API_KEY: ${META_API_KEY:-local-dev-meta-api-key-not-for-production}
       META_SSH_PUBLIC_KEY: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDQtYp3sfaQfsRelTWXbdnikbVItI91dIu4lvnpcK0Od meta-integration@vrtournament
     depends_on:
       seed:
