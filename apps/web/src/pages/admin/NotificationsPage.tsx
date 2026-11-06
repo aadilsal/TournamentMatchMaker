@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { formatDateTime, humanizeEnum } from '@/lib/format';
 import { apiPost } from '@/lib/api';
 import {
   AdminQueryError,
@@ -45,8 +48,10 @@ export function AdminNotificationsPage() {
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastErrors, setBroadcastErrors] = useState<FieldErrors>({});
   const [type, setType] = useState('');
-  const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? '');
   const askConfirm = useConfirm();
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
 
   const list = useAdminList<NotifRow>({
     queryKey: ['admin', 'notifications'],
@@ -103,6 +108,7 @@ export function AdminNotificationsPage() {
     <div>
       <AdminPageHeader title="Notifications" description="Sent and broadcast messages" />
 
+      {isSuperAdmin && (
       <AdminCard className="p-5 mb-6 max-w-lg space-y-3">
         <h3 className="font-semibold text-sm">Broadcast to all players</h3>
         <div>
@@ -147,6 +153,7 @@ export function AdminNotificationsPage() {
           {broadcast.isPending ? 'Sending…' : 'Send broadcast'}
         </Button>
       </AdminCard>
+      )}
 
       <AdminFilterBar>
         <AdminFilterField label="Type" className="min-w-[180px]">
@@ -188,10 +195,10 @@ export function AdminNotificationsPage() {
             ]}
             rows={list.items.map((n) => ({
               user: n.username ?? '—',
-              type: n.type,
-              channel: n.channel,
+              type: humanizeEnum(n.type),
+              channel: n.channel === 'in_app' ? 'In-app' : humanizeEnum(n.channel),
               status: <StatusBadge status={n.status} />,
-              date: new Date(n.createdAt).toLocaleString(),
+              date: formatDateTime(n.createdAt),
             }))}
             emptyMessage="No notifications match your filters"
           />

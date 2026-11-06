@@ -15,6 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { useState } from 'react';
+import { formatTime, localTimeZone, toLocalDateKey } from '@/lib/format';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminBookingFormPage() {
@@ -22,7 +23,7 @@ export function AdminBookingFormPage() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [userId, setUserId] = useState('');
   const [venueId, setVenueId] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => toLocalDateKey());
   const [timeSlotId, setTimeSlotId] = useState('');
 
   const { data: venues = [] } = useQuery({
@@ -32,7 +33,7 @@ export function AdminBookingFormPage() {
 
   const { data: slots = [] } = useQuery({
     queryKey: ['admin', 'venue', venueId, 'slots', date],
-    queryFn: () => apiGet<TimeSlot[]>(`/admin/venues/${venueId}/slots?date=${date}`),
+    queryFn: () => apiGet<TimeSlot[]>(`/admin/venues/${venueId}/slots?date=${date}&tz=${encodeURIComponent(localTimeZone())}`),
     enabled: !!venueId,
   });
 
@@ -60,7 +61,7 @@ export function AdminBookingFormPage() {
     <div>
       <AdminPageHeader title="Create booking" description="Book a slot on behalf of a user" />
 
-      <AdminCard className="p-6 max-w-xl space-y-4">
+      <AdminCard className="p-6 max-w-xl space-y-4 overflow-visible">
         <div>
           <UserPicker
             error={errors.userId}
@@ -77,8 +78,9 @@ export function AdminBookingFormPage() {
           <AdminFieldError message={errors.userId} />
         </div>
         <div>
-          <Label className="text-xs">Venue</Label>
+          <Label htmlFor="booking-venue" className="text-xs">Venue</Label>
           <Select
+            id="booking-venue"
             className="mt-1"
             value={venueId}
             onChange={(e) => {
@@ -99,8 +101,10 @@ export function AdminBookingFormPage() {
           <AdminFieldError message={errors.venueId} />
         </div>
         <div>
-          <Label className="text-xs">Date</Label>
+          <Label htmlFor="booking-date" className="text-xs">Date</Label>
           <Input
+            id="booking-date"
+            className="mt-1"
             type="date"
             value={date}
             onChange={(e) => {
@@ -111,8 +115,9 @@ export function AdminBookingFormPage() {
           />
         </div>
         <div>
-          <Label className="text-xs">Time slot</Label>
+          <Label htmlFor="booking-slot" className="text-xs">Time slot</Label>
           <Select
+            id="booking-slot"
             className="mt-1"
             value={timeSlotId}
             onChange={(e) => {
@@ -128,7 +133,7 @@ export function AdminBookingFormPage() {
             <option value="">Select slot…</option>
             {bookableSlots.map((s) => (
               <option key={s.id} value={s.id}>
-                {new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {formatTime(s.startTime)}
                 {' '}({s.bookedCount}/{s.maxCapacity})
               </option>
             ))}

@@ -12,13 +12,15 @@ import {
   DataTable,
   StatusBadge,
 } from '@/components/admin/AdminUi';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { useAuthUser } from '@/hooks/useAuthUser';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
 
 export function AdminVenuesPage() {
   const [search, setSearch] = useState('');
   const [active, setActive] = useState('');
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
 
   const list = useAdminList<Venue>({
     queryKey: ['admin', 'venues'],
@@ -35,9 +37,11 @@ export function AdminVenuesPage() {
         title="Venues"
         description="VR arenas and slot management"
         actions={
-          <Link to="/admin/venues/new">
-            <Button size="sm">Add venue</Button>
-          </Link>
+          isSuperAdmin ? (
+            <Link to="/admin/venues/new" className={buttonVariants({ size: 'sm' })}>
+              Add venue
+            </Link>
+          ) : undefined
         }
       />
 
@@ -72,7 +76,7 @@ export function AdminVenuesPage() {
             ]}
             rows={list.items.map((v) => ({
               name: (
-                <Link to={`/admin/venues/${v.id}`} className="font-medium hover:underline">
+                <Link to={`/admin/venues/${v.id}`} className="inline-flex min-h-10 items-center font-medium hover:underline">
                   {v.name}
                 </Link>
               ),

@@ -2,16 +2,18 @@ import type { TimeSlot } from '@vr-tournament/shared';
 import { ChevronRight, Clock, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ListSkeleton } from '@/components/ui/skeleton';
+import { formatTime, fromLocalDateKey, toLocalDateKey } from '@/lib/format';
 
+/** Today in the viewer's zone (toISOString would give the UTC day). */
 export function todayString() {
-  return new Date().toISOString().split('T')[0];
+  return toLocalDateKey();
 }
 
 export function getNextDates(count: number) {
   return Array.from({ length: count }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() + i);
-    return d.toISOString().split('T')[0];
+    return toLocalDateKey(d);
   });
 }
 
@@ -26,24 +28,27 @@ export function getNextDates(count: number) {
  * that can actually hold a match.
  */
 export function getRoundDates(startsAt: string, endsAt: string): string[] {
-  const dayMs = 24 * 60 * 60 * 1000;
-  const toDayStart = (d: Date) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const startMs = Math.max(Date.now(), new Date(startsAt).getTime());
+  const endMs = new Date(endsAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return [];
 
-  const start = toDayStart(new Date(Math.max(Date.now(), new Date(startsAt).getTime())));
-  const end = toDayStart(new Date(endsAt));
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
-
+  const endKey = toLocalDateKey(endMs);
+  const day = fromLocalDateKey(toLocalDateKey(startMs));
   const dates: string[] = [];
   // Guard against a mis-set round window producing an unbounded strip.
-  for (let t = start; t <= end && dates.length < 60; t += dayMs) {
-    dates.push(new Date(t).toISOString().split('T')[0]!);
+  while (dates.length < 60) {
+    const key = toLocalDateKey(day);
+    dates.push(key);
+    if (key >= endKey) break;
+    day.setDate(day.getDate() + 1);
   }
   return dates;
 }
 
-export function formatSlotTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+export const formatSlotTime = (iso: string) => formatTime(iso);
+
+const weekdayFmt = new Intl.DateTimeFormat('en-US', { weekday: 'short' });
+const monthFmt = new Intl.DateTimeFormat('en-US', { month: 'short' });
 
 /**
  * `ignoreCapacity` is for VR players: they pick a play window rather than a
@@ -68,12 +73,13 @@ export function SlotDateStrip({ dates, selectedDate, onSelect }: SlotDateStripPr
 
   return (
     <div className="relative -mx-1">
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-6 bg-gradient-to-r from-[var(--color-background)] to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-[var(--color-background)] to-transparent" />
+      {/* Fades sit inside the scroller's padding so they never cover a resting chip. */}
+      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-4 bg-gradient-to-r from-[var(--color-background)] to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-4 bg-gradient-to-l from-[var(--color-background)] to-transparent" />
 
-      <div className="flex gap-2 overflow-x-auto px-1 pb-1 scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-2 overflow-x-auto px-4 py-1 scroll-px-4 scroll-smooth snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {dates.map((date) => {
-          const d = new Date(`${date}T12:00:00`);
+          const d = fromLocalDateKey(date);
           const isSelected = selectedDate === date;
           const isToday = date === today;
 
@@ -95,7 +101,7 @@ export function SlotDateStrip({ dates, selectedDate, onSelect }: SlotDateStripPr
                   isSelected ? 'text-white/80' : 'text-[var(--color-muted-foreground)]'
                 )}
               >
-                {isToday ? 'Today' : d.toLocaleDateString([], { weekday: 'short' })}
+                {isToday ? 'Today' : weekdayFmt.format(d)}
               </span>
               <span className="mt-0.5 text-2xl font-bold leading-none tabular-nums">
                 {d.getDate()}
@@ -106,7 +112,7 @@ export function SlotDateStrip({ dates, selectedDate, onSelect }: SlotDateStripPr
                   isSelected ? 'text-white/75' : 'text-[var(--color-muted-foreground)]'
                 )}
               >
-                {d.toLocaleDateString([], { month: 'short' })}
+                {monthFmt.format(d)}
               </span>
             </button>
           );
@@ -130,7 +136,7 @@ interface TimeSlotGridProps {
 export function TimeSlotGrid({
   slots,
   isLoading,
-  emptyMessage = 'No slots available for this date.',
+  emptyMessage = 'No slots available on this date. Try another day.',
   selectedSlotId,
   onSlotSelect,
   renderSlotAction,

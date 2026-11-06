@@ -7,21 +7,34 @@ import { ProfileSkeleton } from '@/components/ui/route-fallback';
 import { ListSkeleton } from '@/components/ui/skeleton';
 import { MapPin, Headset, BarChart3, Trophy, Swords } from 'lucide-react';
 import { API_URL } from '@/lib/config';
+import { QueryError } from '@/components/ui/query-error';
 
 export function PublicProfilePage() {
   const { username } = useParams<{ username: string }>();
 
-  const { data: profile, isLoading } = useQuery({
+  const { data: profile, isLoading, error, refetch } = useQuery({
     queryKey: ['public-profile', username],
     queryFn: () => apiGet<PublicPlayerProfile>(`/players/${username}`),
     enabled: !!username,
   });
 
-  const { data: matches = [] } = useQuery({
+  const { data: matches = [], error: matchesError, refetch: refetchMatches } = useQuery({
     queryKey: ['public-matches', username],
     queryFn: () => apiGet<Match[]>(`/players/${username}/matches`),
     enabled: !!username,
   });
+
+  if (!isLoading && !profile) {
+    return (
+      <QueryError
+        error={error}
+        resource="player"
+        onRetry={() => refetch()}
+        backTo={{ href: '/tournaments', label: 'Back to tournaments' }}
+        className="max-w-2xl mx-auto"
+      />
+    );
+  }
 
   if (isLoading || !profile) {
     return (
@@ -91,7 +104,9 @@ export function PublicProfilePage() {
           <Swords className="h-5 w-5 text-[var(--color-primary)]" />
           Match history
         </h2>
-        {matches.length === 0 ? (
+        {matchesError ? (
+          <QueryError error={matchesError} resource="match history" onRetry={() => refetchMatches()} />
+        ) : matches.length === 0 ? (
           <p className="text-sm text-[var(--color-muted-foreground)]">No completed matches yet.</p>
         ) : (
           <div className="space-y-2">

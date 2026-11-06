@@ -36,10 +36,11 @@ const DEFAULT_DURATION: Record<ToastVariant, number> = {
 };
 
 const variantStyles: Record<ToastVariant, { icon: typeof CheckCircle2; accent: string; iconClass: string }> = {
+  // Green, not the red brand colour, so a success never reads as an error.
   success: {
     icon: CheckCircle2,
-    accent: 'border-[var(--color-primary)]/40',
-    iconClass: 'text-[var(--color-primary)]',
+    accent: 'border-emerald-400/40',
+    iconClass: 'text-emerald-400',
   },
   error: {
     icon: AlertCircle,

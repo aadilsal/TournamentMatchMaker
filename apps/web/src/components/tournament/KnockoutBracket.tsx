@@ -65,7 +65,7 @@ function MatchNode({
     >
       {won && <Trophy className="h-3.5 w-3.5 shrink-0" />}
       {player ? (
-        <Link to={`/players/${player.username}`} className="truncate hover:underline font-medium">
+        <Link to={`/players/${player.username}`} className="inline-flex min-h-9 -my-2 items-center min-w-0 truncate hover:underline font-medium">
           {player.username}
         </Link>
       ) : (

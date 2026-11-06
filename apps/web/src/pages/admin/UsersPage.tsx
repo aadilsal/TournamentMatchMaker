@@ -11,7 +11,8 @@ import {
   AdminTableFooter,
   DataTable,
 } from '@/components/admin/AdminUi';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { roleLabel } from '@/lib/format';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useAdminList } from '@/hooks/useAdminList';
@@ -42,8 +43,8 @@ export function AdminUsersPage() {
         description="Players and admin accounts"
         actions={
           isSuperAdmin ? (
-            <Link to="/admin/users/new">
-              <Button size="sm">Create user</Button>
+            <Link to="/admin/users/new" className={buttonVariants({ size: 'sm' })}>
+              Create user
             </Link>
           ) : undefined
         }
@@ -80,7 +81,7 @@ export function AdminUsersPage() {
             rows={list.items.map((u) => ({
               username: (
                 <span className="flex items-center gap-2">
-                  <Link to={`/admin/users/${u.id}`} className="font-medium hover:underline">
+                  <Link to={`/admin/users/${u.id}`} className="inline-flex min-h-10 items-center font-medium hover:underline">
                     {u.username}
                   </Link>
                   {/* Bots carry ordinary usernames on purpose, so this badge is
@@ -93,7 +94,7 @@ export function AdminUsersPage() {
                 </span>
               ),
               email: u.email,
-              role: u.role,
+              role: roleLabel(u.role),
               tier: u.skillTier,
               rating: u.ratingPoints ?? '—',
               city: u.city ?? '—',

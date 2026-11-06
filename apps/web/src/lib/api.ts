@@ -11,22 +11,54 @@ export const api = axios.create({
   withCredentials: true,
 });
 
-let accessToken: string | null = localStorage.getItem('accessToken');
+const TOKEN_KEY = 'accessToken';
+
+function readStoredToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+let accessToken: string | null = readStoredToken();
+
+const notifyAuthChanged = () => window.dispatchEvent(new CustomEvent('auth-changed'));
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
-  if (token) {
-    localStorage.setItem('accessToken', token);
-  } else {
-    localStorage.removeItem('accessToken');
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage blocked: keep the in-memory token */
   }
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('auth-changed'));
-  }
+  notifyAuthChanged();
 }
 
 export function getAccessToken() {
   return accessToken;
+}
+
+const PUBLIC_PATHS = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/terms', '/privacy'];
+
+function loginRedirect() {
+  const { pathname, search } = window.location;
+  if (PUBLIC_PATHS.includes(pathname)) return;
+  window.location.assign(`/login?returnTo=${encodeURIComponent(pathname + search)}`);
+}
+
+// Keep every tab on the same token: a refresh or logout in one tab is picked up by the others.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== TOKEN_KEY && e.key !== null) return;
+    const next = readStoredToken();
+    if (next === accessToken) return;
+    const loggedOut = !!accessToken && !next;
+    accessToken = next;
+    notifyAuthChanged();
+    if (loggedOut) loginRedirect();
+  });
 }
 
 api.interceptors.request.use((config) => {
@@ -36,14 +68,73 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-let isRefreshing = false;
-let refreshQueue: Array<(token: string | null) => void> = [];
-
-const AUTH_NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh'];
+const AUTH_NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
 
 function shouldAttemptTokenRefresh(url: string | undefined): boolean {
   if (!url) return true;
   return !AUTH_NO_REFRESH_PATHS.some((path) => url.includes(path));
+}
+
+type RefreshOutcome = { token: string } | { failed: 'auth' | 'network' };
+
+async function postRefresh(): Promise<RefreshOutcome> {
+  try {
+    const { data } = await axios.post<ApiResponse<{ accessToken: string }>>(
+      `${API_URL}/api/v1/auth/refresh`,
+      {},
+      { withCredentials: true }
+    );
+    return data.success && data.data?.accessToken ? { token: data.data.accessToken } : { failed: 'auth' };
+  } catch (err) {
+    return axios.isAxiosError(err) && !err.response ? { failed: 'network' } : { failed: 'auth' };
+  }
+}
+
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+
+/**
+ * One refresh at a time across all tabs: the refresh cookie is single-use, so two
+ * tabs racing would log one of them out. Falls back to per-tab single-flight
+ * where navigator.locks is unavailable.
+ */
+function refreshAccessToken(staleToken: string | null): Promise<RefreshOutcome> {
+  if (!refreshInFlight) {
+    const run = async (): Promise<RefreshOutcome> => {
+      // Another tab may have refreshed while this one waited for the lock.
+      const stored = readStoredToken();
+      if (stored && stored !== staleToken) return { token: stored };
+      return postRefresh();
+    };
+    const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+    const pending: Promise<RefreshOutcome> = locks?.request
+      ? locks.request('vr-auth-refresh', run).then((outcome) => outcome)
+      : run();
+    refreshInFlight = pending
+      .then((outcome) => {
+        if ('token' in outcome) {
+          if (outcome.token !== accessToken) setAccessToken(outcome.token);
+        } else if (outcome.failed === 'auth') {
+          setAccessToken(null);
+          loginRedirect();
+        }
+        return outcome;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+/** Refreshes the access token (shared with the HTTP interceptor); true when a valid token is available. */
+export async function refreshSession(): Promise<boolean> {
+  return 'token' in (await refreshAccessToken(accessToken));
 }
 
 function toApiError(err: unknown): ApiClientError {
@@ -59,58 +150,36 @@ function toApiError(err: unknown): ApiClientError {
     }
   }
   if (err instanceof ApiClientError) return err;
+  if (axios.isAxiosError(err) && err.response) {
+    return new ApiClientError(err.message, undefined, undefined, err.response.status);
+  }
   if (err instanceof Error) {
     return new ApiClientError(err.message);
   }
   return new ApiClientError('Request failed');
 }
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const original = error.config;
 
     if (
+      original &&
       error.response?.status === 401 &&
       !original._retry &&
       shouldAttemptTokenRefresh(original.url)
     ) {
-      if (isRefreshing) {
-        return new Promise((resolve) => {
-          refreshQueue.push((token) => {
-            if (token) {
-              original.headers.Authorization = `Bearer ${token}`;
-              resolve(api(original));
-            } else {
-              resolve(Promise.reject(error));
-            }
-          });
-        });
-      }
-
       original._retry = true;
-      isRefreshing = true;
+      const sent = String(original.headers?.Authorization ?? '').replace(/^Bearer\s+/i, '') || null;
 
-      try {
-        const { data } = await axios.post<ApiResponse<{ accessToken: string }>>(
-          `${API_URL}/api/v1/auth/refresh`,
-          {},
-          { withCredentials: true }
-        );
+      // Another tab (or an earlier refresh) already replaced the token: just retry.
+      const outcome: RefreshOutcome =
+        accessToken && accessToken !== sent ? { token: accessToken } : await refreshAccessToken(sent);
 
-        if (data.success && data.data?.accessToken) {
-          setAccessToken(data.data.accessToken);
-          refreshQueue.forEach((cb) => cb(data.data!.accessToken));
-          refreshQueue = [];
-          original.headers.Authorization = `Bearer ${data.data.accessToken}`;
-          return api(original);
-        }
-      } catch {
-        setAccessToken(null);
-        refreshQueue.forEach((cb) => cb(null));
-        refreshQueue = [];
-        window.location.href = '/login';
-      } finally {
-        isRefreshing = false;
+      if ('token' in outcome) {
+        original.headers.Authorization = `Bearer ${outcome.token}`;
+        return api(original);
       }
     }
 

@@ -7,7 +7,8 @@ import { apiPost } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
-import { Heart } from 'lucide-react';
+import { CheckCircle2, Heart } from 'lucide-react';
+import { formatMoneyCents } from '@/lib/format';
 
 const publishableKey = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || 'pk_test_sample_change_me';
 const stripeConfigured =
@@ -25,7 +26,7 @@ function BuybackPaymentForm({
   onSuccess,
   onCancel,
 }: {
-  onSuccess?: () => void;
+  onSuccess: () => void;
   onCancel: () => void;
 }) {
   const stripe = useStripe();
@@ -51,7 +52,7 @@ function BuybackPaymentForm({
     queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matchmakingStatus });
     queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.matches });
     queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.buybackOptions });
-    onSuccess?.();
+    onSuccess();
   };
 
   return (
@@ -73,6 +74,7 @@ function BuybackPaymentForm({
 
 export function BuybackButton({ tournamentId, tournament, matchId, onSuccess }: BuybackButtonProps) {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paid, setPaid] = useState(false);
 
   const checkout = useMutation({
     mutationFn: () =>
@@ -80,12 +82,21 @@ export function BuybackButton({ tournamentId, tournament, matchId, onSuccess }: 
     onSuccess: (data) => setClientSecret(data.clientSecret),
   });
 
-  const price = (tournament.buybackPriceCents / 100).toFixed(2);
+  const price = formatMoneyCents(tournament.buybackPriceCents);
 
   if (!stripeConfigured || !stripePromise) {
     return (
       <p className="text-xs text-[var(--color-muted-foreground)]">
-        Buyback payments are temporarily unavailable. Stripe is not configured.
+        Online buybacks aren&rsquo;t available right now. Please try again later or ask the tournament organiser.
+      </p>
+    );
+  }
+
+  if (paid) {
+    return (
+      <p role="status" className="flex items-start gap-2 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 p-3 text-sm">
+        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-primary)]" />
+        Payment received — you&rsquo;re back in. Your next match will appear on My Matches.
       </p>
     );
   }
@@ -93,7 +104,14 @@ export function BuybackButton({ tournamentId, tournament, matchId, onSuccess }: 
   if (clientSecret) {
     return (
       <Elements stripe={stripePromise} options={{ clientSecret }}>
-        <BuybackPaymentForm onSuccess={onSuccess} onCancel={() => setClientSecret(null)} />
+        <BuybackPaymentForm
+          onSuccess={() => {
+            setPaid(true);
+            setClientSecret(null);
+            onSuccess?.();
+          }}
+          onCancel={() => setClientSecret(null)}
+        />
       </Elements>
     );
   }
@@ -107,7 +125,7 @@ export function BuybackButton({ tournamentId, tournament, matchId, onSuccess }: 
         variant="outline"
       >
         <Heart className="h-4 w-4 text-[var(--color-primary)]" />
-        {checkout.isPending ? 'Preparing payment…' : `Buy back a life — $${price}`}
+        {checkout.isPending ? 'Preparing payment…' : `Buy back a life — ${price}`}
       </Button>
       {checkout.isError && (
         <p className="text-xs text-[var(--color-destructive)]">{getUserErrorMessage(checkout.error)}</p>

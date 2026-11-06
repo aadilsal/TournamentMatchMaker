@@ -22,6 +22,11 @@ const MatchesPage = lazyNamed(() => import('@/pages/MatchesPage'), 'MatchesPage'
 const PlayFlowPage = lazyNamed(() => import('@/pages/PlayFlowPage'), 'PlayFlowPage');
 const PublicProfilePage = lazyNamed(() => import('@/pages/PublicProfilePage'), 'PublicProfilePage');
 const WelcomePage = lazyNamed(() => import('@/pages/WelcomePage'), 'WelcomePage');
+const ForgotPasswordPage = lazyNamed(() => import('@/pages/ForgotPasswordPage'), 'ForgotPasswordPage');
+const ResetPasswordPage = lazyNamed(() => import('@/pages/ResetPasswordPage'), 'ResetPasswordPage');
+const TermsPage = lazyNamed(() => import('@/pages/LegalPage'), 'TermsPage');
+const PrivacyPage = lazyNamed(() => import('@/pages/LegalPage'), 'PrivacyPage');
+const NotFoundPage = lazyNamed(() => import('@/pages/NotFoundPage'), 'NotFoundPage');
 
 const AdminDashboardPage = lazyNamed(() => import('@/pages/admin/DashboardPage'), 'AdminDashboardPage');
 const AdminMatchesPage = lazyNamed(() => import('@/pages/admin/MatchesPage'), 'AdminMatchesPage');
@@ -101,6 +106,10 @@ export function App() {
 
         <Route path="/login" element={<AppShell><LoginPage /></AppShell>} />
         <Route path="/register" element={<AppShell><RegisterPage /></AppShell>} />
+        <Route path="/forgot-password" element={<AppShell><ForgotPasswordPage /></AppShell>} />
+        <Route path="/reset-password" element={<AppShell><ResetPasswordPage /></AppShell>} />
+        <Route path="/terms" element={<AppShell><TermsPage /></AppShell>} />
+        <Route path="/privacy" element={<AppShell><PrivacyPage /></AppShell>} />
         <Route path="/play" element={<AppShell><PlayFlowPage /></AppShell>} />
         <Route path="/players/:username" element={<AppShell><PublicProfilePage /></AppShell>} />
         <Route path="/welcome" element={<AppShell><WelcomePage /></AppShell>} />
@@ -136,6 +145,8 @@ export function App() {
         <Route path="/admin/notifications" element={<AdminShell><AdminNotificationsPage /></AdminShell>} />
         <Route path="/admin/integrations" element={<AdminShell><AdminIntegrationsPage /></AdminShell>} />
         <Route path="/admin/system" element={<AdminShell><AdminSystemPage /></AdminShell>} />
+
+        <Route path="*" element={<AppShell><NotFoundPage /></AppShell>} />
       </Routes>
     </BrowserRouter>
   );

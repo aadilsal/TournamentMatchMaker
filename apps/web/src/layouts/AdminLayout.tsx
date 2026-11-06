@@ -24,6 +24,7 @@ import { useAuthUser } from '@/hooks/useAuthUser';
 import type { UserRole } from '@vr-tournament/shared';
 import { canAccessAdminPath } from '@/lib/admin-routes';
 import { cn } from '@/lib/utils';
+import { roleLabel } from '@/lib/format';
 
 const allNav = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -67,6 +68,23 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
   const visibleNav = navForRole(user?.role);
 
+  const FooterLinks = () => (
+    <>
+      <Link
+        to="/tournaments"
+        onClick={() => setOpen(false)}
+        className="flex min-h-10 items-center gap-2 px-3 py-2 rounded-lg text-sm text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+      >
+        <ExternalLink className="h-4 w-4" />
+        Player app
+      </Link>
+      <Button variant="ghost" className="w-full justify-start gap-2 px-3" onClick={handleLogout}>
+        <LogOut className="h-4 w-4" />
+        Log out
+      </Button>
+    </>
+  );
+
   const NavLinks = () => (
     <>
       {visibleNav.map((item) => {
@@ -78,7 +96,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
             to={item.href}
             onClick={() => setOpen(false)}
             className={cn(
-              'flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+              'flex min-h-10 items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
               active
                 ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
                 : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]'
@@ -93,44 +111,51 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen flex bg-[var(--color-background)]">
+    <div className="min-h-dvh flex bg-[var(--color-background)]">
       <aside className="hidden lg:flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-card)]">
         <div className="p-4 border-b border-[var(--color-border)]">
           <p className="font-bold text-sm tracking-tight">Admin Panel</p>
           <p className="text-xs text-[var(--color-muted-foreground)] mt-0.5 truncate">
-            {user?.username} · {user?.role}
+            {user?.username} · {roleLabel(user?.role)}
           </p>
         </div>
-        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+        <nav aria-label="Admin navigation" className="flex-1 p-3 space-y-0.5 overflow-y-auto">
           <NavLinks />
         </nav>
         <div className="p-3 border-t border-[var(--color-border)] space-y-1">
-          <Link
-            to="/tournaments"
-            className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            Player app
-          </Link>
-          <Button variant="ghost" size="sm" className="w-full justify-start gap-2" onClick={handleLogout}>
-            <LogOut className="h-4 w-4" />
-            Log out
-          </Button>
+          <FooterLinks />
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
         <header className="lg:hidden sticky top-0 z-30 flex items-center justify-between px-4 h-14 border-b border-[var(--color-border)] bg-[var(--color-card)]">
           <span className="font-semibold text-sm">Admin</span>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setOpen(!open)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setOpen(!open)}
+            aria-label={open ? 'Close admin menu' : 'Open admin menu'}
+            aria-expanded={open}
+            aria-controls="admin-mobile-nav"
+          >
             {open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </Button>
         </header>
 
         {open && (
-          <div className="lg:hidden border-b border-[var(--color-border)] bg-[var(--color-card)] p-3 space-y-0.5">
+          <nav
+            id="admin-mobile-nav"
+            aria-label="Admin navigation"
+            className="lg:hidden border-b border-[var(--color-border)] bg-[var(--color-card)] p-3 space-y-0.5"
+          >
             <NavLinks />
-          </div>
+            <div className="mt-2 border-t border-[var(--color-border)] pt-2 space-y-0.5">
+              <p className="px-3 pb-1 text-xs text-[var(--color-muted-foreground)] truncate">
+                {user?.username} · {roleLabel(user?.role)}
+              </p>
+              <FooterLinks />
+            </div>
+          </nav>
         )}
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-auto">{children}</main>

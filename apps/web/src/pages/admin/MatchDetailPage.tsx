@@ -8,7 +8,8 @@ import {
   validateAdminForm,
   type FieldErrors,
 } from '@/lib/admin-form-validation';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { phaseLabel } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useState } from 'react';
@@ -55,7 +56,14 @@ export function AdminMatchDetailPage() {
 
   if (isLoading) return <GridSkeleton count={3} />;
   if (error || !match)
-    return <AdminQueryError error={error} resource="match" onRetry={() => refetch()} />;
+    return (
+      <AdminQueryError
+        error={error}
+        resource="match"
+        onRetry={() => refetch()}
+        backTo={{ href: '/admin/matches', label: 'All matches' }}
+      />
+    );
 
   const p1Name = match.player1?.username ?? 'Player 1';
   const p2Name = match.player2?.username ?? 'Player 2';
@@ -118,8 +126,8 @@ export function AdminMatchDetailPage() {
         title={`${match.player1?.username} vs ${match.player2?.username}`}
         description={match.tournamentName ?? 'Casual match'}
         actions={
-          <Link to="/admin/matches">
-            <Button variant="outline" size="sm">← Back</Button>
+          <Link to="/admin/matches" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            ← Back
           </Link>
         }
       />
@@ -136,7 +144,7 @@ export function AdminMatchDetailPage() {
           </p>
           <p className="text-sm">
             <span className="text-[var(--color-muted-foreground)]">Round:</span>{' '}
-            {match.roundNumber ?? '—'} ({match.phase ?? '—'})
+            {match.roundNumber ?? '—'} ({match.phase ? phaseLabel(match.phase) : 'Casual'})
           </p>
           {match.result && (
             <p className="text-sm">
@@ -178,7 +186,7 @@ export function AdminMatchDetailPage() {
 
           <div className="space-y-2 pt-2 border-t border-[var(--color-border)]">
             <p className="text-xs font-medium text-[var(--color-muted-foreground)]">Override score</p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <Label className="text-xs" htmlFor="p1-score">{p1Name}</Label>
                 <Input

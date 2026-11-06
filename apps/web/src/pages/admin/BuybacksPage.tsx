@@ -1,5 +1,6 @@
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useState } from 'react';
+import { formatMoneyCents } from '@/lib/format';
 import { useQuery } from '@tanstack/react-query';
 import type { Buyback, Tournament } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
@@ -21,7 +22,8 @@ type BuybackRow = Buyback & { username?: string; tournamentName?: string };
 
 export function AdminBuybacksPage() {
   const [tournamentId, setTournamentId] = useState('');
-  const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? '');
 
   const list = useAdminList<BuybackRow>({
     queryKey: ['admin', 'buybacks'],
@@ -87,12 +89,12 @@ export function AdminBuybacksPage() {
             ]}
             rows={list.items.map((b) => ({
               user: (
-                <Link to={`/admin/buybacks/${b.id}`} className="hover:underline">
+                <Link to={`/admin/buybacks/${b.id}`} className="inline-flex min-h-10 items-center font-medium hover:underline">
                   {b.username ?? b.userId.slice(0, 8)}
                 </Link>
               ),
               tournament: b.tournamentName ?? '—',
-              amount: `$${(b.amountCents / 100).toFixed(2)}`,
+              amount: formatMoneyCents(b.amountCents),
               status: <StatusBadge status={b.status} />,
               round: b.roundNumber,
             }))}

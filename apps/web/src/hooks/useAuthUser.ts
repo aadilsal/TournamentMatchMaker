@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { User } from '@vr-tournament/shared';
 import { apiGet, getAccessToken } from '@/lib/api';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 
 const ADMIN_ROLES = ['superadmin', 'venue_admin', 'tournament_admin'];
 
@@ -8,7 +9,7 @@ export function useAuthUser() {
   const isLoggedIn = !!getAccessToken();
 
   const query = useQuery({
-    queryKey: ['auth', 'me'],
+    queryKey: LIVE_QUERY_KEYS.me,
     queryFn: () => apiGet<User>('/players/me'),
     enabled: isLoggedIn,
     staleTime: 60_000,

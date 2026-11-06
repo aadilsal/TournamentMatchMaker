@@ -24,7 +24,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { centsToDollars, dollarsToCents, formatMoneyCents, toDateTimeLocal } from '@/lib/format';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 const defaultForm: {
@@ -104,6 +105,8 @@ export function AdminTournamentFormPage() {
   // transition, which is only known once the form is submitted.
   const [submitErrors, setSubmitErrors] = useState<FieldErrors>({});
   const [form, setForm] = useState(defaultForm);
+  // Admins type dollars; the form (and API) keep cents.
+  const [buybackDollars, setBuybackDollars] = useState(() => centsToDollars(Number(defaultForm.buybackPriceCents)));
 
   const { data: tournament } = useQuery({
     queryKey: ['admin', 'tournament', id],
@@ -111,22 +114,26 @@ export function AdminTournamentFormPage() {
     enabled: isEdit,
   });
 
+  // Seed the form once per tournament; later refetches must not wipe unsaved edits.
+  const loadedId = useRef<string | null>(null);
   useEffect(() => {
-    if (tournament) {
+    if (tournament && loadedId.current !== tournament.id) {
+      loadedId.current = tournament.id;
       const roundDurationDays = minutesToRoundDurationDays(tournament.roundDurationMinutes);
       setForm({
         name: tournament.name,
         game: tournament.game,
-        startDate: tournament.startDate.slice(0, 16),
-        endDate: tournament.endDate.slice(0, 16),
-        registrationOpensAt: tournament.registrationOpensAt?.slice(0, 16) ?? '',
-        registrationClosesAt: tournament.registrationClosesAt?.slice(0, 16) ?? '',
+        startDate: toDateTimeLocal(tournament.startDate),
+        endDate: toDateTimeLocal(tournament.endDate),
+        registrationOpensAt: toDateTimeLocal(tournament.registrationOpensAt),
+        registrationClosesAt: toDateTimeLocal(tournament.registrationClosesAt),
         status: tournament.status,
         maxPlayers: tournament.maxPlayers?.toString() ?? '',
         skillTier: String(tournament.skillTier),
         buybackPriceCents: String(tournament.buybackPriceCents),
         roundDurationDays,
       });
+      setBuybackDollars(centsToDollars(tournament.buybackPriceCents));
     }
   }, [tournament]);
 
@@ -226,13 +233,13 @@ export function AdminTournamentFormPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] items-start">
         <AdminCard className="p-6 space-y-4">
           <div>
-            <Label required>Name</Label>
-            <Input aria-required="true" value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={200} />
+            <Label htmlFor="t-name" required>Name</Label>
+            <Input id="t-name" aria-required="true" value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={200} />
             <AdminFieldError message={errors.name} />
           </div>
           <div>
-            <Label required>Game</Label>
-            <Input aria-required="true" value={form.game} onChange={(e) => set('game', e.target.value)} maxLength={100} />
+            <Label htmlFor="t-game" required>Game</Label>
+            <Input id="t-game" aria-required="true" value={form.game} onChange={(e) => set('game', e.target.value)} maxLength={100} />
             <AdminFieldError message={errors.game} />
           </div>
           <div>
@@ -242,10 +249,11 @@ export function AdminTournamentFormPage() {
               closes and the tournament starts on their own — you can still do
               either early from the tournament page.
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label required>Registration opens</Label>
+                <Label htmlFor="t-reg-opens" required>Registration opens</Label>
                 <Input
+                  id="t-reg-opens"
                   type="datetime-local"
                   aria-required="true"
                   value={form.registrationOpensAt}
@@ -254,8 +262,9 @@ export function AdminTournamentFormPage() {
                 <AdminFieldError message={errors.registrationOpensAt} />
               </div>
               <div>
-                <Label required>Registration closes</Label>
+                <Label htmlFor="t-reg-closes" required>Registration closes</Label>
                 <Input
+                  id="t-reg-closes"
                   type="datetime-local"
                   aria-required="true"
                   value={form.registrationClosesAt}
@@ -265,10 +274,11 @@ export function AdminTournamentFormPage() {
               </div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label required>Start</Label>
+              <Label htmlFor="t-start" required>Start</Label>
               <Input
+                id="t-start"
                 type="datetime-local"
                 aria-required="true"
                 value={form.startDate}
@@ -277,8 +287,9 @@ export function AdminTournamentFormPage() {
               <AdminFieldError message={errors.startDate} />
             </div>
             <div>
-              <Label required>End</Label>
+              <Label htmlFor="t-end" required>End</Label>
               <Input
+                id="t-end"
                 type="datetime-local"
                 aria-required="true"
                 min={minEndDateTimeLocal(form.startDate)}
@@ -290,14 +301,14 @@ export function AdminTournamentFormPage() {
             </div>
           </div>
           <div>
-            <Label required>Normal round duration (days)</Label>
+            <Label htmlFor="t-round-days" required>Normal round duration (days)</Label>
             <div className="mt-1 flex items-center gap-3">
               <Input
+                id="t-round-days"
                 type="number"
                 min={MIN_ROUND_DURATION_DAYS}
                 max={MAX_ROUND_DURATION_DAYS}
-                aria-label="Round duration in days"
-                value={form.roundDurationDays}
+                                value={form.roundDurationDays}
                 onChange={(e) => set('roundDurationDays', e.target.value)}
               />
               <span className="text-sm text-[var(--color-muted-foreground)]">days</span>
@@ -308,10 +319,11 @@ export function AdminTournamentFormPage() {
             </p>
             <AdminFieldError message={errors.roundDurationDays} />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <Label>Max players</Label>
+              <Label htmlFor="t-max-players">Max players</Label>
               <Input
+                id="t-max-players"
                 type="number"
                 min={1}
                 value={form.maxPlayers}
@@ -321,20 +333,34 @@ export function AdminTournamentFormPage() {
               <AdminFieldError message={errors.maxPlayers} />
             </div>
             <div>
-              <Label required>Skill tier</Label>
-              <AdminSkillTierSelect value={form.skillTier} onChange={(v) => set('skillTier', v)} />
+              <Label htmlFor="t-skill-tier" required>Skill tier</Label>
+              <AdminSkillTierSelect id="t-skill-tier" value={form.skillTier} onChange={(v) => set('skillTier', v)} />
               <AdminFieldError message={errors.skillTier} />
             </div>
           </div>
           <div>
-            <Label required>Buyback price (cents)</Label>
-            <Input
-              type="number"
-              min={0}
-              value={form.buybackPriceCents}
-              onChange={(e) => set('buybackPriceCents', e.target.value)}
+            <Label htmlFor="t-buyback" required>Buyback price (USD)</Label>
+            <div className="mt-1 flex items-center gap-3">
+              <Input
+                id="t-buyback"
+                type="text"
+                inputMode="decimal"
+                placeholder="2.50"
+                aria-describedby="t-buyback-preview"
+                value={buybackDollars}
+                onChange={(e) => {
+                  setBuybackDollars(e.target.value);
+                  const cents = dollarsToCents(e.target.value);
+                  set('buybackPriceCents', e.target.value.trim() === '' ? '' : cents == null ? 'invalid' : String(cents));
+                }}
+              />
+              <span id="t-buyback-preview" className="shrink-0 text-sm text-[var(--color-muted-foreground)]">
+                = {formatMoneyCents(Number(form.buybackPriceCents) || 0)}
+              </span>
+            </div>
+            <AdminFieldError
+              message={form.buybackPriceCents === 'invalid' && errors.buybackPriceCents ? 'Enter an amount like 2.50' : errors.buybackPriceCents}
             />
-            <AdminFieldError message={errors.buybackPriceCents} />
           </div>
           <div>
             <Label htmlFor="tournament-status">Status</Label>

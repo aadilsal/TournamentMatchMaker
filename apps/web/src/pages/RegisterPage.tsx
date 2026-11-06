@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { fetchLocationFromCoords } from '@/lib/location-api';
+import { sanitizeReturnTo } from '@/lib/return-to';
+import { GuestOnly } from '@/components/auth/GuestOnly';
 
 /* ─────────────────────────────────────────────
    Animated cricket delivery banner
@@ -189,7 +191,7 @@ function CricketDeliveryBanner() {
       {/* Season label */}
       <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none z-20">
         <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/40">
-          VR Cricket League · Season 1 · Canada
+          VR Cricket League · Season 1
         </span>
       </div>
     </div>
@@ -200,14 +202,18 @@ type FieldErrors = Partial<Record<keyof RegisterFormInput | 'form', string>>;
 
 function parseFieldErrors(form: typeof initialForm): FieldErrors {
   const result = registerFormSchema.safeParse(form);
-  if (result.success) return {};
-
   const errors: FieldErrors = {};
+  if (result.success) return errors;
+
   for (const issue of result.error.issues) {
     const key = issue.path[0];
     if (typeof key === 'string' && !errors[key as keyof RegisterFormInput]) {
       errors[key as keyof RegisterFormInput] = issue.message;
     }
+  }
+  // The schema's match .refine only runs once every other field passes.
+  if (!errors.confirmPassword && form.confirmPassword && form.confirmPassword !== form.password) {
+    errors.confirmPassword = 'Passwords do not match';
   }
   return errors;
 }
@@ -274,9 +280,17 @@ const initialForm = {
 };
 
 export function RegisterPage() {
+  return (
+    <GuestOnly>
+      <RegisterForm />
+    </GuestOnly>
+  );
+}
+
+function RegisterForm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const returnTo = searchParams.get('returnTo');
+  const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
   const [form, setForm] = useState(initialForm);
   const [availabilityErrors, setAvailabilityErrors] = useState<FieldErrors>({});
   const [serverError, setServerError] = useState('');
@@ -284,10 +298,6 @@ export function RegisterPage() {
   const [touched, setTouched] = useState<Partial<Record<string, boolean>>>({});
 
   const schemaErrors = useMemo(() => parseFieldErrors(form), [form]);
-  const canSubmit =
-    registerFormSchema.safeParse(form).success &&
-    !availabilityErrors.email &&
-    !availabilityErrors.username;
 
   const checkEmailFormat = (email: string) => registerSchema.shape.email.safeParse(email).success;
   const checkUsernameFormat = (username: string) =>
@@ -473,6 +483,11 @@ export function RegisterPage() {
 
     const valid = registerFormSchema.safeParse(form);
     if (!valid.success || availabilityErrors.email || availabilityErrors.username) {
+      // Bring the first invalid field into view on a long phone form.
+      const first = (['email', 'username', 'password', 'confirmPassword', 'acceptTerms'] as const).find(
+        (f) => schemaErrors[f] || availabilityErrors[f]
+      );
+      if (first) document.getElementById(first)?.focus();
       return;
     }
 
@@ -607,13 +622,13 @@ export function RegisterPage() {
                         <span className="text-xs text-[var(--color-muted-foreground)]">{strengthText}</span>
                       )}
                     </div>
-                    <ul id="password-requirements" className="grid grid-cols-2 gap-x-2 gap-y-1">
+                    <ul id="password-requirements" className="grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-3">
                       {passwordReqs.map((req) => (
                         <li
                           key={req.id}
                           className={cn(
                             'flex items-center gap-1.5 text-xs',
-                            req.met ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]'
+                            req.met ? 'text-emerald-400' : 'text-[var(--color-muted-foreground)]'
                           )}
                         >
                           {req.met ? (
@@ -778,13 +793,25 @@ export function RegisterPage() {
                 <input
                   type="checkbox"
                   className="mt-0.5 h-4 w-4 rounded border-[var(--color-border)] accent-[var(--color-primary)]"
+                  id="acceptTerms"
                   checked={form.acceptTerms}
-                  onChange={(e) => update('acceptTerms', e.target.checked)}
+                  onChange={(e) => {
+                    update('acceptTerms', e.target.checked);
+                    setTouched((t) => ({ ...t, acceptTerms: true }));
+                  }}
                   onBlur={() => handleBlur('acceptTerms')}
                   aria-invalid={!!showError('acceptTerms')}
                 />
                 <span className="text-sm text-[var(--color-muted-foreground)]">
-                  I agree to the platform terms and understand my data will be used for matchmaking and bookings.
+                  I agree to the{' '}
+                  <Link to="/terms" target="_blank" className="font-medium text-[var(--color-primary)] hover:underline">
+                    Terms of Service
+                  </Link>{' '}
+                  and have read the{' '}
+                  <Link to="/privacy" target="_blank" className="font-medium text-[var(--color-primary)] hover:underline">
+                    Privacy Policy
+                  </Link>
+                  , including how my data is used for matchmaking and bookings.
                 </span>
               </label>
               {showError('acceptTerms') && (
@@ -800,14 +827,17 @@ export function RegisterPage() {
               </p>
             )}
 
-            <Button type="submit" className="w-full" size="lg" disabled={register.isPending || !canSubmit}>
+            <Button type="submit" className="w-full" size="lg" disabled={register.isPending}>
               {register.isPending ? 'Creating account...' : 'Create account'}
             </Button>
           </form>
 
           <p className="mt-6 text-center text-sm text-[var(--color-muted-foreground)]">
             Already have an account?{' '}
-            <Link to="/login" className="font-medium text-[var(--color-primary)] hover:underline">
+            <Link
+              to={returnTo ? `/login?returnTo=${encodeURIComponent(returnTo)}` : '/login'}
+              className="font-medium text-[var(--color-primary)] hover:underline"
+            >
               Sign in
             </Link>
           </p>

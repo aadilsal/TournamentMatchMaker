@@ -5,11 +5,13 @@ import type { User } from '@vr-tournament/shared';
 import { apiGet, apiPatch, getAccessToken } from '@/lib/api';
 import { prepareAvatarUpload } from '@/lib/avatar-upload';
 import { getUserErrorMessage } from '@/lib/user-messages';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { Label } from '@/components/ui/label';
 import { ProfileSkeleton } from '@/components/ui/route-fallback';
+import { QueryError } from '@/components/ui/query-error';
 import { User as UserIcon, MapPin, Headset, BarChart3, CheckCircle2, Upload } from 'lucide-react';
 import { motion } from 'motion/react';
 import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
@@ -44,13 +46,16 @@ export function ProfilePage() {
     if (!getAccessToken()) navigate('/login');
   }, [navigate]);
 
-  const { data: profile, isLoading } = useQuery({
-    queryKey: ['profile'],
+  const { data: profile, isLoading, error, refetch } = useQuery({
+    queryKey: LIVE_QUERY_KEYS.me,
     queryFn: () => apiGet<User>('/players/me'),
   });
 
+  // Fill the form once per account so a background refetch never overwrites unsaved edits.
+  const loadedId = useRef<string | null>(null);
   useEffect(() => {
-    if (profile) {
+    if (profile && loadedId.current !== profile.id) {
+      loadedId.current = profile.id;
       setForm({
         username: profile.username,
         country: profile.country || '',
@@ -67,7 +72,7 @@ export function ProfilePage() {
         ...form,
         vrDeviceType: form.vrDeviceType || null,
       }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profile'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.me }),
   });
 
   const uploadAvatar = useMutation({
@@ -76,7 +81,7 @@ export function ProfilePage() {
       return apiPatch<User>('/players/me/avatar', { data, mimeType });
     },
     onSuccess: (user) => {
-      queryClient.invalidateQueries({ queryKey: ['profile'] });
+      queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.me });
       queryClient.invalidateQueries({ queryKey: ['public-profile', user.username] });
     },
   });
@@ -86,6 +91,9 @@ export function ProfilePage() {
     : null;
 
   if (isLoading) return <ProfileSkeleton />;
+  if (!profile) {
+    return <QueryError error={error} resource="profile" onRetry={() => refetch()} className="max-w-lg mx-auto" />;
+  }
 
   return (
     <div className="max-w-lg mx-auto space-y-6">

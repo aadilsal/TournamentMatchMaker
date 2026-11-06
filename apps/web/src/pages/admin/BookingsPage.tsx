@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { AdminBookingRow, Venue } from '@vr-tournament/shared';
 import { apiDelete, apiGet } from '@/lib/api';
@@ -14,16 +14,20 @@ import {
   DataTable,
   StatusBadge,
 } from '@/components/admin/AdminUi';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { formatDateTime } from '@/lib/format';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 import { useConfirm } from '@/components/ui/confirm-dialog';
+import { useAuthUser } from '@/hooks/useAuthUser';
 
 export function AdminBookingsPage() {
   const askConfirm = useConfirm();
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? '');
   const [venueId, setVenueId] = useState('');
 
   const { data: venues = [] } = useQuery({
@@ -50,12 +54,7 @@ export function AdminBookingsPage() {
   const handleCancel = async (booking: AdminBookingRow) => {
     const who = booking.username ?? 'this player';
     const when = booking.slotStart
-      ? new Date(booking.slotStart).toLocaleString([], {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
+      ? formatDateTime(booking.slotStart)
       : 'their slot';
     const ok = await askConfirm({
       title: 'Cancel this booking?',
@@ -75,10 +74,10 @@ export function AdminBookingsPage() {
     <div>
       <AdminPageHeader
         title="Bookings"
-        description="All venue slot reservations"
+        description={isSuperAdmin ? 'All venue slot reservations' : 'Reservations at your venues'}
         actions={
-          <Link to="/admin/bookings/new">
-            <Button size="sm">Create booking</Button>
+          <Link to="/admin/bookings/new" className={buttonVariants({ size: 'sm' })}>
+            Create booking
           </Link>
         }
       />
@@ -126,15 +125,10 @@ export function AdminBookingsPage() {
               user: b.username ?? b.userId.slice(0, 8),
               venue: b.venueName ?? '—',
               slot: b.slotStart
-                ? new Date(b.slotStart).toLocaleString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
+                ? formatDateTime(b.slotStart)
                 : '—',
               status: <StatusBadge status={b.status} />,
-              created: new Date(b.createdAt).toLocaleString(),
+              created: formatDateTime(b.createdAt),
               actions:
                 b.status === 'confirmed' ? (
                   <Button

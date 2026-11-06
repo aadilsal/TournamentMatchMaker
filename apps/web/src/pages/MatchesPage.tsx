@@ -29,6 +29,21 @@ import { BuybackBanner } from '@/components/tournament/BuybackBanner';
 import { useState } from 'react';
 import { MapPin, Trophy, Swords } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { QueryError } from '@/components/ui/query-error';
+import { formatDateTimeRange } from '@/lib/format';
+import { matchCardState, needsToPlay, type MatchCardState } from '@/lib/match-card-state';
+import { cn } from '@/lib/utils';
+
+const HEADERS: Record<MatchCardState, string> = {
+  not_started: 'Waiting for confirmation',
+  bat_first: 'No target yet',
+  chasing: 'You are chasing',
+  waiting_opponent: 'Your innings is in',
+  resolving: 'Both innings are in',
+  completed: 'Match complete',
+  closed: 'Match closed',
+};
 
 /**
  * A player may only play inside their own booked window. Pairing no longer
@@ -60,11 +75,12 @@ export function MatchesPage() {
   const [actionError, setActionError] = useState<Record<string, string>>({});
 
   const { data: me } = useQuery({
-    queryKey: ['profile'],
+    queryKey: LIVE_QUERY_KEYS.me,
     queryFn: () => apiGet<User>('/players/me'),
   });
 
-  const { data: matches = [], isLoading } = useQuery({
+  const confirm = useConfirm();
+  const { data: matches = [], isLoading, error: matchesError, refetch: refetchMatches } = useQuery({
     queryKey: LIVE_QUERY_KEYS.matches,
     queryFn: () => apiGet<Match[]>('/matches/me'),
     staleTime: LIVE_STALE_TIME,
@@ -210,6 +226,8 @@ export function MatchesPage() {
 
       {isLoading ? (
         <ListSkeleton count={3} />
+      ) : matchesError ? (
+        <QueryError error={matchesError} resource="your matches" onRetry={() => refetchMatches()} />
       ) : active.length === 0 && history.length === 0 && !queueStatus?.inQueue ? (
         <EmptyState
           icon={<Swords className="h-12 w-12" />}
@@ -222,19 +240,28 @@ export function MatchesPage() {
           {active.length > 0 && (
             <div className="space-y-4">
               {active.map((match, i) => {
-                const { label, variant } = matchStatusBadge(match.status);
+                const play = playWindow(match);
+                const badge = matchStatusBadge(match.status);
+                // "Live" only while the player's own slot is actually open.
+                const { label, variant } =
+                  match.status === 'in_progress' && play.state !== 'open'
+                    ? { label: 'Scheduled', variant: 'neutral' as const }
+                    : badge;
                 const isP1 = me && match.player1Id === me.id;
                 const result = match.result as MatchResult | null;
                 const myScore = isP1 ? result?.player1Score : result?.player2Score;
                 const opponentScore = isP1 ? result?.player2Score : result?.player1Score;
-                const chaseTarget = match.result?.chaseTarget;
-                const amChasing = chaseTarget != null && match.result?.chasePlayerId === me?.id;
-                // Nothing on the board yet: whoever bats first sets the target
-                // their opponent will have to chase.
-                const amSettingTarget =
-                  chaseTarget == null && myScore == null && opponentScore == null;
                 const opponent = isP1 ? match.player2 : match.player1;
-                const targetSetter = amChasing ? opponent : isP1 ? match.player1 : match.player2;
+                const cardState = matchCardState({
+                  status: match.status,
+                  myScore,
+                  opponentScore,
+                  chasePlayerId: match.result?.chasePlayerId,
+                  myId: me?.id,
+                });
+                // The runs the chaser must beat: the setter's innings.
+                const runsToBeat = opponentScore ?? match.result?.chaseTarget ?? null;
+                const opponentName = opponent?.username ?? 'your opponent';
                 const youConfirmed =
                   !!me &&
                   !!match.confirmations &&
@@ -267,14 +294,14 @@ export function MatchesPage() {
                     {/* VS header */}
                     <div className="px-5 py-4 border-b border-[var(--color-border)] flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Link to={`/players/${match.player1?.username}`} className="font-semibold truncate hover:underline">
-                          {match.player1?.username ?? '—'}
+                        <Link to={`/players/${match.player1?.username}`} title={match.player1?.username} className="inline-flex min-h-9 -my-2 items-center min-w-0 font-semibold hover:underline">
+                          <span className="truncate">{match.player1?.username ?? '—'}</span>
                         </Link>
                         <span className="flex items-center justify-center h-6 w-6 rounded-full bg-[var(--color-primary)]/15 shrink-0">
                           <Swords className="h-3 w-3 text-[var(--color-primary)]" />
                         </span>
-                        <Link to={`/players/${match.player2?.username}`} className="font-semibold truncate hover:underline">
-                          {match.player2?.username ?? '—'}
+                        <Link to={`/players/${match.player2?.username}`} title={match.player2?.username} className="inline-flex min-h-9 -my-2 items-center min-w-0 font-semibold hover:underline">
+                          <span className="truncate">{match.player2?.username ?? '—'}</span>
                         </Link>
                       </div>
                       <Badge variant={variant}>{label}</Badge>
@@ -287,74 +314,66 @@ export function MatchesPage() {
                           {match.venue.name}, {match.venue.city}
                         </p>
                       )}
-                      {match.slot && (
+                      {play.window && (
                         <p className="text-sm text-[var(--color-muted-foreground)]">
-                          {new Date(match.slot.startTime).toLocaleString()}
+                          Your slot: {formatDateTimeRange(play.window.startTime, play.window.endTime)}
                         </p>
                       )}
 
-                      {/* Match briefing — shown before the player joins so they
-                          know whether they are batting first or chasing. */}
                       {me && (
                         <div
-                          className={`rounded-lg border px-3 py-2.5 ${
-                            amSettingTarget
+                          className={cn(
+                            'rounded-lg border px-3 py-2.5',
+                            needsToPlay(cardState)
                               ? 'border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5'
                               : 'border-[var(--color-border)] bg-[var(--color-background)]/50'
-                          }`}
+                          )}
                         >
                           <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--color-muted-foreground)]">
-                            {amSettingTarget ? 'You bat first' : amChasing ? 'You are chasing' : 'Your target is set'}
+                            {cardState === 'not_started' && youConfirmed ? 'You confirmed' : HEADERS[cardState]}
                           </p>
-                          {amSettingTarget ? (
-                            <p className="mt-1 text-sm">
-                              No target yet — you are the first player. The score you post becomes
-                              the target{' '}
-                              <span className="font-semibold">{opponent?.username ?? 'your opponent'}</span>{' '}
-                              has to beat.
-                            </p>
-                          ) : chaseTarget != null ? (
-                            <p className="mt-1 text-sm">
-                              {amChasing ? (
-                                <>
-                                  <span className="font-semibold text-[var(--color-primary)]">
-                                    {chaseTarget} runs
-                                  </span>{' '}
-                                  to beat, set by{' '}
-                                  <span className="font-semibold">
-                                    {targetSetter?.username ?? 'your opponent'}
-                                  </span>
-                                  . Match a tied score and you replay.
-                                </>
-                              ) : (
-                                <>
-                                  You posted{' '}
-                                  <span className="font-semibold text-[var(--color-primary)]">
-                                    {chaseTarget} runs
-                                  </span>
-                                  .{' '}
-                                  <span className="font-semibold">
-                                    {opponent?.username ?? 'Your opponent'}
-                                  </span>{' '}
-                                  has to beat it.
-                                </>
-                              )}
-                            </p>
-                          ) : (
-                            <p className="mt-1 text-sm text-[var(--color-muted-foreground)]">
-                              Waiting on the first innings before a target is set.
-                            </p>
-                          )}
+                          <p className="mt-1 text-sm">
+                            {cardState === 'not_started' &&
+                              (youConfirmed
+                                ? `Waiting for ${opponentName} to confirm — you’ll be notified when the match is locked in.`
+                                : 'Confirm below to lock in the match. Whoever plays first sets the target.')}
+                            {cardState === 'bat_first' && (
+                              <>
+                                Neither of you has batted. Play first and your score becomes the target{' '}
+                                <span className="font-semibold">{opponentName}</span> has to beat; if they
+                                play first, you chase theirs.
+                              </>
+                            )}
+                            {cardState === 'chasing' && (
+                              <>
+                                {runsToBeat != null ? (
+                                  <>
+                                    <span className="font-semibold text-[var(--color-primary)]">{runsToBeat} runs</span>{' '}
+                                    to beat
+                                  </>
+                                ) : (
+                                  'A target has been set'
+                                )}
+                                , set by <span className="font-semibold">{opponentName}</span>. Score the same and
+                                you replay.
+                              </>
+                            )}
+                            {cardState === 'waiting_opponent' && (
+                              <>
+                                You posted{' '}
+                                <span className="font-semibold text-[var(--color-primary)]">{myScore} runs</span>.
+                                Waiting on <span className="font-semibold">{opponentName}</span> to play their
+                                innings — you&rsquo;ll be notified as soon as they do.
+                              </>
+                            )}
+                            {cardState === 'resolving' && 'Working out the result now — this only takes a moment.'}
+                            {(cardState === 'completed' || cardState === 'closed') && 'See your match history below.'}
+                          </p>
                         </div>
                       )}
 
                       {match.status === 'pending_confirmation' && (
                         <div className="space-y-2 pt-1">
-                          {youConfirmed && !opponentConfirmed && (
-                            <p className="text-sm text-[var(--color-primary)]">
-                              You confirmed — waiting for your opponent to confirm.
-                            </p>
-                          )}
                           {!youConfirmed && opponentConfirmed && (
                             <p className="text-sm text-[var(--color-muted-foreground)]">
                               Your opponent confirmed. Please confirm to lock in the match.
@@ -378,7 +397,14 @@ export function MatchesPage() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => declineMutation.mutate(match.id)}
+                              onClick={async () => {
+                                const ok = await confirm({
+                                  title: 'Decline this match?',
+                                  description: `You won't play ${opponentName} in this match. We'll put you back in the queue to find another opponent.`,
+                                  confirmLabel: 'Decline match',
+                                });
+                                if (ok) declineMutation.mutate(match.id);
+                              }}
                               disabled={isConfirming || isDeclining}
                             >
                               {isDeclining ? 'Declining…' : 'Decline'}
@@ -394,30 +420,14 @@ export function MatchesPage() {
                             // Play happens in the headset, so this is guidance,
                             // not a control: tell the player where they are —
                             // waiting for their window, in it, or done.
-                            const play = playWindow(match);
-                            const when = play.window
-                              ? new Date(play.window.startTime).toLocaleString([], {
-                                  weekday: 'short', day: 'numeric', month: 'short',
-                                  hour: '2-digit', minute: '2-digit',
-                                })
-                              : null;
+                            if (!needsToPlay(cardState)) return null;
 
-                            if (myScore != null) {
+                            // Time is shown once above; this line only says how long until it.
+                            if (play.state === 'early') {
                               return (
                                 <p className="text-sm text-[var(--color-muted-foreground)]">
-                                  {opponentScore != null
-                                    ? 'Both innings are in — working out the result now.'
-                                    : "Innings recorded. We're waiting on your opponent to play theirs — you'll be notified as soon as they do."}
-                                </p>
-                              );
-                            }
-
-                            if (play.state === 'early' && when) {
-                              return (
-                                <p className="text-sm text-[var(--color-muted-foreground)]">
-                                  You&rsquo;re all set. Your slot opens{' '}
-                                  <span className="font-medium text-[var(--color-foreground)]">{when}</span>{' '}
-                                  ({untilLabel(play.start!)}) — put your headset on then and your score will appear here.
+                                  You&rsquo;re all set. Your slot opens {untilLabel(play.start!)} — put your
+                                  headset on then and your score will appear here.
                                 </p>
                               );
                             }

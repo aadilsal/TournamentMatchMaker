@@ -14,11 +14,12 @@ const ROLE_SECTIONS: Record<Exclude<UserRole, 'player'>, string[] | 'all'> = {
     '/admin',
     '/admin/matches',
     '/admin/tournaments',
-    '/admin/queue',
     '/admin/buybacks',
-    '/admin/notifications',
   ],
 };
+
+// Create pages whose POST is superadmin-only, though their section is shared.
+const SUPERADMIN_ONLY_PATHS = ['/admin/tournaments/new', '/admin/venues/new', '/admin/matches/new'];
 
 export function allowedAdminSections(role?: UserRole): string[] | 'all' {
   if (!role || role === 'player') return [];
@@ -29,6 +30,7 @@ export function allowedAdminSections(role?: UserRole): string[] | 'all' {
 export function canAccessAdminPath(pathname: string, role?: UserRole): boolean {
   const sections = allowedAdminSections(role);
   if (sections === 'all') return true;
+  if (SUPERADMIN_ONLY_PATHS.includes(pathname)) return false;
   return sections.some((section) =>
     section === '/admin' ? pathname === '/admin' : pathname.startsWith(section)
   );

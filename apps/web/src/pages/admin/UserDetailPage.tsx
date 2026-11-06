@@ -8,7 +8,7 @@ import {
   adminRatingFormSchema,
   validateAdminForm,
 } from '@/lib/admin-form-validation';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -71,7 +71,14 @@ export function AdminUserDetailPage() {
 
   if (isLoading) return <GridSkeleton count={3} />;
   if (error || !user)
-    return <AdminQueryError error={error} resource="user" onRetry={() => refetch()} />;
+    return (
+      <AdminQueryError
+        error={error}
+        resource="user"
+        onRetry={() => refetch()}
+        backTo={{ href: '/admin/users', label: 'All users' }}
+      />
+    );
 
   const displayRole = role || user.role;
   const isSelf = currentUser?.id === user.id;
@@ -175,15 +182,15 @@ export function AdminUserDetailPage() {
         title={user.username}
         description={user.email}
         actions={
-          <Link to="/admin/users">
-            <Button variant="outline" size="sm">← All users</Button>
+          <Link to="/admin/users" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            ← All users
           </Link>
         }
       />
 
       <div className="grid lg:grid-cols-2 gap-4 mb-6">
         <AdminCard className="p-5 space-y-2 text-sm">
-          <p><span className="text-[var(--color-muted-foreground)]">Role:</span> {user.role}</p>
+          <p><span className="text-[var(--color-muted-foreground)]">Role:</span> {ROLE_LABELS[user.role] ?? user.role}</p>
           <p><span className="text-[var(--color-muted-foreground)]">Tier:</span> {user.skillTier}</p>
           <p><span className="text-[var(--color-muted-foreground)]">Rating:</span> {user.ratingPoints}</p>
           <p><span className="text-[var(--color-muted-foreground)]">City:</span> {user.city ?? '—'}</p>
@@ -241,7 +248,7 @@ export function AdminUserDetailPage() {
                 aria-invalid={Boolean(ratingError)}
               />
               <AdminFieldError message={ratingError} />
-              <div className="flex gap-2 mt-2">
+              <div className="flex flex-wrap gap-2 mt-2">
                 <Button
                   size="sm"
                   variant="outline"
@@ -260,7 +267,7 @@ export function AdminUserDetailPage() {
                 </Button>
               </div>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -316,7 +323,7 @@ export function AdminUserDetailPage() {
         ]}
         rows={user.tournaments.map((t) => ({
           name: (
-            <Link to={`/admin/tournaments/${t.id}`} className="hover:underline">
+            <Link to={`/admin/tournaments/${t.id}`} className="inline-flex min-h-10 items-center hover:underline">
               {t.name}
             </Link>
           ),

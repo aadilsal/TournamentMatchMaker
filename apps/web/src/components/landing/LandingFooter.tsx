@@ -13,6 +13,8 @@ export function LandingFooter() {
           <Link to="/venues" className="hover:text-[var(--color-foreground)] transition-colors">Venues</Link>
           <Link to="/register" className="hover:text-[var(--color-foreground)] transition-colors">Register</Link>
           <Link to="/login" className="hover:text-[var(--color-foreground)] transition-colors">Login</Link>
+          <Link to="/terms" className="hover:text-[var(--color-foreground)] transition-colors">Terms</Link>
+          <Link to="/privacy" className="hover:text-[var(--color-foreground)] transition-colors">Privacy</Link>
         </nav>
         <p className="text-xs text-[var(--color-muted-foreground)]">
           © {new Date().getFullYear()} TechVersa

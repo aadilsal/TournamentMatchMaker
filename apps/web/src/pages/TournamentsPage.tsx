@@ -16,7 +16,9 @@ import {
   queueNeedsPolling,
 } from '@/lib/query-keys';
 import { useSocketEvent } from '@/hooks/useSocket';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
+import { formatDate } from '@/lib/format';
 import { Badge, tournamentStatusBadge } from '@/components/ui/badge';
 import { Tabs } from '@/components/ui/tabs';
 import { GridSkeleton } from '@/components/ui/skeleton';
@@ -35,7 +37,7 @@ export function TournamentsPage() {
   // Finished seasons are noise on the default view — they stay one click away.
   const [view, setView] = useState<TournamentView>('active');
 
-  const { data: tournaments = [], isLoading } = useQuery({
+  const { data: tournaments = [], isLoading, error, refetch } = useQuery({
     queryKey: ['tournaments'],
     queryFn: () => apiGet<Tournament[]>('/tournaments'),
   });
@@ -171,6 +173,8 @@ export function TournamentsPage() {
 
       {isLoading ? (
         <GridSkeleton cols={2} count={4} />
+      ) : error ? (
+        <QueryError error={error} resource="tournaments" onRetry={() => refetch()} />
       ) : visible.length === 0 ? (
         <EmptyState
           icon={<Trophy className="h-12 w-12" />}
@@ -206,7 +210,7 @@ export function TournamentsPage() {
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm text-[var(--color-muted-foreground)]">
                     <span className="flex items-center gap-1.5">
                       <Calendar className="h-3.5 w-3.5" />
-                      {new Date(t.startDate).toLocaleDateString()} – {new Date(t.endDate).toLocaleDateString()}
+                      {formatDate(t.startDate)} – {formatDate(t.endDate)}
                     </span>
                     <span className="flex items-center gap-1.5">
                       <Users className="h-3.5 w-3.5" />
@@ -215,8 +219,11 @@ export function TournamentsPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <Link to={`/tournaments/${t.id}`} className="flex-1">
-                      <Button size="sm" variant="outline" className="w-full">Details</Button>
+                    <Link
+                      to={`/tournaments/${t.id}`}
+                      className={buttonVariants({ variant: 'outline', className: 'flex-1' })}
+                    >
+                      Details
                     </Link>
                     {t.status === 'open' &&
                       (() => {
@@ -229,7 +236,6 @@ export function TournamentsPage() {
                         const alreadyIn = !!liveTournament && liveTournament.id === t.id;
                         return (
                           <Button
-                            size="sm"
                             className="flex-1"
                             variant={alreadyIn ? 'secondary' : 'default'}
                             disabled={blocked}

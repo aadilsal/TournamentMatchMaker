@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight, Play } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 
 export function HeroSection() {
   return (
@@ -48,7 +48,7 @@ export function HeroSection() {
           >
             <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/10 px-4 py-1.5 text-xs font-medium text-[var(--color-accent-foreground)] mb-8">
               <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-primary)] animate-pulse" />
-              Season 1 Open — Canada's first VR cricket tournament
+              Season 1 Open — the first VR cricket league
             </span>
           </motion.div>
 
@@ -69,7 +69,7 @@ export function HeroSection() {
             transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-6 text-lg text-[var(--color-muted-foreground)] leading-relaxed"
           >
-            Canada's first VR cricket tournament. Register, book your arena
+            The first VR cricket league. Register, book your arena
             slot, and compete in Super Over format — with a Meta Quest at home
             or at a VR venue near you.
           </motion.p>
@@ -80,17 +80,13 @@ export function HeroSection() {
             transition={{ duration: 0.6, delay: 0.4 }}
             className="mt-10 flex flex-col sm:flex-row items-start gap-4"
           >
-            <Link to="/register">
-              <Button size="lg" className="h-12 px-8 text-base gap-2 shadow-xl shadow-[var(--color-primary)]/30">
-                Register for Season 1
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+            <Link to="/register" className={buttonVariants({ size: 'lg', className: 'h-12 px-8 text-base gap-2 shadow-xl shadow-[var(--color-primary)]/30' })}>
+              Register for Season 1
+              <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link to="/venues">
-              <Button variant="outline" size="lg" className="h-12 px-8 text-base gap-2 border-[var(--color-border)] bg-white/5 backdrop-blur-sm">
-                <Play className="h-4 w-4" />
-                Browse venues
-              </Button>
+            <Link to="/venues" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-8 text-base gap-2 border-[var(--color-border)] bg-white/5 backdrop-blur-sm' })}>
+              <Play className="h-4 w-4" />
+              Browse venues
             </Link>
           </motion.div>
 

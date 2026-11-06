@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Trophy } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 
 const links = [
   { href: '#story', label: 'The Game' },
@@ -61,15 +61,11 @@ export function LandingNav() {
         </nav>
 
         <div className="flex items-center gap-3">
-          <Link to="/login">
-            <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
-              Log in
-            </Button>
+          <Link to="/login" className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'hidden sm:inline-flex' })}>
+            Log in
           </Link>
-          <Link to="/register">
-            <Button size="sm" className="shadow-lg shadow-[var(--color-primary)]/25">
-              Get started
-            </Button>
+          <Link to="/register" className={buttonVariants({ size: 'sm', className: 'shadow-lg shadow-[var(--color-primary)]/25' })}>
+            Get started
           </Link>
         </div>
       </div>

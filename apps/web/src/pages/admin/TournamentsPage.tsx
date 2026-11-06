@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import type { Tournament } from '@vr-tournament/shared';
 import {
   AdminQueryError,
@@ -12,13 +12,17 @@ import {
   DataTable,
   StatusBadge,
 } from '@/components/admin/AdminUi';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { formatDate } from '@/lib/format';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
 
 export function AdminTournamentsPage() {
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const [status, setStatus] = useState(() => searchParams.get('status') ?? '');
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
   const [phase, setPhase] = useState('');
 
   const list = useAdminList<Tournament>({
@@ -35,11 +39,13 @@ export function AdminTournamentsPage() {
     <div>
       <AdminPageHeader
         title="Tournaments"
-        description="Create and manage tournaments"
+        description={isSuperAdmin ? 'Create and manage tournaments' : 'Manage your tournaments'}
         actions={
-          <Link to="/admin/tournaments/new">
-            <Button size="sm">Create tournament</Button>
-          </Link>
+          isSuperAdmin ? (
+            <Link to="/admin/tournaments/new" className={buttonVariants({ size: 'sm' })}>
+              Create tournament
+            </Link>
+          ) : undefined
         }
       />
 
@@ -54,8 +60,8 @@ export function AdminTournamentsPage() {
             options={[
               { value: 'draft', label: 'Draft' },
               { value: 'open', label: 'Open' },
-              { value: 'closed', label: 'Closed' },
-              { value: 'in_progress', label: 'In progress' },
+              { value: 'closed', label: 'Registration closed' },
+              { value: 'in_progress', label: 'Live' },
               { value: 'completed', label: 'Completed' },
             ]}
           />
@@ -65,7 +71,7 @@ export function AdminTournamentsPage() {
             value={phase}
             onChange={setPhase}
             options={[
-              { value: 'normal', label: 'Normal' },
+              { value: 'normal', label: 'Normal rounds' },
               { value: 'knockout', label: 'Knockout' },
               { value: 'completed', label: 'Completed' },
             ]}
@@ -89,14 +95,14 @@ export function AdminTournamentsPage() {
             ]}
             rows={list.items.map((t) => ({
               name: (
-                <Link to={`/admin/tournaments/${t.id}`} className="font-medium hover:underline">
+                <Link to={`/admin/tournaments/${t.id}`} className="inline-flex min-h-10 items-center font-medium hover:underline">
                   {t.name}
                 </Link>
               ),
               status: <StatusBadge status={t.status} />,
               phase: <StatusBadge status={t.phase} />,
               players: `${t.registrationCount ?? 0}${t.maxPlayers ? ` / ${t.maxPlayers}` : ''}`,
-              dates: `${new Date(t.startDate).toLocaleDateString()} – ${new Date(t.endDate).toLocaleDateString()}`,
+              dates: `${formatDate(t.startDate)} – ${formatDate(t.endDate)}`,
             }))}
             emptyMessage="No tournaments match your filters"
           />

@@ -1,9 +1,13 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AuthTokens } from '@vr-tournament/shared';
 import { apiPost, setAccessToken } from '@/lib/api';
 import { connectSocket } from '@/hooks/useSocket';
+import { isAdminRole } from '@/hooks/useAuthUser';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
+import { postLoginPath, sanitizeReturnTo } from '@/lib/return-to';
+import { GuestOnly } from '@/components/auth/GuestOnly';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,7 +17,18 @@ import { Trophy } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export function LoginPage() {
+  return (
+    <GuestOnly>
+      <LoginForm />
+    </GuestOnly>
+  );
+}
+
+function LoginForm() {
   const navigate   = useNavigate();
+  const queryClient = useQueryClient();
+  const [searchParams] = useSearchParams();
+  const returnTo = sanitizeReturnTo(searchParams.get('returnTo'));
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [error, setError]       = useState('');
@@ -23,8 +38,9 @@ export function LoginPage() {
       apiPost<AuthTokens>('/auth/login', data),
     onSuccess: (data) => {
       setAccessToken(data.accessToken);
+      queryClient.setQueryData(LIVE_QUERY_KEYS.me, data.user);
       connectSocket();
-      navigate('/venues');
+      navigate(postLoginPath(returnTo, isAdminRole(data.user.role)), { replace: true });
     },
     onError: (err: Error) => setError(getUserErrorMessage(err)),
   });
@@ -51,7 +67,7 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-5rem)] flex -my-8 -mx-4 sm:-mx-6">
+    <div className="min-h-[calc(100dvh-4rem)] flex -my-8 -mx-4 sm:-mx-6">
 
       {/* ── Left panel — cartoonplayer2.png ── */}
       <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col bg-[#0a0a0a]">
@@ -113,7 +129,7 @@ export function LoginPage() {
           <div className="flex items-center gap-3">
             {([
               { label: '🏏 Super Over', borderColor: 'rgba(227,24,55,0.45)', color: '#fecaca', bg: 'rgba(227,24,55,0.26)' },
-              { label: '📍 Canada',     borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff', bg: 'rgba(255,255,255,0.08)' },
+              { label: '🥽 Meta Quest',borderColor: 'rgba(255,255,255,0.25)', color: '#ffffff', bg: 'rgba(255,255,255,0.08)' },
               { label: '6 balls only',  borderColor: 'rgba(227,24,55,0.35)',  color: '#fca5a5', bg: 'rgba(227,24,55,0.13)' },
             ] as const).map((chip) => (
               <div
@@ -137,7 +153,7 @@ export function LoginPage() {
               <span className="text-white/85 font-semibold tracking-tight">VR Cricket League</span>
             </div>
             <h2 className="text-3xl font-bold text-white leading-snug">
-              Canada's first<br />VR cricket tournament
+              The first<br />VR cricket league
             </h2>
             <p className="mt-2 text-white/50 text-sm leading-relaxed">
               6-ball Super Over format · Skill-tier matchmaking · Certified arenas
@@ -189,7 +205,15 @@ export function LoginPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="login-password">Password</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="login-password">Password</Label>
+                <Link
+                  to="/forgot-password"
+                  className="-my-2 py-2 text-xs font-medium text-[var(--color-primary)] hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <PasswordInput
                 id="login-password"
                 autoComplete="current-password"
@@ -219,7 +243,10 @@ export function LoginPage() {
 
           <p className="text-sm text-center text-[var(--color-muted-foreground)]">
             No account?{' '}
-            <Link to="/register" className="font-medium text-[var(--color-primary)] hover:underline">
+            <Link
+              to={returnTo ? `/register?returnTo=${encodeURIComponent(returnTo)}` : '/register'}
+              className="font-medium text-[var(--color-primary)] hover:underline"
+            >
               Create one free
             </Link>
           </p>

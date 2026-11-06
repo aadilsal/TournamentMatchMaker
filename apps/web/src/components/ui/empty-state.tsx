@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Button } from './button';
+import { buttonVariants } from './button';
 import { Link } from 'react-router-dom';
 
 interface EmptyStateProps {
@@ -32,8 +32,8 @@ export function EmptyState({ icon, image, title, description, action, className 
         </p>
       )}
       {action && (
-        <Link to={action.href} className="mt-6">
-          <Button size="sm">{action.label}</Button>
+        <Link to={action.href} className={buttonVariants({ className: 'mt-6' })}>
+          {action.label}
         </Link>
       )}
     </div>

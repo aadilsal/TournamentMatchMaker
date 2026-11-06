@@ -1,23 +1,29 @@
 import { useQuery } from '@tanstack/react-query';
 import type { AdminIntegrationsConfig } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
-import { AdminPageHeader, AdminCard } from '@/components/admin/AdminUi';
+import { AdminPageHeader, AdminCard, AdminQueryError } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminIntegrationsPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['admin', 'integrations'],
     queryFn: () => apiGet<AdminIntegrationsConfig>('/admin/integrations'),
   });
 
   const testEmail = useAdminMutation({
-    mutationFn: () => apiPost('/admin/integrations/email/test'),
-    successMessage: 'Test email sent — check your inbox.',
+    mutationFn: () =>
+      apiPost<{ sent: boolean; provider: string | null; failures: string[]; to: string }>(
+        '/admin/integrations/email/test'
+      ),
+    successMessage: (r) => (r?.sent ? `Test email sent via ${r.provider} to ${r.to}.` : 'Test email was not delivered — see details.'),
   });
+  const result = testEmail.data;
 
   if (isLoading) return <GridSkeleton count={3} />;
+  if (error || !data)
+    return <AdminQueryError error={error} resource="integrations" onRetry={() => refetch()} />;
 
   return (
     <div>
@@ -34,10 +40,15 @@ export function AdminIntegrationsPage() {
         <AdminCard className="p-5 space-y-3 text-sm">
           <h3 className="font-semibold">Email</h3>
           <p className="text-[var(--color-muted-foreground)]">
-            Provider: {data?.email.provider}<br />
-            From: {data?.email.from}<br />
-            Enabled: {data?.email.enabled ? 'Yes' : 'No'}
+            Send order: {data.email.providers.length ? data.email.providers.join(' → ') : 'none'}<br />
+            From: {data.email.from ?? '—'}<br />
+            Enabled: {data.email.enabled ? 'Yes' : 'No'}
           </p>
+          {data.email.providers.length === 0 && (
+            <p role="alert" className="text-xs text-[var(--color-destructive)]">
+              No email provider is configured — emails (including password resets) are not being sent.
+            </p>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -46,6 +57,13 @@ export function AdminIntegrationsPage() {
           >
             {testEmail.isPending ? 'Sending…' : 'Send test to me'}
           </Button>
+          {result && !result.sent && (
+            <ul role="alert" className="text-xs text-[var(--color-destructive)] space-y-1 break-words">
+              {result.failures.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+          )}
           {!data?.email.enabled && (
             <p className="text-xs text-[var(--color-muted-foreground)]">
               Enable email delivery to send a test.

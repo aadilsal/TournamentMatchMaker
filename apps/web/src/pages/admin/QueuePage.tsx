@@ -1,13 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import type { AdminQueueOverview } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPost } from '@/lib/api';
-import { AdminPageHeader, AdminCard, DataTable } from '@/components/admin/AdminUi';
+import { AdminPageHeader, AdminCard, AdminQueryError, DataTable } from '@/components/admin/AdminUi';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 import { Button } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { formatDuration } from '@/lib/format';
 
 export function AdminQueuePage() {
-  const { data, isLoading } = useQuery({
+  const askConfirm = useConfirm();
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['admin', 'queue'],
     queryFn: () => apiGet<AdminQueueOverview>('/admin/queue'),
     refetchInterval: 5000,
@@ -34,6 +37,17 @@ export function AdminQueuePage() {
   });
 
   if (isLoading) return <GridSkeleton count={3} />;
+  if (error || !data)
+    return <AdminQueryError error={error} resource="queue" onRetry={() => refetch()} />;
+
+  const handleKick = async (player: { userId: string; username: string }) => {
+    const ok = await askConfirm({
+      title: `Remove ${player.username} from the queue?`,
+      description: 'They stop waiting for an opponent and must re-enter the queue themselves to be paired.',
+      confirmLabel: 'Remove from queue',
+    });
+    if (ok) kick.mutate(player);
+  };
 
   return (
     <div>
@@ -50,12 +64,12 @@ export function AdminQueuePage() {
       <div className="grid sm:grid-cols-2 gap-4 mb-6">
         <AdminCard className="p-4">
           <p className="text-xs text-[var(--color-muted-foreground)]">Global queue</p>
-          <p className="text-2xl font-bold">{data?.globalSize ?? 0}</p>
+          <p className="text-2xl font-bold">{data.globalSize ?? 0}</p>
         </AdminCard>
         <AdminCard className="p-4">
           <p className="text-xs text-[var(--color-muted-foreground)]">Tournament queues</p>
           <p className="text-sm mt-1">
-            {data?.tournaments.length
+            {data.tournaments.length
               ? data.tournaments.map((t) => `${t.name}: ${t.size}`).join(' · ')
               : 'None'}
           </p>
@@ -66,15 +80,15 @@ export function AdminQueuePage() {
         columns={[
           { key: 'player', label: 'Player' },
           { key: 'tournament', label: 'Tournament' },
-          { key: 'wait', label: 'Wait (s)' },
+          { key: 'wait', label: 'Waiting' },
           { key: 'round', label: 'Round' },
           { key: 'solo', label: 'Solo' },
           { key: 'actions', label: '' },
         ]}
-        rows={(data?.entries ?? []).map((e) => ({
+        rows={(data.entries ?? []).map((e) => ({
           player: e.username,
           tournament: e.tournamentName ?? 'Global',
-          wait: e.waitSeconds,
+          wait: formatDuration(e.waitSeconds),
           round: e.roundNumber,
           solo: e.soloTarget ?? '—',
           actions: (
@@ -82,7 +96,7 @@ export function AdminQueuePage() {
               size="sm"
               variant="ghost"
               className="text-[var(--color-destructive)]"
-              onClick={() => kick.mutate({ userId: e.userId, username: e.username })}
+              onClick={() => handleKick({ userId: e.userId, username: e.username })}
               disabled={kick.isPending}
             >
               Kick

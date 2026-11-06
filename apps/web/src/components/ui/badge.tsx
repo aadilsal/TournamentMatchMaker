@@ -78,7 +78,7 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
   in_progress: { label: 'Live', variant: 'info' },
   completed: { label: 'Completed', variant: 'neutral' },
   // Tournament / round phase
-  normal: { label: 'Normal', variant: 'info' },
+  normal: { label: 'Normal rounds', variant: 'info' },
   knockout: { label: 'Knockout', variant: 'warning' },
   // Match status
   pending_confirmation: { label: 'Pending', variant: 'warning' },
@@ -96,6 +96,12 @@ const STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
   locked: { label: 'Locked', variant: 'danger' },
   // Buyback / notification status
   pending: { label: 'Pending', variant: 'warning' },
+  refunded: { label: 'Refunded', variant: 'neutral' },
+  // Roles
+  player: { label: 'Player', variant: 'neutral' },
+  superadmin: { label: 'Superadmin', variant: 'default' },
+  venue_admin: { label: 'Venue admin', variant: 'info' },
+  tournament_admin: { label: 'Tournament admin', variant: 'info' },
   failed: { label: 'Failed', variant: 'danger' },
   sent: { label: 'Sent', variant: 'success' },
 };

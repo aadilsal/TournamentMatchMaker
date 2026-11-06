@@ -21,6 +21,11 @@ interface ModalProps {
 export function Modal({ open, title, onClose, children, busy, className }: ModalProps) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  // Callers pass inline onClose; a ref keeps the effect from re-running (and refocusing) every render.
+  const onCloseRef = useRef(onClose);
+  const busyRef = useRef(busy);
+  onCloseRef.current = onClose;
+  busyRef.current = busy;
 
   useEffect(() => {
     if (!open) return;
@@ -28,8 +33,8 @@ export function Modal({ open, title, onClose, children, busy, className }: Modal
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) {
-        onClose();
+      if (e.key === 'Escape' && !busyRef.current) {
+        onCloseRef.current();
         return;
       }
       if (e.key === 'Tab' && panelRef.current) {
@@ -66,7 +71,7 @@ export function Modal({ open, title, onClose, children, busy, className }: Modal
       clearTimeout(focusTimer);
       previouslyFocused?.focus?.();
     };
-  }, [open, busy, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -107,7 +112,7 @@ export function Modal({ open, title, onClose, children, busy, className }: Modal
                 onClick={onClose}
                 disabled={busy}
                 aria-label="Close dialog"
-                className="-m-1 rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] disabled:opacity-50"
+                className="-m-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)] disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
               </button>

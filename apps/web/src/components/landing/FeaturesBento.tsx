@@ -25,7 +25,7 @@ const features = [
   {
     icon: BarChart3,
     title: 'Live national leaderboard',
-    description: 'Real-time rankings, tournament brackets and match history. Climb the national ladder across Canada.',
+    description: 'Real-time rankings, tournament brackets and match history. Climb the league ladder.',
   },
   {
     icon: Shield,
@@ -61,7 +61,7 @@ export function FeaturesBento() {
           </h2>
           <p className="mt-6 text-lg text-[var(--color-muted-foreground)]">
             Everything you need to register, compete, and track your progress in
-            Canada's first VR cricket tournament — built to run without a hitch.
+            The first VR cricket league — built to run without a hitch.
           </p>
         </motion.div>
 

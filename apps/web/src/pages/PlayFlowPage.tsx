@@ -8,12 +8,19 @@ import type {
   TournamentRoundSlot,
   User,
   Venue,
+  TournamentRegistration,
+  TournamentParticipant,
 } from '@vr-tournament/shared';
+import { knockoutRoundLabel } from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
-import { LIVE_STALE_TIME, SAFETY_POLL_MS, invalidateTournamentQueries } from '@/lib/query-keys';
+import { LIVE_QUERY_KEYS, LIVE_STALE_TIME, SAFETY_POLL_MS, invalidateTournamentQueries } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
+import { formatDateTime, toLocalDateKey } from '@/lib/format';
+import { canEnterTournament } from '@/lib/tournament-play';
+import { toast } from '@/components/ui/toast';
 import { Button } from '@/components/ui/button';
 import { DetailPageSkeleton } from '@/components/ui/route-fallback';
+import { QueryError } from '@/components/ui/query-error';
 import { MapPin, Clock, ChevronRight, Headset } from 'lucide-react';
 import { motion } from 'motion/react';
 import { SlotConfirmModal } from '@/components/tournament/SlotConfirmModal';
@@ -56,13 +63,18 @@ export function PlayFlowPage() {
     if (!tournamentId) navigate('/tournaments');
   }, [navigate, tournamentId]);
 
-  const { data: profile } = useQuery({
-    queryKey: ['profile'],
+  const { data: profile, error: profileError, refetch: refetchProfile } = useQuery({
+    queryKey: LIVE_QUERY_KEYS.me,
     queryFn: () => apiGet<User>('/players/me'),
     enabled: !!getAccessToken(),
   });
 
-  const { data: tournament, isLoading: tournamentLoading } = useQuery({
+  const {
+    data: tournament,
+    isLoading: tournamentLoading,
+    error: tournamentError,
+    refetch: refetchTournament,
+  } = useQuery({
     queryKey: ['tournament', tournamentId],
     queryFn: () => apiGet<Tournament>(`/tournaments/${tournamentId}`),
     enabled: !!tournamentId,
@@ -72,6 +84,19 @@ export function PlayFlowPage() {
   // VR players play from home, so they only pick a time; venue players pick
   // where first, then when.
   const needsVenue = !!profile && !hasVr;
+
+  // Lets the page refuse up front instead of after the player picks a venue and slot.
+  const { data: registration, isSuccess: registrationKnown } = useQuery({
+    queryKey: ['tournament-registration', tournamentId],
+    queryFn: () => apiGet<TournamentRegistration | null>(`/tournaments/${tournamentId}/registration`),
+    enabled: !!tournamentId,
+  });
+
+  const { data: participant, isSuccess: participantKnown } = useQuery({
+    queryKey: ['tournament-participant', tournamentId],
+    queryFn: () => apiGet<TournamentParticipant | null>(`/tournaments/${tournamentId}/participant`),
+    enabled: !!tournamentId && !!registration,
+  });
 
   const { data: venues = [] } = useQuery({
     queryKey: ['venues-play'],
@@ -104,7 +129,7 @@ export function PlayFlowPage() {
     if (dateInitialised || !previousRoundSlot?.slot) return;
     const start = new Date(previousRoundSlot.slot.startTime);
     if (start.getTime() > Date.now()) {
-      setSelectedDate(start.toISOString().split('T')[0]!);
+      setSelectedDate(toLocalDateKey(start));
     }
     setDateInitialised(true);
   }, [previousRoundSlot, dateInitialised]);
@@ -170,26 +195,52 @@ export function PlayFlowPage() {
       // panel all change as a result of this — refresh them immediately rather
       // than leaving a stale "0 registered" behind.
       invalidateTournamentQueries(queryClient, tournamentId ?? undefined);
+      toast.success(`You're in ${tournament?.name ?? 'the tournament'} — we'll match you with an opponent and notify you.`, { duration: 7000 });
       navigate(needsVenue ? '/bookings' : '/matches');
     },
   });
 
+  if (tournamentError || profileError) {
+    return (
+      <QueryError
+        error={tournamentError ?? profileError}
+        resource="tournament"
+        onRetry={() => (tournamentError ? refetchTournament() : refetchProfile())}
+        backTo={{ href: '/tournaments', label: 'Back to tournaments' }}
+        className="max-w-2xl mx-auto"
+      />
+    );
+  }
   if (tournamentLoading || !tournament || !profile) return <DetailPageSkeleton />;
 
+  const closedToNewPlayers =
+    registrationKnown && !registration && (tournament.status !== 'open' || tournament.phase === 'knockout');
+  // Registered players are refused up front too, not at confirm with a 409.
+  const closedToMe =
+    !!registration &&
+    !canEnterTournament(tournament.status, participantKnown ? participant?.status : null);
+  if (closedToNewPlayers || closedToMe) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-4 text-center py-12">
+        <h1 className="text-2xl font-bold">{closedToMe ? 'No longer accepting entries' : 'Registration is closed'}</h1>
+        <p className="text-[var(--color-muted-foreground)]">
+          {closedToMe
+            ? tournament.status === 'completed'
+              ? `${tournament.name} has finished, so no more matches can be booked.`
+              : `${tournament.name} is no longer accepting entries from you. Pick an open tournament to play in.`
+            : `${tournament.name} is no longer taking new players. Pick an open tournament to play in.`}
+        </p>
+        <Button onClick={() => navigate('/tournaments')}>Browse open tournaments</Button>
+      </div>
+    );
+  }
+
   const roundNumber = slotOptions?.roundNumber ?? tournament.currentRoundNumber;
+  const roundName = knockoutRoundLabel(roundNumber);
   const steps: Step[] = needsVenue ? ['venue', 'slot'] : ['slot'];
-  const emptySlotMessage = slotOptions?.round
-    ? 'No slots left on this date for this round. Try another day.'
-    : undefined;
 
   const roundWindowLabel = slotOptions?.round
-    ? `Round ${roundNumber} runs until ${new Date(slotOptions.round.endsAt).toLocaleString([], {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-      })} — only days inside it can be played.`
+    ? `${roundName} runs until ${formatDateTime(slotOptions.round.endsAt)} — only days inside it can be played.`
     : null;
 
   return (
@@ -202,7 +253,7 @@ export function PlayFlowPage() {
             : 'Pick a venue and time slot — we’ll book and find your opponent automatically.'}
         </p>
         <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
-          Round {roundNumber}
+          {roundName}
           {previousSlotId && ' · your previous slot is preselected'}
         </p>
       </div>
@@ -227,7 +278,7 @@ export function PlayFlowPage() {
                 if (s === 'slot' && needsVenue && !selectedVenue) return;
                 setStep(s);
               }}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex min-h-10 items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                 step === s
                   ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30'
                   : 'bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-muted-foreground)]'
@@ -296,7 +347,6 @@ export function PlayFlowPage() {
               setSelectedSlot(slot as SlotOption);
               setShowConfirm(true);
             }}
-            emptyMessage={emptySlotMessage}
           />
 
           {selectedSlot && !showConfirm && (

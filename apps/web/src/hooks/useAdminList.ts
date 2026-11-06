@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiGetList, type ListQueryParams } from '@/lib/api';
 
@@ -16,15 +16,12 @@ export function useAdminList<T>({
   limit?: number;
 }) {
   const [limit, setLimit] = useState(limitProp ?? DEFAULT_LIMIT);
-  const [pageIndex, setPageIndex] = useState(0);
-  const [cursors, setCursors] = useState<(string | undefined)[]>([undefined]);
-
   const filterKey = useMemo(() => JSON.stringify(filters), [filters]);
-
-  useEffect(() => {
-    setPageIndex(0);
-    setCursors([undefined]);
-  }, [filterKey, limit]);
+  const pagingKey = `${filterKey}|${limit}`;
+  const [paging, setPaging] = useState({ key: pagingKey, pageIndex: 0, cursors: [undefined] as (string | undefined)[] });
+  // New filters reset paging in the same render, so no request goes out with a stale cursor.
+  const current = paging.key === pagingKey ? paging : { key: pagingKey, pageIndex: 0, cursors: [undefined] };
+  const { pageIndex, cursors } = current;
 
   const cursor = cursors[pageIndex];
 
@@ -40,21 +37,14 @@ export function useAdminList<T>({
 
   const nextPage = () => {
     if (!nextCursor) return;
-    setCursors((prev) => {
-      const trimmed = prev.slice(0, pageIndex + 1);
-      return [...trimmed, nextCursor];
-    });
-    setPageIndex((i) => i + 1);
+    setPaging({ key: pagingKey, pageIndex: pageIndex + 1, cursors: [...cursors.slice(0, pageIndex + 1), nextCursor] });
   };
 
   const prevPage = () => {
-    if (pageIndex > 0) setPageIndex((i) => i - 1);
+    if (pageIndex > 0) setPaging({ key: pagingKey, pageIndex: pageIndex - 1, cursors });
   };
 
-  const resetPage = () => {
-    setPageIndex(0);
-    setCursors([undefined]);
-  };
+  const resetPage = () => setPaging({ key: pagingKey, pageIndex: 0, cursors: [undefined] });
 
   return {
     items,

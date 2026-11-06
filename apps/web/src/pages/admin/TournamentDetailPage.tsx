@@ -21,7 +21,9 @@ import {
 } from '@/components/admin/AdminUi';
 import { UserPicker } from '@/components/admin/UserPicker';
 import { TournamentFlowGuide } from '@/components/admin/TournamentFlowGuide';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { formatDateTime, formatMoneyCents } from '@/lib/format';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Modal } from '@/components/ui/modal';
@@ -59,6 +61,7 @@ function formatRoundCountdown(endsAt: string): string {
 export function AdminTournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const askConfirm = useConfirm();
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
   const [tab, setTab] = useState('participants');
   const [showFlowGuide, setShowFlowGuide] = useState(false);
   const [participantErrors, setParticipantErrors] = useState<FieldErrors>({});
@@ -83,13 +86,13 @@ export function AdminTournamentDetailPage() {
     enabled: !!id,
   });
 
-  const { data: participants = [] } = useQuery({
+  const participantsQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'participants'],
     queryFn: () => apiGet<TournamentParticipant[]>(`/admin/tournaments/${id}/participants`),
     enabled: !!id,
   });
 
-  const { data: registrations = [] } = useQuery({
+  const registrationsQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'registrations'],
     queryFn: () =>
       apiGet<(TournamentRegistration & { username?: string; email?: string })[]>(
@@ -98,25 +101,25 @@ export function AdminTournamentDetailPage() {
     enabled: !!id,
   });
 
-  const { data: rounds = [] } = useQuery({
+  const roundsQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'rounds'],
     queryFn: () => apiGet<TournamentRound[]>(`/admin/tournaments/${id}/rounds`),
     enabled: !!id,
   });
 
-  const { data: matches = [] } = useQuery({
+  const matchesQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'matches'],
     queryFn: () => apiGet<Match[]>(`/admin/tournaments/${id}/matches`),
     enabled: !!id && tab === 'matches',
   });
 
-  const { data: bracket } = useQuery({
+  const bracketQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'bracket'],
     queryFn: () => apiGet<TournamentBracket>(`/admin/tournaments/${id}/bracket`),
     enabled: !!id && tab === 'bracket',
   });
 
-  const { data: buybacks = [] } = useQuery({
+  const buybacksQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'buybacks'],
     queryFn: () =>
       apiGet<Array<{ id: string; username?: string; amountCents: number; status: string; roundNumber: number }>>(
@@ -124,6 +127,21 @@ export function AdminTournamentDetailPage() {
       ),
     enabled: !!id && tab === 'buybacks',
   });
+
+  const participants = participantsQ.data ?? [];
+  const registrations = registrationsQ.data ?? [];
+  const rounds = roundsQ.data ?? [];
+  const matches = matchesQ.data ?? [];
+  const buybacks = buybacksQ.data ?? [];
+  const bracket = bracketQ.data;
+  const tabQuery = {
+    participants: participantsQ,
+    registrations: registrationsQ,
+    matches: matchesQ,
+    bracket: bracketQ,
+    rounds: roundsQ,
+    buybacks: buybacksQ,
+  }[tab];
 
   const { data: admins = [] } = useQuery({
     queryKey: ['admin', 'tournament', id, 'admins'],
@@ -220,7 +238,14 @@ export function AdminTournamentDetailPage() {
 
   if (isLoading) return <GridSkeleton count={4} />;
   if (error || !tournament)
-    return <AdminQueryError error={error} resource="tournament" onRetry={() => refetch()} />;
+    return (
+      <AdminQueryError
+        error={error}
+        resource="tournament"
+        onRetry={() => refetch()}
+        backTo={{ href: '/admin/tournaments', label: 'All tournaments' }}
+      />
+    );
 
   const activeCount = participants.filter((p) => p.status === 'active' || p.status === 'advanced').length;
   const activeRound = rounds.find(
@@ -351,8 +376,8 @@ export function AdminTournamentDetailPage() {
       if (violation) {
         errors[violation.path] =
           violation.path === 'startsAt'
-            ? `Round starts before the tournament does (${violation.limit.toLocaleString()})`
-            : `Round ends after the tournament does (${violation.limit.toLocaleString()})`;
+            ? `Round starts before the tournament does (${formatDateTime(violation.limit)})`
+            : `Round ends after the tournament does (${formatDateTime(violation.limit)})`;
       }
     }
     if (Object.keys(errors).length > 0) {
@@ -375,11 +400,11 @@ export function AdminTournamentDetailPage() {
         description={`${tournament.game} · Round ${tournament.currentRoundNumber}`}
         actions={
           <>
-            <Link to={`/admin/tournaments/${id}/edit`}>
-              <Button variant="outline" size="sm">Edit</Button>
+            <Link to={`/admin/tournaments/${id}/edit`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              Edit
             </Link>
-            <Link to="/admin/tournaments">
-              <Button variant="outline" size="sm">← All</Button>
+            <Link to="/admin/tournaments" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              ← All
             </Link>
           </>
         }
@@ -468,7 +493,7 @@ export function AdminTournamentDetailPage() {
               <>
                 Round {activeRound.roundNumber} closes automatically at{' '}
                 <strong className="text-[var(--color-foreground)]">
-                  {new Date(activeRound.endsAt).toLocaleString()}
+                  {formatDateTime(activeRound.endsAt)}
                 </strong>{' '}
                 ({formatRoundCountdown(activeRound.endsAt)}). Winners advance and the next round starts on
                 its own — use <strong>Close round</strong> only to end it early.
@@ -490,7 +515,8 @@ export function AdminTournamentDetailPage() {
       </AdminCard>
 
       <AdminPageHeader title="Tournament admins" description="Users who can manage this tournament" />
-      <AdminCard className="p-4 mb-6 space-y-4">
+      <AdminCard className="p-4 mb-6 space-y-4 overflow-visible">
+        {isSuperAdmin && (
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
             <UserPicker value={assignAdminUserId} onChange={setAssignAdminUserId} label="Assign admin" />
@@ -503,11 +529,13 @@ export function AdminTournamentDetailPage() {
             {assignAdmin.isPending ? 'Assigning…' : 'Assign'}
           </Button>
         </div>
+        )}
         {admins.length > 0 ? (
           <ul className="text-sm space-y-2">
             {admins.map((a) => (
-              <li key={a.userId} className="flex justify-between items-center">
-                <span>{a.username} ({a.email})</span>
+              <li key={a.userId} className="flex flex-wrap justify-between items-center gap-2">
+                <span className="min-w-0 break-all">{a.username} ({a.email})</span>
+                {isSuperAdmin && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -517,6 +545,7 @@ export function AdminTournamentDetailPage() {
                 >
                   Remove
                 </Button>
+                )}
               </li>
             ))}
           </ul>
@@ -539,6 +568,12 @@ export function AdminTournamentDetailPage() {
         ]}
       />
 
+      {tabQuery?.error ? (
+        <AdminQueryError error={tabQuery.error} resource={tab} onRetry={() => tabQuery.refetch()} />
+      ) : tabQuery?.isLoading ? (
+        <GridSkeleton count={2} />
+      ) : (
+      <>
       {tab === 'participants' && (
         <PagedDataTable
           columns={[
@@ -579,7 +614,7 @@ export function AdminTournamentDetailPage() {
 
       {tab === 'registrations' && (
         <>
-          <AdminCard className="p-4 mb-4 flex flex-wrap gap-3 items-end">
+          <AdminCard className="p-4 mb-4 flex flex-wrap gap-3 items-end overflow-visible">
             <div className="flex-1 min-w-[200px]">
               <UserPicker value={registerUserId} onChange={setRegisterUserId} label="Add player" />
             </div>
@@ -601,7 +636,7 @@ export function AdminTournamentDetailPage() {
             rows={registrations.map((r) => ({
               user: r.username ?? r.userId.slice(0, 8),
               email: r.email ?? '—',
-              date: new Date(r.registeredAt).toLocaleString(),
+              date: formatDateTime(r.registeredAt),
               actions: (
                 <Button
                   size="sm"
@@ -630,7 +665,7 @@ export function AdminTournamentDetailPage() {
           ]}
           rows={matches.map((m) => ({
             players: (
-              <Link to={`/admin/matches/${m.id}`} className="hover:underline">
+              <Link to={`/admin/matches/${m.id}`} className="inline-flex min-h-10 items-center hover:underline">
                 {m.player1?.username} vs {m.player2?.username}
               </Link>
             ),
@@ -641,7 +676,13 @@ export function AdminTournamentDetailPage() {
         />
       )}
 
-      {tab === 'bracket' && bracket && (
+      {tab === 'bracket' && !bracket?.rounds?.length && (
+        <AdminCard className="p-8 text-center text-sm text-[var(--color-muted-foreground)]">
+          The knockout bracket appears once the knockout phase starts.
+        </AdminCard>
+      )}
+
+      {tab === 'bracket' && !!bracket?.rounds?.length && (
         <AdminCard className="p-4">
           <KnockoutBracket rounds={bracket.rounds} />
         </AdminCard>
@@ -714,8 +755,8 @@ export function AdminTournamentDetailPage() {
             rows={rounds.map((r) => ({
               round: r.roundNumber,
               status: <StatusBadge status={r.status} />,
-              starts: new Date(r.startsAt).toLocaleString(),
-              ends: new Date(r.endsAt).toLocaleString(),
+              starts: formatDateTime(r.startsAt),
+              ends: formatDateTime(r.endsAt),
               actions: (
                 <Button
                   size="sm"
@@ -744,16 +785,18 @@ export function AdminTournamentDetailPage() {
           ]}
           rows={buybacks.map((b) => ({
             user: (
-              <Link to={`/admin/buybacks/${b.id}`} className="hover:underline">
+              <Link to={`/admin/buybacks/${b.id}`} className="inline-flex min-h-10 items-center hover:underline">
                 {b.username ?? b.id.slice(0, 8)}
               </Link>
             ),
-            amount: `$${(b.amountCents / 100).toFixed(2)}`,
+            amount: formatMoneyCents(b.amountCents),
             status: <StatusBadge status={b.status} />,
             round: b.roundNumber,
           }))}
           emptyMessage="No buybacks"
         />
+      )}
+      </>
       )}
 
       <Modal
@@ -786,7 +829,7 @@ export function AdminTournamentDetailPage() {
               </p>
               <AdminFieldError message={participantErrors.status} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs" htmlFor="participant-wins">Wins</Label>
                 <input
@@ -820,7 +863,7 @@ export function AdminTournamentDetailPage() {
                 <AdminFieldError message={participantErrors.losses} />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs" htmlFor="participant-round">Round</Label>
                 <input

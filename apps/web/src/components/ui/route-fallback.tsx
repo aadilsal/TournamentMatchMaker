@@ -100,7 +100,7 @@ export function RouteFallback({
 }) {
   if (variant === 'marketing') {
     return (
-      <div className={cn('min-h-screen bg-[var(--color-background)]', className)}>
+      <div className={cn('min-h-dvh bg-[var(--color-background)]', className)}>
         <div className="border-b border-[var(--color-border)]">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
             <Skeleton className="h-8 w-32" />
@@ -153,7 +153,7 @@ export function RouteFallback({
 
   if (variant === 'admin' || variant === 'admin-content') {
     return (
-      <div className={cn('min-h-screen flex bg-[var(--color-background)]', className)}>
+      <div className={cn('min-h-dvh flex bg-[var(--color-background)]', className)}>
         {variant === 'admin' && <AdminSidebarSkeleton />}
         <div className="flex-1 min-w-0">
           {variant === 'admin' && (
@@ -196,7 +196,7 @@ export function RouteFallback({
   }
 
   return (
-    <div className={cn('min-h-screen flex flex-col bg-[var(--color-background)]', className)}>
+    <div className={cn('min-h-dvh flex flex-col bg-[var(--color-background)]', className)}>
       <HeaderSkeleton />
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-8">
         <div className="space-y-6">

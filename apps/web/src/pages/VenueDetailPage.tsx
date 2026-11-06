@@ -4,11 +4,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Venue, TimeSlot, Booking } from '@vr-tournament/shared';
 import { apiGet, apiPost, getAccessToken } from '@/lib/api';
 import { getUserErrorMessage } from '@/lib/user-messages';
+import { localTimeZone } from '@/lib/format';
 import { LIVE_QUERY_KEYS, LIVE_STALE_TIME, SAFETY_POLL_MS } from '@/lib/query-keys';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
+import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { SlotPicker, todayString } from '@/components/slots/SlotPicker';
 import { MapPin, Users } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 
 export function VenueDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,15 +21,15 @@ export function VenueDetailPage() {
   const [selectedDate, setSelectedDate] = useState(todayString());
   const [bookingError, setBookingError] = useState('');
 
-  const { data: venue, isLoading: venueLoading } = useQuery({
+  const { data: venue, isLoading: venueLoading, error: venueError, refetch: refetchVenue } = useQuery({
     queryKey: ['venue', id],
     queryFn: () => apiGet<Venue>(`/venues/${id}`),
     enabled: !!id,
   });
 
-  const { data: slots = [], isLoading: slotsLoading } = useQuery({
+  const { data: slots = [], isLoading: slotsLoading, error: slotsError, refetch: refetchSlots } = useQuery({
     queryKey: ['slots', id, selectedDate],
-    queryFn: () => apiGet<TimeSlot[]>(`/venues/${id}/slots?date=${selectedDate}`),
+    queryFn: () => apiGet<TimeSlot[]>(`/venues/${id}/slots?date=${selectedDate}&tz=${encodeURIComponent(localTimeZone())}`),
     enabled: !!id,
     staleTime: LIVE_STALE_TIME,
     refetchInterval: SAFETY_POLL_MS,
@@ -58,21 +62,32 @@ export function VenueDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slots', id, selectedDate] });
       queryClient.invalidateQueries({ queryKey: LIVE_QUERY_KEYS.bookings });
+      toast.success(`Slot booked${venue ? ` at ${venue.name}` : ''}.`);
       navigate('/bookings');
     },
   });
 
   const handleBook = (slotId: string) => {
     if (!getAccessToken()) {
-      navigate('/login');
+      navigate(`/login?returnTo=${encodeURIComponent(`/venues/${id}`)}`);
       return;
     }
     setBookingError('');
     bookSlot.mutate(slotId);
   };
 
-  if (venueLoading) return <p>Loading venue...</p>;
-  if (!venue) return <p>Venue not found</p>;
+  if (venueLoading) return <DetailPageSkeleton />;
+  if (!venue) {
+    return (
+      <QueryError
+        error={venueError}
+        resource="venue"
+        onRetry={() => refetchVenue()}
+        backTo={{ href: '/venues', label: 'Back to venues' }}
+        className="max-w-3xl mx-auto"
+      />
+    );
+  }
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -95,7 +110,11 @@ export function VenueDetailPage() {
       <h2 className="text-xl font-semibold mb-4">Available Time Slots</h2>
 
       {bookingError && (
-        <p className="text-sm text-[var(--color-destructive)] mb-4">{bookingError}</p>
+        <p role="alert" className="text-sm text-[var(--color-destructive)] mb-4">{bookingError}</p>
+      )}
+
+      {slotsError && (
+        <QueryError error={slotsError} resource="time slots" onRetry={() => refetchSlots()} className="mb-4" />
       )}
 
       <SlotPicker

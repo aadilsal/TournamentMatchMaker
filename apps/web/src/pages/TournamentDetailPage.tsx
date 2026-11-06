@@ -7,6 +7,7 @@ import type {
   TournamentParticipant,
   TournamentRegistration,
 } from '@vr-tournament/shared';
+import { knockoutRoundLabel } from '@vr-tournament/shared';
 import { apiDelete, apiGet, getAccessToken } from '@/lib/api';
 import { invalidateTournamentQueries } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
@@ -17,6 +18,11 @@ import { NormalMatchList } from '@/components/tournament/NormalMatchList';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
 import { DetailPageSkeleton } from '@/components/ui/route-fallback';
+import { QueryError } from '@/components/ui/query-error';
+import { useConfirm } from '@/components/ui/confirm-dialog';
+import { toast } from '@/components/ui/toast';
+import { formatDateTime, phaseLabel } from '@/lib/format';
+import { canEnterTournament, tournamentIsRunning } from '@/lib/tournament-play';
 
 export function TournamentDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -24,8 +30,9 @@ export function TournamentDetailPage() {
   const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
   const [activeTab, setActiveTab] = useState<string>('normal');
+  const confirm = useConfirm();
 
-  const { data: tournament, isLoading } = useQuery({
+  const { data: tournament, isLoading, error, refetch } = useQuery({
     queryKey: ['tournament', id],
     queryFn: () => apiGet<Tournament>(`/tournaments/${id}`),
     enabled: !!id,
@@ -70,8 +77,22 @@ export function TournamentDetailPage() {
 
   const withdrawMutation = useMutation({
     mutationFn: () => apiDelete(`/tournaments/${id}/register`),
-    onSuccess: () => invalidateTournamentQueries(queryClient, id),
+    onSuccess: () => {
+      invalidateTournamentQueries(queryClient, id);
+      toast.success('You have withdrawn from the tournament.');
+    },
   });
+
+  const handleWithdraw = async () => {
+    const ok = await confirm({
+      title: 'Withdraw from this tournament?',
+      description:
+        'You will lose your place and any match in progress is forfeited. You can only rejoin while registration is still open.',
+      confirmLabel: 'Withdraw',
+      cancelLabel: 'Stay in',
+    });
+    if (ok) withdrawMutation.mutate();
+  };
 
   const handleJoin = () => {
     if (!isLoggedIn) {
@@ -81,7 +102,18 @@ export function TournamentDetailPage() {
     navigate(`/play?tournament=${id}`);
   };
 
-  if (isLoading || !tournament) return <DetailPageSkeleton />;
+  if (isLoading) return <DetailPageSkeleton />;
+  if (!tournament) {
+    return (
+      <QueryError
+        error={error}
+        resource="tournament"
+        onRetry={() => refetch()}
+        backTo={{ href: '/tournaments', label: 'Back to tournaments' }}
+        className="max-w-4xl mx-auto"
+      />
+    );
+  }
 
   const normalRounds = bracket?.rounds.filter((r) => r.phase !== 'knockout' && (r.round ?? 0) < 100) ?? [];
   const koRounds = bracket?.rounds.filter((r) => r.phase === 'knockout' || (r.round ?? 0) >= 100) ?? [];
@@ -105,15 +137,15 @@ export function TournamentDetailPage() {
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          {tournament.game} · {tournament.phase} phase
+          {tournament.game} · {phaseLabel(tournament.phase)}
         </p>
         <p className="text-sm mt-2">
-          {new Date(tournament.startDate).toLocaleString()} — {new Date(tournament.endDate).toLocaleString()}
+          {formatDateTime(tournament.startDate)} – {formatDateTime(tournament.endDate)}
         </p>
         <p className="text-sm">
           {tournament.registrationCount ?? 0}
-          {tournament.maxPlayers ? ` / ${tournament.maxPlayers}` : ''} players · Round{' '}
-          {tournament.currentRoundNumber}
+          {tournament.maxPlayers ? ` / ${tournament.maxPlayers}` : ''} players ·{' '}
+          {tournament.phase === 'knockout' ? 'Knockout stage' : knockoutRoundLabel(tournament.currentRoundNumber)}
         </p>
       </div>
 
@@ -133,15 +165,15 @@ export function TournamentDetailPage() {
             {isLoggedIn ? 'Join tournament' : 'Register to join'}
           </Button>
         )}
-        {myRegistration && (
-          <>
-            <Button variant="secondary" onClick={handleJoin}>
-              Pick slot & find next match
-            </Button>
-            <Button variant="outline" onClick={() => withdrawMutation.mutate()} disabled={withdrawMutation.isPending}>
-              {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
-            </Button>
-          </>
+        {myRegistration && canEnterTournament(tournament.status, myParticipant?.status) && (
+          <Button variant="secondary" onClick={handleJoin}>
+            Pick slot & find next match
+          </Button>
+        )}
+        {myRegistration && tournamentIsRunning(tournament.status) && (
+          <Button variant="outline" onClick={handleWithdraw} disabled={withdrawMutation.isPending}>
+            {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
+          </Button>
         )}
         {myParticipant?.status === 'eliminated' && tournament.phase === 'normal' && (
           <BuybackButton tournamentId={tournament.id} tournament={tournament} />
@@ -154,8 +186,15 @@ export function TournamentDetailPage() {
           Registration is closed for this tournament — new players can no longer join.
         </p>
       )}
+      {myRegistration && !tournamentIsRunning(tournament.status) && (
+        <p className="text-sm text-[var(--color-muted-foreground)]">
+          {tournament.status === 'completed'
+            ? 'This tournament has finished — no more matches can be booked.'
+            : 'This tournament is no longer accepting entries.'}
+        </p>
+      )}
       {withdrawMutation.isError && (
-        <p className="text-sm text-[var(--color-destructive)]">
+        <p role="alert" className="text-sm text-[var(--color-destructive)]">
           {getUserErrorMessage(withdrawMutation.error)}
         </p>
       )}

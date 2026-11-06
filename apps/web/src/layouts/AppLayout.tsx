@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trophy, LogOut, User, MapPin, Calendar, Menu, X } from 'lucide-react';
+import { Trophy, LogOut, User, MapPin, Calendar, Menu, X, Shield, Swords } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SocketSyncProvider } from '@/components/sync/SocketSyncProvider';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { getAccessToken, setAccessToken, apiPost } from '@/lib/api';
 import { disconnectSocket } from '@/hooks/useSocket';
 import { useAuthUser } from '@/hooks/useAuthUser';
@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 const navItems = [
   { href: '/tournaments', label: 'Tournaments', icon: Trophy, auth: false },
   { href: '/venues', label: 'Venues', icon: MapPin, auth: false },
-  { href: '/matches', label: 'Matches', icon: Trophy, auth: true },
+  { href: '/matches', label: 'Matches', icon: Swords, auth: true },
   { href: '/bookings', label: 'Bookings', icon: Calendar, auth: true },
 ];
 
@@ -41,7 +41,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <SocketSyncProvider>
-    <div className="min-h-screen flex flex-col bg-[var(--color-background)]">
+    <div className="min-h-dvh flex flex-col bg-[var(--color-background)]">
       {/* Header */}
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-card)]/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
@@ -82,30 +82,33 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               <>
                 <NotificationBell />
                 {isAdmin && (
-                  <Link to="/admin" className="hidden sm:block">
-                    <Button variant="outline" size="sm">
-                      Admin
-                    </Button>
+                  <Link
+                    to="/admin"
+                    className={buttonVariants({ variant: 'outline', size: 'sm', className: 'hidden sm:inline-flex' })}
+                  >
+                    Admin
                   </Link>
                 )}
-                <Link to="/profile">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className={cn(
+                <Link
+                  to="/profile"
+                  className={buttonVariants({
+                    variant: 'ghost',
+                    size: 'sm',
+                    className: cn(
                       'hidden sm:inline-flex gap-1.5',
                       isActive('/profile') && 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                    )}
-                  >
-                    <User className="h-4 w-4" />
-                    Profile
-                  </Button>
+                    ),
+                  })}
+                >
+                  <User className="h-4 w-4" />
+                  Profile
                 </Link>
                 <Button
                   variant="ghost"
-                  size="sm"
+                  size="icon"
                   onClick={handleLogout}
                   className="text-[var(--color-muted-foreground)] hidden sm:inline-flex"
+                  aria-label="Log out"
                   title="Log out"
                 >
                   <LogOut className="h-4 w-4" />
@@ -113,24 +116,28 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               </>
             ) : (
               <>
-                <Link to="/login" className="hidden sm:block">
-                  <Button variant="ghost" size="sm">Log in</Button>
+                <Link to="/login" className={buttonVariants({ variant: 'ghost', size: 'sm', className: 'hidden sm:inline-flex' })}>
+                  Log in
                 </Link>
-                <Link to="/register">
-                  <Button size="sm" className="shadow-lg shadow-[var(--color-primary)]/20">
-                    Register
-                  </Button>
+                <Link
+                  to="/register"
+                  className={buttonVariants({ size: 'sm', className: 'shadow-lg shadow-[var(--color-primary)]/20' })}
+                >
+                  Register
                 </Link>
               </>
             )}
 
             {/* Mobile toggle */}
             <button
-              className="md:hidden flex items-center justify-center h-8 w-8 rounded-md hover:bg-[var(--color-muted)] transition-colors"
+              type="button"
+              className="md:hidden flex items-center justify-center h-10 w-10 rounded-md hover:bg-[var(--color-muted)] transition-colors"
               onClick={() => setMobileOpen((v) => !v)}
-              aria-label="Toggle menu"
+              aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileOpen}
+              aria-controls="app-mobile-nav"
             >
-              {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
           </div>
         </div>
@@ -145,7 +152,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               transition={{ duration: 0.2 }}
               className="md:hidden border-t border-[var(--color-border)] overflow-hidden"
             >
-              <nav className="flex flex-col p-3 gap-1">
+              <nav id="app-mobile-nav" aria-label="Main navigation" className="flex flex-col p-3 gap-1">
                 {visibleItems.map((item) => {
                   const Icon = item.icon;
                   const active = isActive(item.href);
@@ -168,6 +175,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 })}
                 {isLoggedIn ? (
                   <>
+                    {isAdmin && (
+                      <Link
+                        to="/admin"
+                        onClick={() => setMobileOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
+                      >
+                        <Shield className="h-4 w-4" />
+                        Admin
+                      </Link>
+                    )}
                     <Link
                       to="/profile"
                       onClick={() => setMobileOpen(false)}
@@ -177,8 +194,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       Profile
                     </Link>
                     <button
+                      type="button"
                       onClick={() => { setMobileOpen(false); handleLogout(); }}
-                      className="flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
+                      className="w-full text-left flex items-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-muted)]"
                     >
                       <LogOut className="h-4 w-4" />
                       Log out
@@ -209,6 +227,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       >
         {children}
       </motion.main>
+
+      <footer className="border-t border-[var(--color-border)]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-xs text-[var(--color-muted-foreground)]">
+          <span>© {new Date().getFullYear()} VR Cricket League</span>
+          <nav aria-label="Legal" className="flex gap-4">
+            <Link to="/terms" className="py-2 hover:text-[var(--color-foreground)]">Terms</Link>
+            <Link to="/privacy" className="py-2 hover:text-[var(--color-foreground)]">Privacy</Link>
+          </nav>
+        </div>
+      </footer>
     </div>
     </SocketSyncProvider>
   );

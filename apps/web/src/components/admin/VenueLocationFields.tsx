@@ -54,10 +54,11 @@ export function VenueLocationFields({
         cityId="venue-city"
       />
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label>Latitude</Label>
+          <Label htmlFor="venue-latitude">Latitude</Label>
           <input
+            id="venue-latitude"
             readOnly
             className="mt-1 flex h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 text-sm text-[var(--color-muted-foreground)]"
             value={coordsLoading && city ? 'Loading…' : latitude}
@@ -65,8 +66,9 @@ export function VenueLocationFields({
           />
         </div>
         <div>
-          <Label>Longitude</Label>
+          <Label htmlFor="venue-longitude">Longitude</Label>
           <input
+            id="venue-longitude"
             readOnly
             className="mt-1 flex h-10 w-full rounded-md border border-[var(--color-border)] bg-[var(--color-muted)]/40 px-3 text-sm text-[var(--color-muted-foreground)]"
             value={coordsLoading && city ? 'Loading…' : longitude}

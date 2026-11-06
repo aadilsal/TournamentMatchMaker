@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Match, Tournament } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
@@ -14,7 +14,9 @@ import {
   StatusBadge,
 } from '@/components/admin/AdminUi';
 import { Tabs } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { formatDateTime } from '@/lib/format';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAdminList } from '@/hooks/useAdminList';
 
@@ -25,8 +27,14 @@ interface MatchRow extends Match {
 }
 
 export function AdminMatchesPage() {
-  const [view, setView] = useState<View>('ongoing');
-  const [status, setStatus] = useState('');
+  const [searchParams] = useSearchParams();
+  const initialStatus = searchParams.get('status') ?? '';
+  const viewParam = searchParams.get('view');
+  const initialView = (['ongoing', 'upcoming', 'past', 'all'] as const).find((v) => v === viewParam);
+  // A status deep link (dashboard cards) must not be narrowed further by the default tab.
+  const [view, setView] = useState<View>(initialView ?? (initialStatus ? 'all' : 'ongoing'));
+  const [status, setStatus] = useState(initialStatus);
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
   const [tournamentId, setTournamentId] = useState('');
 
   const { data: tournaments = [] } = useQuery({
@@ -48,11 +56,13 @@ export function AdminMatchesPage() {
     <div>
       <AdminPageHeader
         title="Matches"
-        description="All matches across the platform"
+        description={isSuperAdmin ? 'All matches across the platform' : 'Matches in your tournaments'}
         actions={
-          <Link to="/admin/matches/new">
-            <Button size="sm">Create match</Button>
-          </Link>
+          isSuperAdmin ? (
+            <Link to="/admin/matches/new" className={buttonVariants({ size: 'sm' })}>
+              Create match
+            </Link>
+          ) : undefined
         }
       />
 
@@ -109,7 +119,7 @@ export function AdminMatchesPage() {
             ]}
             rows={list.items.map((m) => ({
               players: (
-                <Link to={`/admin/matches/${m.id}`} className="hover:underline font-medium">
+                <Link to={`/admin/matches/${m.id}`} className="inline-flex min-h-10 items-center font-medium hover:underline">
                   {m.player1?.username} vs {m.player2?.username}
                 </Link>
               ),
@@ -118,9 +128,9 @@ export function AdminMatchesPage() {
               round: m.roundNumber ?? '—',
               venue: m.venue?.name ?? '—',
               scheduled: m.scheduledAt
-                ? new Date(m.scheduledAt).toLocaleString()
+                ? formatDateTime(m.scheduledAt)
                 : m.slot?.startTime
-                  ? new Date(m.slot.startTime).toLocaleString()
+                  ? formatDateTime(m.slot.startTime)
                   : '—',
             }))}
             emptyMessage="No matches match your filters"

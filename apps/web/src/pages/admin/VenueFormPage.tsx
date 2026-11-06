@@ -13,7 +13,7 @@ import { VenueLocationFields } from '@/components/admin/VenueLocationFields';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 
 export function AdminVenueFormPage() {
@@ -38,8 +38,11 @@ export function AdminVenueFormPage() {
     enabled: isEdit,
   });
 
+  // Seed once per venue; background refetches must not wipe unsaved edits.
+  const loadedId = useRef<string | null>(null);
   useEffect(() => {
-    if (venue) {
+    if (venue && loadedId.current !== venue.id) {
+      loadedId.current = venue.id;
       setForm({
         name: venue.name,
         address: venue.address,
@@ -88,13 +91,13 @@ export function AdminVenueFormPage() {
 
       <AdminCard className="p-6 max-w-xl space-y-4">
         <div>
-          <Label>Name</Label>
-          <Input value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={255} />
+          <Label htmlFor="venue-name">Name</Label>
+          <Input id="venue-name" value={form.name} onChange={(e) => set('name', e.target.value)} maxLength={255} />
           <AdminFieldError message={errors.name} />
         </div>
         <div>
-          <Label>Address</Label>
-          <Input value={form.address} onChange={(e) => set('address', e.target.value)} />
+          <Label htmlFor="venue-address">Address</Label>
+          <Input id="venue-address" value={form.address} onChange={(e) => set('address', e.target.value)} />
           <AdminFieldError message={errors.address} />
         </div>
 
@@ -116,19 +119,20 @@ export function AdminVenueFormPage() {
           }}
           onCityChange={(city) => set('city', city)}
           onCoordsChange={(latitude, longitude) =>
-            setForm((f) => ({ ...f, latitude, longitude }))
+            setForm((f) => (f.latitude === latitude && f.longitude === longitude ? f : { ...f, latitude, longitude }))
           }
         />
         <AdminFieldError message={errors.country || errors.city || errors.latitude || errors.longitude} />
 
         <div>
-          <Label>Capacity</Label>
-          <Input type="number" min={1} value={form.capacity} onChange={(e) => set('capacity', e.target.value)} />
+          <Label htmlFor="venue-capacity">Capacity</Label>
+          <Input id="venue-capacity" type="number" min={1} value={form.capacity} onChange={(e) => set('capacity', e.target.value)} />
           <AdminFieldError message={errors.capacity} />
         </div>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex min-h-10 items-center gap-2 text-sm">
           <input
             type="checkbox"
+            className="h-4 w-4"
             checked={form.active}
             onChange={(e) => set('active', e.target.checked)}
           />

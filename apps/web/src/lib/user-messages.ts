@@ -13,7 +13,7 @@ const BY_CODE: Record<string, string> = {
   INTERNAL_ERROR: GENERIC,
   GEO_LOOKUP_FAILED: 'We could not detect your location. Enter your city manually.',
   GEO_OUT_OF_RANGE:
-    'We could not find a supported venue city near you. Please select Lahore or Karachi manually.',
+    'We could not find a supported venue city near you. Please choose your city from the list.',
   GEO_CITIES_FAILED: 'We could not load cities for that country.',
 };
 
@@ -57,6 +57,11 @@ const BY_MESSAGE: Record<string, string> = {
   'an unexpected error occurred': GENERIC,
 };
 
+const SERVER_REASON_CODES = new Set(['CONFLICT', 'BAD_REQUEST', 'INVALID_RESET_TOKEN']);
+
+const isHumanMessage = (message: string) =>
+  /\s/.test(message.trim()) && !/^[A-Z_]+$/.test(message) && !message.includes('ECONNREFUSED');
+
 function normalizeMessage(message: string): string {
   return message.trim().toLowerCase();
 }
@@ -74,6 +79,11 @@ export function friendlyApiError(error: ApiError | null | undefined): string {
 
   const byMessage = matchByPartialMessage(error.message);
   if (byMessage) return byMessage;
+
+  // These carry a specific reason from the server (bad slot range, illegal status move, expired link).
+  if (error.code && SERVER_REASON_CODES.has(error.code) && isHumanMessage(error.message)) {
+    return error.message;
+  }
 
   if (error.code && BY_CODE[error.code]) {
     return BY_CODE[error.code]!;

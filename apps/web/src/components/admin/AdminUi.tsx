@@ -1,20 +1,12 @@
 import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SKILL_TIER_OPTIONS } from '@vr-tournament/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import {
-  ChevronLeft,
-  ChevronRight,
-  ArrowUpRight,
-  ShieldOff,
-  SearchX,
-  AlertCircle,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { ApiClientError, getUserErrorMessage } from '@/lib/api';
+import { QueryError } from '@/components/ui/query-error';
 
 export function AdminFieldError({ message }: { message?: string }) {
   if (!message) return null;
@@ -25,54 +17,8 @@ export function AdminFieldError({ message }: { message?: string }) {
   );
 }
 
-/**
- * Distinguishes "you can't see this", "it doesn't exist", and "the request
- * failed". Previously all three rendered as an empty table or bare
- * "not found" text, which read as "there is no data".
- */
-export function AdminQueryError({
-  error,
-  resource = 'data',
-  onRetry,
-}: {
-  error: unknown;
-  resource?: string;
-  onRetry?: () => void;
-}) {
-  const status = error instanceof ApiClientError ? error.status : undefined;
-  const forbidden = status === 403;
-  const notFound = status === 404;
-
-  const title = forbidden
-    ? 'You don’t have permission to view this'
-    : notFound
-      ? `This ${resource} no longer exists`
-      : `Couldn’t load ${resource}`;
-
-  const detail = forbidden
-    ? 'Your admin role doesn’t cover this data. Ask a superadmin if you need access.'
-    : notFound
-      ? 'It may have been deleted since this link was created.'
-      : getUserErrorMessage(error);
-
-  const Icon = forbidden ? ShieldOff : notFound ? SearchX : AlertCircle;
-
-  return (
-    <AdminCard className="p-8 text-center">
-      <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--color-destructive)]/15 text-[var(--color-destructive)]">
-        <Icon className="h-5 w-5" />
-      </div>
-      <p className="font-semibold">{title}</p>
-      <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-[var(--color-muted-foreground)]">
-        {detail}
-      </p>
-      {onRetry && !forbidden && !notFound && (
-        <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>
-          Try again
-        </Button>
-      )}
-    </AdminCard>
-  );
+export function AdminQueryError(props: Parameters<typeof QueryError>[0]) {
+  return <QueryError {...props} />;
 }
 
 export function AdminSkillTierSelect({
@@ -126,10 +72,10 @@ export function AdminFilterField({
   className?: string;
 }) {
   return (
-    <div className={cn('min-w-[140px]', className)}>
-      <Label className="text-xs text-[var(--color-muted-foreground)]">{label}</Label>
-      <div className="mt-1">{children}</div>
-    </div>
+    <label className={cn('block min-w-[140px]', className)}>
+      <span className="text-xs font-medium leading-none text-[var(--color-muted-foreground)]">{label}</span>
+      <span className="mt-1 block">{children}</span>
+    </label>
   );
 }
 
@@ -148,7 +94,7 @@ export function AdminFilterSelect({
 }) {
   return (
     <Select
-      className={cn('h-9 px-2.5', className)}
+      className={cn('h-10 px-2.5', className)}
       value={value}
       onChange={(e) => onChange(e.target.value)}
     >
@@ -171,12 +117,23 @@ export function AdminFilterSearch({
   onChange: (value: string) => void;
   placeholder?: string;
 }) {
+  const [text, setText] = useState(value);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => setText(value), [value]);
+  useEffect(() => {
+    if (text === value) return;
+    const timer = setTimeout(() => onChangeRef.current(text), 300);
+    return () => clearTimeout(timer);
+  }, [text, value]);
+
   return (
     <Input
-      className="h-9"
+      type="search"
       placeholder={placeholder}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
     />
   );
 }
@@ -217,7 +174,7 @@ export function AdminTableFooter({
         {onLimitChange && (
           <AdminFilterField label="Per page" className="min-w-[88px] mb-0">
             <Select
-              className="h-9 px-2.5"
+              className="h-10 px-2.5"
               aria-label="Rows per page"
               value={String(limit)}
               onChange={(e) => onLimitChange(Number(e.target.value))}
@@ -232,7 +189,7 @@ export function AdminTableFooter({
         <Button
           size="sm"
           variant="outline"
-          className="h-9 gap-1"
+          className="h-10 gap-1"
           onClick={onPrev}
           disabled={!canPrev}
         >
@@ -242,7 +199,7 @@ export function AdminTableFooter({
         <Button
           size="sm"
           variant="outline"
-          className="h-9 gap-1"
+          className="h-10 gap-1"
           onClick={onNext}
           disabled={!canNext}
         >

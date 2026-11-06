@@ -56,7 +56,7 @@ export function AdminMatchFormPage() {
     <div>
       <AdminPageHeader title="Create match" description="Manually pair two players" />
 
-      <AdminCard className="p-6 max-w-xl space-y-4">
+      <AdminCard className="p-6 max-w-xl space-y-4 overflow-visible">
         <div>
           <UserPicker
             label="Player 1"
@@ -90,8 +90,9 @@ export function AdminMatchFormPage() {
           <AdminFieldError message={errors.player2Id} />
         </div>
         <div>
-          <Label className="text-xs">Tournament (optional)</Label>
+          <Label htmlFor="match-tournament" className="text-xs">Tournament (optional)</Label>
           <Select
+            id="match-tournament"
             className="mt-1"
             value={tournamentId}
             onChange={(e) => setTournamentId(e.target.value)}
@@ -101,10 +102,12 @@ export function AdminMatchFormPage() {
               <option key={t.id} value={t.id}>{t.name}</option>
             ))}
           </Select>
+          <AdminFieldError message={errors.tournamentId} />
         </div>
         <div>
-          <Label className="text-xs">Venue (optional)</Label>
+          <Label htmlFor="match-venue" className="text-xs">Venue (optional)</Label>
           <Select
+            id="match-venue"
             className="mt-1"
             value={venueId}
             onChange={(e) => setVenueId(e.target.value)}
@@ -114,6 +117,7 @@ export function AdminMatchFormPage() {
               <option key={v.id} value={v.id}>{v.name}</option>
             ))}
           </Select>
+          <AdminFieldError message={errors.venueId} />
         </div>
         <AdminFieldError message={errors._form} />
         <Button onClick={handleSubmit} disabled={create.isPending}>

@@ -18,13 +18,14 @@ import { useAdminList } from '@/hooks/useAdminList';
 import { useQuery } from '@tanstack/react-query';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
 import { useConfirm } from '@/components/ui/confirm-dialog';
+import { formatDateTime } from '@/lib/format';
 
 export function AdminSystemPage() {
   const [entityType, setEntityType] = useState('');
   const [action, setAction] = useState('');
   const askConfirm = useConfirm();
 
-  const { data: health, isLoading } = useQuery({
+  const { data: health, isLoading, error: healthError, refetch: refetchHealth } = useQuery({
     queryKey: ['admin', 'system', 'health'],
     queryFn: () => apiGet<SystemHealth>('/admin/system/health'),
   });
@@ -78,10 +79,17 @@ export function AdminSystemPage() {
         }
       />
 
+      {healthError && (
+        <div className="mb-6">
+          <AdminQueryError error={healthError} resource="system health" onRetry={() => refetchHealth()} />
+        </div>
+      )}
+      {health && (
       <div className="grid sm:grid-cols-2 gap-4 mb-6">
         <StatCard label="Database" value={health?.database === 'ok' ? 'OK' : 'Error'} />
         <StatCard label="Redis" value={health?.redis === 'ok' ? 'OK' : 'Error'} />
       </div>
+      )}
 
       {health?.tableCounts && (
         <AdminCard className="p-4 mb-6">
@@ -124,7 +132,7 @@ export function AdminSystemPage() {
               action: a.action,
               entity: `${a.entityType}${a.entityId ? ` #${a.entityId.slice(0, 8)}` : ''}`,
               actor: a.actorUsername ?? a.actorId?.slice(0, 8) ?? 'system',
-              time: new Date(a.createdAt).toLocaleString(),
+              time: formatDateTime(a.createdAt),
             }))}
             emptyMessage="No audit entries match your filters"
           />

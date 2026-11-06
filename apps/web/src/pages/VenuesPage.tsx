@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { QueryError } from '@/components/ui/query-error';
 import { Input } from '@/components/ui/input';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -32,7 +33,7 @@ export function VenuesPage() {
     }
   }, [searchParams]);
 
-  const { data: venues = [], isLoading, refetch } = useQuery({
+  const { data: venues = [], isLoading, error, refetch } = useQuery({
     queryKey: ['venues', city, coords],
     queryFn: () => {
       const params = new URLSearchParams();
@@ -69,7 +70,7 @@ export function VenuesPage() {
           <h1 className="text-2xl font-bold tracking-tight">VR Venues</h1>
         </div>
         <p className="text-[var(--color-muted-foreground)] mt-1 ml-11">
-          Find certified VR cricket arenas across Canada
+          Find certified VR cricket arenas near you
         </p>
         {showWelcome && (
           <div className="mt-4 ml-11 rounded-lg border border-[var(--color-primary)]/30 bg-[var(--color-primary)]/8 px-4 py-3 text-sm">
@@ -86,6 +87,7 @@ export function VenuesPage() {
         className="flex gap-3 flex-wrap"
       >
         <Input
+          aria-label="Filter by city"
           placeholder="Filter by city..."
           value={city}
           onChange={(e) => setCity(e.target.value)}
@@ -109,6 +111,8 @@ export function VenuesPage() {
       {/* Results */}
       {isLoading ? (
         <GridSkeleton cols={3} count={6} />
+      ) : error ? (
+        <QueryError error={error} resource="venues" onRetry={() => refetch()} />
       ) : venues.length === 0 ? (
         <EmptyState
           icon={<MapPin className="h-12 w-12" />}

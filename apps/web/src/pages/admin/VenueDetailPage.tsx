@@ -17,11 +17,14 @@ import { useAdminMutation } from '@/hooks/useAdminMutation';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   adminSlotGenerationFormSchema,
+  SLOT_GENERATION_HOURS_PER_DAY,
   validateAdminForm,
   type FieldErrors,
 } from '@/lib/admin-form-validation';
 import { UserPicker } from '@/components/admin/UserPicker';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { formatDate, formatTime, fromLocalDateKey, localTimeZone, toLocalDateKey } from '@/lib/format';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useState } from 'react';
@@ -30,7 +33,8 @@ import { GridSkeleton } from '@/components/ui/skeleton';
 export function AdminVenueDetailPage() {
   const { id } = useParams<{ id: string }>();
   const askConfirm = useConfirm();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
+  const [date, setDate] = useState(() => toLocalDateKey());
   const [genStart, setGenStart] = useState(date);
   const [genEnd, setGenEnd] = useState(date);
   const [genErrors, setGenErrors] = useState<FieldErrors>({});
@@ -42,9 +46,14 @@ export function AdminVenueDetailPage() {
     enabled: !!id,
   });
 
-  const { data: slots = [] } = useQuery({
+  const {
+    data: slots = [],
+    isLoading: slotsLoading,
+    error: slotsError,
+    refetch: refetchSlots,
+  } = useQuery({
     queryKey: ['admin', 'venue', id, 'slots', date],
-    queryFn: () => apiGet<TimeSlot[]>(`/admin/venues/${id}/slots?date=${date}`),
+    queryFn: () => apiGet<TimeSlot[]>(`/admin/venues/${id}/slots?date=${date}&tz=${encodeURIComponent(localTimeZone())}`),
     enabled: !!id,
   });
 
@@ -75,14 +84,15 @@ export function AdminVenueDetailPage() {
 
   const generate = useAdminMutation({
     mutationFn: (body: { startDate: string; endDate: string }) =>
-      apiPost<{ created?: number }>(`/admin/venues/${id}/slots/generate`, {
+      apiPost<unknown[]>(`/admin/venues/${id}/slots/generate`, {
         ...body,
         startHour: 10,
-        endHour: 20,
+        endHour: 10 + SLOT_GENERATION_HOURS_PER_DAY,
+        timeZone: localTimeZone(),
       }),
     successMessage: (data) =>
-      typeof data?.created === 'number'
-        ? `Generated ${data.created} slot${data.created === 1 ? '' : 's'}.`
+      Array.isArray(data)
+        ? `Generated ${data.length} slot${data.length === 1 ? '' : 's'}.`
         : 'Slots generated.',
     invalidate: slotsKey,
   });
@@ -101,7 +111,14 @@ export function AdminVenueDetailPage() {
 
   if (isLoading) return <GridSkeleton count={3} />;
   if (error || !venue)
-    return <AdminQueryError error={error} resource="venue" onRetry={() => refetch()} />;
+    return (
+      <AdminQueryError
+        error={error}
+        resource="venue"
+        onRetry={() => refetch()}
+        backTo={{ href: '/admin/venues', label: 'All venues' }}
+      />
+    );
 
   const filteredSlots = slotStatus ? slots.filter((s) => s.status === slotStatus) : slots;
 
@@ -128,8 +145,9 @@ export function AdminVenueDetailPage() {
       description: (
         <>
           This creates hourly 10am–8pm slots at {venue.name} from{' '}
-          <strong>{result.data.startDate}</strong> to <strong>{result.data.endDate}</strong> —
-          roughly <strong>{days * 10} slots</strong>. Running this twice over the same dates can
+          <strong>{formatDate(fromLocalDateKey(result.data.startDate))}</strong> to{' '}
+          <strong>{formatDate(fromLocalDateKey(result.data.endDate))}</strong> —
+          roughly <strong>{days * SLOT_GENERATION_HOURS_PER_DAY} slots</strong>. Running this twice over the same dates can
           produce duplicate or overlapping slots, which players will see as repeated booking options.
         </>
       ),
@@ -155,11 +173,11 @@ export function AdminVenueDetailPage() {
         description={`${venue.address}, ${venue.city}`}
         actions={
           <>
-            <Link to={`/admin/venues/${id}/edit`}>
-              <Button variant="outline" size="sm">Edit</Button>
+            <Link to={`/admin/venues/${id}/edit`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              Edit
             </Link>
-            <Link to="/admin/venues">
-              <Button variant="outline" size="sm">← All</Button>
+            <Link to="/admin/venues" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+              ← All
             </Link>
           </>
         }
@@ -173,7 +191,8 @@ export function AdminVenueDetailPage() {
       </AdminCard>
 
       <AdminPageHeader title="Venue admins" description="Users who can manage this venue" />
-      <AdminCard className="p-4 mb-6 space-y-4">
+      <AdminCard className="p-4 mb-6 space-y-4 overflow-visible">
+        {isSuperAdmin && (
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
             <UserPicker value={assignUserId} onChange={setAssignUserId} label="Assign admin" />
@@ -186,11 +205,13 @@ export function AdminVenueDetailPage() {
             {assignAdmin.isPending ? 'Assigning…' : 'Assign'}
           </Button>
         </div>
+        )}
         {admins.length > 0 ? (
           <ul className="text-sm space-y-2">
             {admins.map((a) => (
-              <li key={a.userId} className="flex justify-between items-center">
-                <span>{a.username} ({a.email})</span>
+              <li key={a.userId} className="flex flex-wrap justify-between items-center gap-2">
+                <span className="min-w-0 break-all">{a.username} ({a.email})</span>
+                {isSuperAdmin && (
                 <Button
                   size="sm"
                   variant="ghost"
@@ -200,6 +221,7 @@ export function AdminVenueDetailPage() {
                 >
                   Remove
                 </Button>
+                )}
               </li>
             ))}
           </ul>
@@ -252,9 +274,15 @@ export function AdminVenueDetailPage() {
           />
           <AdminFieldError message={genErrors.endDate} />
         </div>
-        <Button size="sm" className="mt-5" onClick={handleGenerate} disabled={generate.isPending}>
-          {generate.isPending ? 'Generating…' : 'Generate slots (10am–8pm)'}
-        </Button>
+        <div>
+          <Button size="sm" className="mt-5" onClick={handleGenerate} disabled={generate.isPending}>
+            {generate.isPending ? 'Generating…' : 'Generate slots (10am–8pm)'}
+          </Button>
+          {/* Any error not tied to a date field still has to be seen. */}
+          <AdminFieldError
+            message={Object.entries(genErrors).find(([k]) => k !== 'startDate' && k !== 'endDate')?.[1]}
+          />
+        </div>
       </div>
 
       <AdminFilterBar className="mb-4">
@@ -271,6 +299,11 @@ export function AdminVenueDetailPage() {
         </AdminFilterField>
       </AdminFilterBar>
 
+      {slotsError ? (
+        <AdminQueryError error={slotsError} resource="slots" onRetry={() => refetchSlots()} />
+      ) : slotsLoading ? (
+        <GridSkeleton count={2} />
+      ) : (
       <PagedDataTable
         columns={[
           { key: 'time', label: 'Time' },
@@ -279,7 +312,7 @@ export function AdminVenueDetailPage() {
           { key: 'actions', label: '' },
         ]}
         rows={filteredSlots.map((s) => ({
-          time: `${new Date(s.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} – ${new Date(s.endTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+          time: `${formatTime(s.startTime)} – ${formatTime(s.endTime)}`,
           booked: `${s.bookedCount} / ${s.maxCapacity}`,
           status: <StatusBadge status={s.status} />,
           actions: (
@@ -306,6 +339,7 @@ export function AdminVenueDetailPage() {
         emptyMessage="No slots for this date — generate some above"
         pageSize={10}
       />
+      )}
     </div>
   );
 }

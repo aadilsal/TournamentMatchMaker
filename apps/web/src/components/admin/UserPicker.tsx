@@ -7,8 +7,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { X, Check, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuthUser } from '@/hooks/useAuthUser';
 
 const PAGE_LIMIT = 25;
+
+type PickerUser = Pick<User, 'id' | 'username'> & { email?: string; city?: string | null };
 
 /**
  * Searchable user picker. A plain <select> capped at 100 users meant an admin
@@ -39,19 +42,23 @@ export function UserPicker({
     return () => clearTimeout(t);
   }, [search]);
 
+  // Only superadmins may list users with emails; scoped admins get the public lookup.
+  const isSuperAdmin = useAuthUser().user?.role === 'superadmin';
+  const q = debounced ? `&search=${encodeURIComponent(debounced)}` : '';
   const { data: users = [], isFetching } = useQuery({
-    queryKey: ['admin', 'users', 'picker', debounced],
+    queryKey: ['admin', 'users', 'picker', isSuperAdmin, debounced],
     queryFn: () =>
-      apiGet<User[]>(
-        `/admin/users?limit=${PAGE_LIMIT}${debounced ? `&search=${encodeURIComponent(debounced)}` : ''}`
-      ),
+      apiGet<PickerUser[]>(isSuperAdmin ? `/admin/users?limit=${PAGE_LIMIT}${q}` : `/admin/users/lookup?limit=20${q}`),
     placeholderData: keepPreviousData,
   });
 
   // Resolve the current selection even when it isn't in the visible page.
   const { data: selectedUser } = useQuery({
-    queryKey: ['admin', 'user', 'picker-selected', value],
-    queryFn: () => apiGet<User>(`/admin/users/${value}`),
+    queryKey: ['admin', 'user', 'picker-selected', isSuperAdmin, value],
+    queryFn: async () =>
+      isSuperAdmin
+        ? apiGet<PickerUser>(`/admin/users/${value}`)
+        : (await apiGet<PickerUser[]>(`/admin/users/lookup?id=${value}`))[0],
     enabled: Boolean(value),
   });
 
@@ -71,7 +78,7 @@ export function UserPicker({
 
   useEffect(() => setHighlight(0), [debounced]);
 
-  const choose = (user: User) => {
+  const choose = (user: PickerUser) => {
     onChange(user.id);
     setOpen(false);
     setSearch('');
@@ -109,12 +116,14 @@ export function UserPicker({
         <div className="mt-1 flex h-10 items-center gap-2 rounded-md border border-[var(--color-input)] bg-[var(--color-card)] px-3 text-sm">
           <span className="min-w-0 flex-1 truncate">
             {selected.username}{' '}
-            <span className="text-[var(--color-muted-foreground)]">({selected.email})</span>
+            {(selected.email ?? selected.city) && (
+              <span className="text-[var(--color-muted-foreground)]">({selected.email ?? selected.city})</span>
+            )}
           </span>
           <Button
             variant="ghost"
             size="sm"
-            className="-mr-2 h-7 px-2"
+            className="-mr-2.5 h-9 w-9 shrink-0 px-0"
             onClick={() => {
               onChange('');
               setOpen(true);
@@ -171,13 +180,15 @@ export function UserPicker({
                 onMouseEnter={() => setHighlight(i)}
                 onClick={() => choose(u)}
                 className={cn(
-                  'flex w-full items-center gap-2 px-3 py-2 text-left text-sm',
+                  'flex min-h-10 w-full items-center gap-2 px-3 py-2 text-left text-sm',
                   i === highlight && 'bg-[var(--color-muted)]/60'
                 )}
               >
                 <span className="min-w-0 flex-1 truncate">
                   {u.username}{' '}
-                  <span className="text-[var(--color-muted-foreground)]">({u.email})</span>
+                  {(u.email ?? u.city) && (
+                    <span className="text-[var(--color-muted-foreground)]">({u.email ?? u.city})</span>
+                  )}
                 </span>
                 {u.id === value && <Check className="h-3.5 w-3.5 text-[var(--color-primary)]" />}
               </button>

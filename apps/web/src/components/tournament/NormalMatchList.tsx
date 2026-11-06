@@ -65,7 +65,7 @@ function PlayerCell({
       )}
     >
       {won && <Trophy className="h-4 w-4 shrink-0 text-[var(--color-primary)]" />}
-      <Link to={`/players/${player.username}`} className="hover:underline truncate">
+      <Link to={`/players/${player.username}`} className="inline-flex min-h-9 -my-2 items-center min-w-0 hover:underline truncate">
         {player.username}
       </Link>
     </span>

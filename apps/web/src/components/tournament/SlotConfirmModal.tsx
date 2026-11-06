@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { formatDate } from '@/lib/format';
 
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -39,19 +40,7 @@ interface SlotConfirmModalProps {
 
 
 
-function formatSlotDate(iso: string) {
-
-  return new Date(iso).toLocaleDateString([], {
-
-    weekday: 'long',
-
-    month: 'short',
-
-    day: 'numeric',
-
-  });
-
-}
+const formatSlotDate = (iso: string) => formatDate(iso);
 
 
 

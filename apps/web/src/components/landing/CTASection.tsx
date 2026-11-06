@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ArrowRight } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { buttonVariants } from '@/components/ui/button';
 
 export function CTASection() {
   return (
@@ -18,23 +18,19 @@ export function CTASection() {
           <div className="landing-grid absolute inset-0 opacity-30" aria-hidden />
           <div className="relative z-10">
             <h2 className="text-4xl sm:text-5xl font-bold tracking-tight max-w-2xl mx-auto">
-              Canada's first VR cricket tournament — Season 1 is open.
+              The first VR cricket league — Season 1 is open.
             </h2>
             <p className="mt-6 text-lg text-[var(--color-muted-foreground)] max-w-xl mx-auto">
               Register before spots fill. Whether you play at home on Meta Quest or at a
-              VR arena near you across Canada — a place in the Season 1 bracket is waiting.
+              VR arena near you — a place in the Season 1 bracket is waiting.
             </p>
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link to="/register">
-                <Button size="lg" className="h-12 px-10 text-base gap-2">
-                  Register for Season 1
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
+              <Link to="/register" className={buttonVariants({ size: 'lg', className: 'h-12 px-10 text-base gap-2' })}>
+                Register for Season 1
+                <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link to="/venues">
-                <Button variant="outline" size="lg" className="h-12 px-10 text-base bg-transparent">
-                  Browse venues first
-                </Button>
+              <Link to="/venues" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-10 text-base bg-transparent' })}>
+                Browse venues first
               </Link>
             </div>
           </div>

@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import type { Buyback } from '@vr-tournament/shared';
 import { apiGet, apiPost } from '@/lib/api';
 import { AdminQueryError, AdminPageHeader, AdminCard, StatusBadge } from '@/components/admin/AdminUi';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { formatMoneyCents } from '@/lib/format';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
@@ -33,9 +34,16 @@ export function AdminBuybackDetailPage() {
 
   if (isLoading) return <GridSkeleton count={2} />;
   if (error || !buyback)
-    return <AdminQueryError error={error} resource="buyback" onRetry={() => refetch()} />;
+    return (
+      <AdminQueryError
+        error={error}
+        resource="buyback"
+        onRetry={() => refetch()}
+        backTo={{ href: '/admin/buybacks', label: 'All buybacks' }}
+      />
+    );
 
-  const amount = `$${(buyback.amountCents / 100).toFixed(2)}`;
+  const amount = formatMoneyCents(buyback.amountCents);
 
   const handleRefund = async () => {
     const ok = await askConfirm({
@@ -58,8 +66,8 @@ export function AdminBuybackDetailPage() {
       <AdminPageHeader
         title="Buyback detail"
         actions={
-          <Link to="/admin/buybacks">
-            <Button variant="outline" size="sm">← All</Button>
+          <Link to="/admin/buybacks" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+            ← All
           </Link>
         }
       />
@@ -70,7 +78,7 @@ export function AdminBuybackDetailPage() {
         </div>
         <p><span className="text-[var(--color-muted-foreground)]">Player:</span> {buyback.username}</p>
         <p><span className="text-[var(--color-muted-foreground)]">Tournament:</span> {buyback.tournamentName}</p>
-        <p><span className="text-[var(--color-muted-foreground)]">Amount:</span> ${(buyback.amountCents / 100).toFixed(2)}</p>
+        <p><span className="text-[var(--color-muted-foreground)]">Amount:</span> {amount}</p>
         <p><span className="text-[var(--color-muted-foreground)]">Round:</span> {buyback.roundNumber}</p>
         <p><span className="text-[var(--color-muted-foreground)]">Stripe PI:</span>{' '}
           {buyback.stripePaymentIntentId ?? '—'}

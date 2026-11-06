@@ -2,7 +2,8 @@ import { Link, useLocation, Navigate, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Venue } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { sanitizeReturnTo } from '@/lib/return-to';
 import { ArrowRight, CheckCircle2, Headset, MapPin, Target } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -124,10 +125,8 @@ export function WelcomePage() {
                       ))}
                     </ul>
                   )}
-                  <Link to={venueLink}>
-                    <Button variant="outline" size="sm" className="gap-2">
-                      Browse venues <ArrowRight className="h-3.5 w-3.5" />
-                    </Button>
+                  <Link to={venueLink} className={buttonVariants({ variant: 'outline', size: 'sm', className: 'gap-2' })}>
+                    Browse venues <ArrowRight className="h-3.5 w-3.5" />
                   </Link>
                 </div>
               </li>
@@ -163,14 +162,12 @@ export function WelcomePage() {
             <Button
               className="w-full gap-2 flex-1"
               size="lg"
-              onClick={() => navigate(state?.returnTo ?? '/tournaments')}
+              onClick={() => navigate(sanitizeReturnTo(state?.returnTo) ?? '/tournaments')}
             >
               Choose a tournament <ArrowRight className="h-4 w-4" />
             </Button>
-            <Link to="/profile" className="flex-1">
-              <Button variant="outline" className="w-full" size="lg">
-                View profile
-              </Button>
+            <Link to="/profile" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'flex-1 w-full' })}>
+              View profile
             </Link>
           </div>
         </div>
