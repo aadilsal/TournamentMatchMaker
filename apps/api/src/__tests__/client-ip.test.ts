@@ -12,12 +12,16 @@ function mockRequest(overrides: Partial<Request> = {}): Request {
 }
 
 describe('client-ip', () => {
-  it('prefers x-forwarded-for', () => {
+  it('uses the proxy-resolved req.ip, not a spoofable x-forwarded-for', () => {
     const req = mockRequest({
       headers: { 'x-forwarded-for': '203.0.113.10, 70.41.3.18' },
-      ip: '127.0.0.1',
+      ip: '70.41.3.18',
     });
-    expect(getClientIp(req)).toBe('203.0.113.10');
+    expect(getClientIp(req)).toBe('70.41.3.18');
+  });
+
+  it('rejects anything that is not an IP address', () => {
+    expect(getClientIp(mockRequest({ ip: '1.2.3.4/../../admin' }))).toBe('');
   });
 
   it('normalizes ipv4-mapped addresses', () => {

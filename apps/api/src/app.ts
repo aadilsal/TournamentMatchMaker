@@ -35,10 +35,21 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   );
   app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
   app.use('/webhooks/stripe', createStripeWebhookRouter(pool, redis, env));
-  // Default 100kb is too small for base64 avatar uploads (schema allows up to ~2MB decoded).
-  app.use(express.json({ limit: '4mb' }));
+  // Only the base64 avatar upload needs more than the 100kb default.
+  app.use('/api/v1/players/me/avatar', express.json({ limit: '4mb' }));
+  app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
-  app.use(pinoHttp({ level: env.NODE_ENV === 'production' ? 'info' : 'debug' }));
+  app.use(
+    pinoHttp({
+      level: env.NODE_ENV === 'production' ? 'info' : 'debug',
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        'req.headers["x-meta-api-key"]',
+        'res.headers["set-cookie"]',
+      ],
+    })
+  );
 
   app.get('/health', (_req, res) => {
     sendSuccess(res, { status: 'ok', timestamp: new Date().toISOString() });

@@ -4,6 +4,7 @@ import type { RedisClient } from '../lib/redis.js';
 import type { Env } from '../config/env.js';
 import type { AuthPayload } from '../middleware/auth.js';
 import { MatchesService } from '../modules/matches/matches.service.js';
+import { AppError } from '../lib/response.js';
 import { isSessionValid } from './auth.middleware.js';
 
 /** How often an idle socket re-checks that its session is still valid. */
@@ -49,7 +50,7 @@ export function registerSocketHandlers(
       try {
         await matchesService.confirm(data.matchId, user.sub);
       } catch (err) {
-        socket.emit('error', { message: err instanceof Error ? err.message : 'Confirm failed' });
+        socket.emit('error', { message: err instanceof AppError ? err.message : 'Confirm failed' });
       }
     });
 
@@ -58,7 +59,7 @@ export function registerSocketHandlers(
       try {
         await matchesService.decline(data.matchId, user.sub, { requeue: true });
       } catch (err) {
-        socket.emit('error', { message: err instanceof Error ? err.message : 'Decline failed' });
+        socket.emit('error', { message: err instanceof AppError ? err.message : 'Decline failed' });
       }
     });
   });

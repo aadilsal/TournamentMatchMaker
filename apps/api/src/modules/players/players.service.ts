@@ -156,7 +156,7 @@ export class PlayersService {
 
     const result = await this.pool.query(
       `${MATCH_SELECT}
-       WHERE m.player1_id = $1 OR m.player2_id = $1
+       WHERE (m.player1_id = $1 OR m.player2_id = $1) AND m.status = 'completed'
        ORDER BY m.created_at DESC
        LIMIT $2`,
       [userId, limit]

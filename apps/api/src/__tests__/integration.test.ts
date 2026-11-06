@@ -192,7 +192,7 @@ describe('API Integration', () => {
     accessToken = loginRes.body.data.accessToken;
 
     const res = await request(app)
-      .post('/api/v1/venues')
+      .post('/api/v1/admin/venues')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         name: 'Test VR Arena',
@@ -216,7 +216,7 @@ describe('API Integration', () => {
     end.setHours(15, 0, 0, 0);
 
     const res = await request(app)
-      .post(`/api/v1/venues/${venueId}/slots`)
+      .post(`/api/v1/admin/venues/${venueId}/slots`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         slots: [{
@@ -268,7 +268,7 @@ describe('API Integration', () => {
     end.setHours(17, 0, 0, 0);
 
     const slotRes = await request(app)
-      .post(`/api/v1/venues/${venueId}/slots`)
+      .post(`/api/v1/admin/venues/${venueId}/slots`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         slots: [{

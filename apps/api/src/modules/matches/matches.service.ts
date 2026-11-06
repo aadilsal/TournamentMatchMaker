@@ -1,11 +1,13 @@
 import type { Pool } from 'pg';
 import type { DeclineMatchInput, SubmitScoreInput, Match, MatchUpdatedEvent } from '@vr-tournament/shared';
+import { matchNotificationDetails } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
 import { mapMatch } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 import {
   finalizeMatchSlotBookings,
+  recountSlotSeats,
   releaseSlotLock,
   SLOT_LOCK_TTL_SEC,
 } from '../../lib/slot-lock.js';
@@ -155,7 +157,8 @@ export class MatchesService {
             client,
             this.redis,
             match.time_slot_id,
-            attendingPlayerIds
+            attendingPlayerIds,
+            matchId
           );
         }
 
@@ -171,7 +174,12 @@ export class MatchesService {
               userId: uid,
               type: 'match_confirmed',
               channels: ['in_app', 'email'],
-              payload: { matchId, venueId: match.venue_id, slotId: match.time_slot_id },
+              payload: {
+                ...(await matchNotificationDetails(this.pool, 'match_confirmed', matchId, uid)),
+                matchId,
+                venueId: match.venue_id,
+                slotId: match.time_slot_id,
+              },
               idempotencyKey: `match-confirmed:${matchId}:${uid}`,
             });
           }
@@ -238,6 +246,16 @@ export class MatchesService {
       await releaseSlotLock(this.pool, this.redis, match.time_slot_id);
       await this.redis.del(matchConfirmKey(matchId));
 
+      // Seats this match took on confirmation go back; bookings players made themselves stay.
+      const released = await client.query(
+        `UPDATE bookings SET status = 'cancelled' WHERE match_id = $1 AND status <> 'cancelled'`,
+        [matchId]
+      );
+      if (released.rowCount && match.time_slot_id) {
+        await client.query(`SELECT id FROM time_slots WHERE id = $1 FOR UPDATE`, [match.time_slot_id]);
+        await recountSlotSeats(client, match.time_slot_id);
+      }
+
       const otherPlayer =
         match.player1_id === userId ? match.player2_id : match.player1_id;
 
@@ -256,7 +274,7 @@ export class MatchesService {
           userId: otherPlayer,
           type: 'match_declined',
           channels: ['in_app', 'email'],
-          payload: { matchId },
+          payload: { matchId, ...(await matchNotificationDetails(this.pool, 'match_declined', matchId, otherPlayer)) },
           idempotencyKey: `match-declined:${matchId}:${otherPlayer}`,
         });
       }

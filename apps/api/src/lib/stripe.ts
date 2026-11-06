@@ -95,32 +95,61 @@ export async function createBuybackPaymentIntent(
     await pool.query(`UPDATE buybacks SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [
       existing.id,
     ]);
+  } else if (existing) {
+    // No intent yet: either a concurrent checkout is mid-flight or an earlier one died before Stripe answered.
+    const orphaned = await pool.query(
+      `UPDATE buybacks SET status = 'failed'
+       WHERE id = $1 AND status = 'pending' AND stripe_payment_intent_id IS NULL
+         AND created_at < NOW() - INTERVAL '1 minute'
+       RETURNING id`,
+      [existing.id]
+    );
+    if (!orphaned.rowCount) throw checkoutInProgress();
   }
 
-  const buybackResult = await pool.query(
-    `INSERT INTO buybacks (user_id, tournament_id, round_number, match_id, amount_cents, status)
-     VALUES ($1, $2, $3, $4, $5, 'pending')
-     RETURNING id`,
-    [
-      params.userId,
-      params.tournamentId,
-      params.roundNumber,
-      params.matchId,
-      params.amountCents,
-    ]
-  );
-  const buybackId = buybackResult.rows[0].id;
+  let buybackId: string;
+  try {
+    const buybackResult = await pool.query(
+      `INSERT INTO buybacks (user_id, tournament_id, round_number, match_id, amount_cents, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')
+       RETURNING id`,
+      [
+        params.userId,
+        params.tournamentId,
+        params.roundNumber,
+        params.matchId,
+        params.amountCents,
+      ]
+    );
+    buybackId = buybackResult.rows[0].id;
+  } catch (err) {
+    // idx_buybacks_one_pending: a second click landed while the first checkout is open.
+    if ((err as { code?: string }).code === '23505') throw checkoutInProgress();
+    throw err;
+  }
 
-  const intent = await stripe.paymentIntents.create({
-    amount: params.amountCents,
-    currency: 'usd',
-    metadata: {
+  let intent: import('stripe').Stripe.PaymentIntent;
+  try {
+    intent = await stripe.paymentIntents.create(
+      {
+        amount: params.amountCents,
+        currency: 'usd',
+        metadata: {
+          buybackId,
+          userId: params.userId,
+          tournamentId: params.tournamentId,
+        },
+        automatic_payment_methods: { enabled: true },
+      },
+      { idempotencyKey: `buyback-intent:${buybackId}` }
+    );
+  } catch (err) {
+    // A pending row without an intent would block every later checkout.
+    await pool.query(`UPDATE buybacks SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [
       buybackId,
-      userId: params.userId,
-      tournamentId: params.tournamentId,
-    },
-    automatic_payment_methods: { enabled: true },
-  });
+    ]);
+    throw err;
+  }
 
   await pool.query(`UPDATE buybacks SET stripe_payment_intent_id = $1 WHERE id = $2`, [
     intent.id,
@@ -146,11 +175,8 @@ export async function fulfillBuybackFromWebhook(
 ) {
   const buyback = await findBuybackByPaymentIntent(pool, paymentIntentId);
   if (!buyback) return null;
-  if (buyback.status === 'completed') return buyback;
-  if (buyback.status === 'failed') {
-    console.warn(`Ignoring payment_intent.succeeded for failed buyback ${buyback.id}`);
-    return buyback;
-  }
+  // A `failed` mark from an earlier decline does not outweigh money that has now arrived.
+  if (buyback.status === 'completed' || buyback.refunded_at) return buyback;
   if (!buyback.stripe_payment_intent_id) {
     throw new AppError('BAD_REQUEST', 'Buyback has no Stripe payment intent', 400);
   }
@@ -165,12 +191,31 @@ export async function failBuybackFromWebhook(pool: Pool, paymentIntentId: string
   if (!buyback) return null;
   if (buyback.status === 'completed') return buyback;
 
-  await pool.query(`UPDATE buybacks SET status = 'failed' WHERE id = $1`, [buyback.id]);
+  await pool.query(`UPDATE buybacks SET status = 'failed' WHERE id = $1 AND status = 'pending'`, [
+    buyback.id,
+  ]);
   const updated = await pool.query(`SELECT * FROM buybacks WHERE id = $1`, [buyback.id]);
   return updated.rows[0];
 }
 
-export async function refundBuybackPayment(env: Env, paymentIntentId: string) {
+function checkoutInProgress() {
+  return new AppError(
+    'CONFLICT',
+    'A buyback checkout is already open — finish it or try again in a minute',
+    409
+  );
+}
+
+export async function getPaymentIntentStatus(env: Env, paymentIntentId: string): Promise<string> {
   const stripe = await getStripe(env);
-  return stripe.refunds.create({ payment_intent: paymentIntentId });
+  return (await stripe.paymentIntents.retrieve(paymentIntentId)).status;
+}
+
+/** One refund per buyback, however many times it is asked for. */
+export async function refundBuybackPayment(env: Env, paymentIntentId: string, buybackId: string) {
+  const stripe = await getStripe(env);
+  return stripe.refunds.create(
+    { payment_intent: paymentIntentId },
+    { idempotencyKey: `buyback-refund:${buybackId}` }
+  );
 }

@@ -27,7 +27,7 @@ function uniqueViolationMessage(err: Error): string {
 
 export function errorHandler(
   err: Error,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction
 ) {
@@ -62,6 +62,11 @@ export function errorHandler(
     return sendError(res, { code: 'CONFLICT', message: uniqueViolationMessage(err) }, 409);
   }
 
+  // A CHECK constraint (e.g. seats over capacity) is a business-rule conflict, not a crash.
+  if (pgCode === '23514') {
+    return sendError(res, { code: 'CONFLICT', message: 'That change would break a capacity or consistency rule' }, 409);
+  }
+
   // Referenced row is missing or still referenced elsewhere.
   if (pgCode === '23503') {
     return sendError(res, { code: 'CONFLICT', message: 'Referenced record is missing or still in use' }, 409);
@@ -70,7 +75,12 @@ export function errorHandler(
   if ((err as { type?: string }).type === 'entity.too.large') {
     return sendError(
       res,
-      { code: 'PAYLOAD_TOO_LARGE', message: 'Image is too large. Please use a smaller file (max 2MB).' },
+      {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: req.originalUrl.includes('/avatar')
+          ? 'Image is too large. Please use a smaller file (max 2MB).'
+          : 'Request body is too large',
+      },
       413
     );
   }

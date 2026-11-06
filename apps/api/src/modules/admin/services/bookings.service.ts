@@ -5,6 +5,7 @@ import { mapBooking } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { BookingsService } from '../../bookings/bookings.service.js';
+import { recountSlotSeats } from '../../../lib/slot-lock.js';
 
 export class AdminBookingsService {
   private bookings: BookingsService;
@@ -27,7 +28,9 @@ export class AdminBookingsService {
     if (query.venueId) {
       params.push(query.venueId);
       where += ` AND ts.venue_id = $${params.length}`;
-    } else if (query.venueIds && query.venueIds.length > 0) {
+    }
+    // null = every venue, [] = nothing in scope.
+    if (query.venueIds) {
       params.push(query.venueIds);
       where += ` AND ts.venue_id = ANY($${params.length})`;
     }
@@ -125,7 +128,23 @@ export class AdminBookingsService {
     }
 
     if (input.status) {
-      await this.pool.query(`UPDATE bookings SET status = $1 WHERE id = $2`, [input.status, id]);
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+        const slot = await client.query(
+          `SELECT ts.id FROM time_slots ts JOIN bookings b ON b.time_slot_id = ts.id
+           WHERE b.id = $1 FOR UPDATE OF ts`,
+          [id]
+        );
+        await client.query(`UPDATE bookings SET status = $1 WHERE id = $2`, [input.status, id]);
+        if (slot.rows[0]) await recountSlotSeats(client, slot.rows[0].id);
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
     }
 
     await writeAudit(this.pool, {

@@ -1,27 +1,9 @@
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback } from '@vr-tournament/shared/email';
 import type { Env } from '../config/env.js';
 
-let sesClient: SESClient | null = null;
-
-function getSesClient(env: Env): SESClient {
-  if (!sesClient) {
-    sesClient = new SESClient({
-      region: env.AWS_REGION,
-      credentials: {
-        accessKeyId: env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-      },
-    });
-  }
-  return sesClient;
-}
-
 /**
- * Sends a transactional email via AWS SES.
- *
- * In development (or when AWS credentials are still the sample placeholders) the
- * email is logged to the console instead of hitting SES, so local integration
- * testing does not require real credentials.
+ * Sends a transactional email through Resend, then SMTP, then SES — the first
+ * configured provider that accepts it wins. Resolves true only when one did.
  */
 export async function sendEmail(
   env: Env,
@@ -29,25 +11,18 @@ export async function sendEmail(
   subject: string,
   html: string
 ): Promise<boolean> {
-  if (!env.NOTIFICATION_EMAIL_ENABLED) return true;
+  if (!env.NOTIFICATION_EMAIL_ENABLED) return false;
 
-  const isSampleKey =
-    env.AWS_ACCESS_KEY_ID.startsWith('sample') || env.AWS_SECRET_ACCESS_KEY.startsWith('sample');
-
-  if (isSampleKey) {
-    console.log(`[email:dev] To: ${to} | Subject: ${subject}\n${html}`);
-    return true;
+  const cfg = emailConfigFromEnv(env);
+  if (configuredEmailProviders(cfg).length === 0) {
+    // Bodies can carry reset links, so they are only printed outside production.
+    if (env.NODE_ENV === 'production') console.error(`[email] not sent to ${to}: no email provider is configured`);
+    else console.log(`[email:dev] To: ${to} | Subject: ${subject}\n${html}`);
+    return false;
   }
 
-  await getSesClient(env).send(
-    new SendEmailCommand({
-      Source: env.AWS_SES_FROM_EMAIL,
-      Destination: { ToAddresses: [to] },
-      Message: {
-        Subject: { Data: subject, Charset: 'UTF-8' },
-        Body: { Html: { Data: html, Charset: 'UTF-8' } },
-      },
-    })
-  );
-  return true;
+  const result = await sendEmailWithFallback(cfg, { to, subject, html });
+  if (!result.sent) console.error(`[email] not sent to ${to}: ${result.failures.join(' | ')}`);
+  else if (result.failures.length) console.warn(`[email] sent via ${result.provider} after: ${result.failures.join(' | ')}`);
+  return result.sent;
 }

@@ -1,15 +1,15 @@
 import { Router } from 'express';
-import { createVenueSchema, venueListQuerySchema } from '@vr-tournament/shared';
+import { venueListQuerySchema } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { VenueListQuery } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
-import { authenticate, requireRole } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { VenuesService } from './venues.service.js';
 
-export function createVenuesRouter(pool: Pool, redis: RedisClient, env: Env): Router {
+// Venue creation lives only under /admin/venues (superadmin-only).
+export function createVenuesRouter(pool: Pool, redis: RedisClient, _env: Env): Router {
   const router = Router();
   const service = new VenuesService(pool, redis);
 
@@ -30,21 +30,6 @@ export function createVenuesRouter(pool: Pool, redis: RedisClient, env: Env): Ro
       next(err);
     }
   });
-
-  router.post(
-    '/',
-    authenticate(env),
-    requireRole('venue_admin', 'superadmin'),
-    validate(createVenueSchema),
-    async (req, res, next) => {
-      try {
-        const venue = await service.create(req.body);
-        sendSuccess(res, venue, {}, 201);
-      } catch (err) {
-        next(err);
-      }
-    }
-  );
 
   return router;
 }

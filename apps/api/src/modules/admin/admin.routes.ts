@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import {
   adminAssignTournamentAdminSchema,
   adminAssignVenueAdminSchema,
@@ -19,6 +19,7 @@ import {
   adminMatchResultSchema,
   adminNotificationListQuerySchema,
   adminResetPasswordSchema,
+  adminSlotListQuerySchema,
   adminTournamentListQuerySchema,
   adminUpdateBookingSchema,
   adminUpdateBuybackSchema,
@@ -31,6 +32,8 @@ import {
   adminUpdateVenueSchema,
   adminVenueListQuerySchema,
   createSlotsSchema,
+  slotListQuerySchema,
+  adminUserLookupQuerySchema,
   createTournamentSchema,
   createVenueSchema,
   tournamentMatchesQuerySchema,
@@ -68,6 +71,23 @@ function actorId(req: { user?: { sub: string } }) {
   return req.user!.sub;
 }
 
+type Page<T> = { items: T[]; nextCursor: string | null };
+
+/** Runs a tournament-filtered list inside the caller's tournament scope. */
+async function listInTournamentScope<T extends { tournamentId: string | null }>(
+  req: Request,
+  list: (query: never) => Promise<Page<T>>
+): Promise<Page<T>> {
+  const query = req.query as { tournamentId?: string };
+  const ids = req.adminScope?.tournamentIds ?? null;
+  if (ids === null) return list(query as never);
+  if (query.tournamentId) {
+    assertTournamentAccess(req.adminScope, query.tournamentId);
+    return list(query as never);
+  }
+  return list({ ...query, tournamentIds: ids } as never);
+}
+
 export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
   router.use(authenticate(env), requireAdmin(), loadAdminScope(pool));
@@ -96,11 +116,11 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   const notifications = new AdminNotificationsService(pool, env);
   const queue = new AdminQueueService(pool, redis, env);
   const system = new AdminSystemService(pool, redis, env);
-  const integrations = new AdminIntegrationsService(env);
+  const integrations = new AdminIntegrationsService(env, pool);
 
-  router.get('/dashboard', async (_req, res, next) => {
+  router.get('/dashboard', async (req, res, next) => {
     try {
-      sendSuccess(res, await dashboard.getStats());
+      sendSuccess(res, await dashboard.getStats(req.adminScope));
     } catch (err) {
       next(err);
     }
@@ -129,6 +149,15 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
     try {
       const user = await users.create(actorId(req), req.body);
       sendSuccess(res, user, undefined, 201);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Registered before /users/:id so "lookup" is not read as an id.
+  router.get('/users/lookup', validate(adminUserLookupQuerySchema, 'query'), async (req, res, next) => {
+    try {
+      sendSuccess(res, await users.lookup(req.query as never));
     } catch (err) {
       next(err);
     }
@@ -166,8 +195,8 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
 
   router.delete('/users/:id', requireSuperAdmin(), async (req, res, next) => {
     try {
-      await users.delete(actorId(req), req.params.id as string);
-      sendSuccess(res, { deleted: true });
+      const { anonymised } = await users.delete(actorId(req), req.params.id as string);
+      sendSuccess(res, { deleted: true, anonymised });
     } catch (err) {
       next(err);
     }
@@ -199,8 +228,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   // Venues
   router.get('/venues', validate(adminVenueListQuerySchema, 'query'), async (req, res, next) => {
     try {
-      const scope = req.adminScope;
-      const venueIds = scope?.role === 'venue_admin' ? scope.venueIds : null;
+      const venueIds = req.adminScope?.venueIds ?? null;
       const result = await venues.list({ ...(req.query as Record<string, unknown>), venueIds } as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor, limit: Number(req.query.limit) || 20 });
     } catch (err) {
@@ -244,10 +272,10 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
     }
   });
 
-  router.get('/venues/:id/slots', ownsVenue, async (req, res, next) => {
+  router.get('/venues/:id/slots', ownsVenue, validate(slotListQuerySchema.partial({ date: true }), 'query'), async (req, res, next) => {
     try {
       const date = (req.query.date as string) || new Date().toISOString().slice(0, 10);
-      sendSuccess(res, await venues.listSlots(req.params.id as string, date));
+      sendSuccess(res, await venues.listSlots(req.params.id as string, date, req.query.tz as string | undefined));
     } catch (err) {
       next(err);
     }
@@ -298,16 +326,13 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   });
 
   // Slots
-  router.get('/slots', async (req, res, next) => {
+  router.get('/slots', validate(adminSlotListQuerySchema, 'query'), async (req, res, next) => {
     try {
+      const query = req.query as unknown as { venueId?: string; date?: string; status?: string; limit: number };
+      if (query.venueId) assertVenueAccess(req.adminScope, query.venueId);
       sendSuccess(
         res,
-        await venues.listAllSlots({
-          venueId: req.query.venueId as string | undefined,
-          date: req.query.date as string | undefined,
-          status: req.query.status as string | undefined,
-          limit: Number(req.query.limit) || 100,
-        })
+        await venues.listAllSlots({ ...query, venueIds: req.adminScope?.venueIds ?? null })
       );
     } catch (err) {
       next(err);
@@ -358,8 +383,11 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   // Bookings
   router.get('/bookings', validate(adminBookingListQuerySchema, 'query'), async (req, res, next) => {
     try {
-      const scope = req.adminScope;
-      const venueIds = scope?.role === 'venue_admin' ? scope.venueIds : null;
+      const venueIds = req.adminScope?.venueIds ?? null;
+      const venueId = (req.query as { venueId?: string }).venueId;
+      if (venueId) assertVenueAccess(req.adminScope, venueId);
+      // The service treats [] as "no filter", so an admin with no venues must stop here.
+      if (!venueId && venueIds?.length === 0) return sendSuccess(res, [], { cursor: null });
       const result = await bookings.list({ ...(req.query as Record<string, unknown>), venueIds } as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor, limit: Number(req.query.limit) || 20 });
     } catch (err) {
@@ -404,13 +432,9 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   // Tournaments
   router.get('/tournaments', validate(adminTournamentListQuerySchema, 'query'), async (req, res, next) => {
     try {
-      const result = await tournaments.list(req.query as never);
-      const scope = req.adminScope;
-      let items = result.items;
-      if (scope?.role === 'tournament_admin' && scope.tournamentIds) {
-        items = items.filter((t) => scope.tournamentIds!.includes(t.id));
-      }
-      sendSuccess(res, items, { cursor: result.nextCursor });
+      const tournamentIds = req.adminScope?.tournamentIds ?? null;
+      const result = await tournaments.list({ ...(req.query as Record<string, unknown>), tournamentIds } as never);
+      sendSuccess(res, result.items, { cursor: result.nextCursor });
     } catch (err) {
       next(err);
     }
@@ -512,7 +536,10 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
 
   router.get('/tournaments/:id/registrations', ownsTournament, async (req, res, next) => {
     try {
-      sendSuccess(res, await tournaments.listRegistrations(req.params.id as string));
+      sendSuccess(
+        res,
+        await tournaments.listRegistrations(req.params.id as string, req.adminScope?.role === 'superadmin')
+      );
     } catch (err) {
       next(err);
     }
@@ -647,7 +674,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   // Matches
   router.get('/matches', tournamentSection, validate(adminMatchListQuerySchema, 'query'), async (req, res, next) => {
     try {
-      const result = await matches.list(req.query as never);
+      const result = await listInTournamentScope(req, (q) => matches.list(q));
       sendSuccess(res, result.items, { cursor: result.nextCursor });
     } catch (err) {
       next(err);
@@ -715,7 +742,7 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   // Buybacks
   router.get('/buybacks', tournamentSection, validate(adminBuybackListQuerySchema, 'query'), async (req, res, next) => {
     try {
-      const result = await buybacks.list(req.query as never);
+      const result = await listInTournamentScope(req, (q) => buybacks.list(q));
       sendSuccess(res, result.items, { cursor: result.nextCursor, limit: Number(req.query.limit) || 20 });
     } catch (err) {
       next(err);
@@ -757,7 +784,8 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
   });
 
   // Notifications
-  router.get('/notifications', tournamentSection, validate(adminNotificationListQuerySchema, 'query'), async (req, res, next) => {
+  // Superadmin-only: the service cannot narrow notifications to a scoped admin's players.
+  router.get('/notifications', requireSuperAdmin(), validate(adminNotificationListQuerySchema, 'query'), async (req, res, next) => {
     try {
       const result = await notifications.list(req.query as never);
       sendSuccess(res, result.items, { cursor: result.nextCursor });

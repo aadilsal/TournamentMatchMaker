@@ -68,6 +68,14 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     }
   );
 
+  metaApiRouter.get('/tournaments/live', metaPollRateLimit(env), async (_req, res, next) => {
+    try {
+      sendSuccess(res, await service.listLiveTournaments());
+    } catch (err) {
+      next(err);
+    }
+  });
+
   metaApiRouter.post(
     '/matches/:id/scores',
     metaPollRateLimit(env),

@@ -1,5 +1,10 @@
 import { Router } from 'express';
-import { registerSchema, loginSchema } from '@vr-tournament/shared';
+import {
+  registerSchema,
+  loginSchema,
+  forgotPasswordSchema,
+  resetPasswordSchema,
+} from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
@@ -54,6 +59,23 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
         authService.getRefreshCookieOptions()
       );
       sendSuccess(res, { accessToken: result.accessToken, user: result.user });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/forgot-password', credentialLimit, validate(forgotPasswordSchema), (req, res) => {
+    // Answered before the lookup so neither the body nor the timing reveals whether the email exists.
+    authService.requestPasswordReset(req.body.email).catch((err) => {
+      req.log.error({ err }, 'password reset email failed');
+    });
+    sendSuccess(res, { success: true });
+  });
+
+  router.post('/reset-password', credentialLimit, validate(resetPasswordSchema), async (req, res, next) => {
+    try {
+      await authService.resetPassword(req.body.token, req.body.password);
+      sendSuccess(res, { success: true });
     } catch (err) {
       next(err);
     }

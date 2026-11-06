@@ -5,6 +5,7 @@ import {
   MATCHMAKING_JOB_PAIR_NOW,
 } from '@vr-tournament/shared';
 import type { Env } from '../config/env.js';
+import { logRedisErrors } from './redis.js';
 
 let matchmakingQueue: Queue | null = null;
 
@@ -17,6 +18,7 @@ export function getMatchmakingQueue(env: Env): Queue {
         removeOnFail: 100,
       },
     });
+    logRedisErrors(matchmakingQueue, 'matchmakingQueue');
   }
   return matchmakingQueue;
 }

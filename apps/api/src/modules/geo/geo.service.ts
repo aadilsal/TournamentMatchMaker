@@ -1,3 +1,4 @@
+import { isIP } from 'net';
 import { normalizeCity } from '@vr-tournament/shared';
 import { AppError } from '../../lib/response.js';
 import { isPrivateOrLoopback } from '../../lib/client-ip.js';
@@ -31,7 +32,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function lookupIp(ip: string | undefined): string | undefined {
-  return ip && !isPrivateOrLoopback(ip) ? ip : undefined;
+  return ip && isIP(ip) && !isPrivateOrLoopback(ip) ? ip : undefined;
 }
 
 function matchCountryInList(country: string, countries: CountryOption[]): CountryOption | undefined {

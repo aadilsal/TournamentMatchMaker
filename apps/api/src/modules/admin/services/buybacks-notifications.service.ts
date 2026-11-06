@@ -13,7 +13,7 @@ import { mapBuyback } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { enqueueNotification } from '../../../lib/bullmq.js';
-import { refundBuybackPayment } from '../../../lib/stripe.js';
+import { getPaymentIntentStatus, refundBuybackPayment } from '../../../lib/stripe.js';
 
 export class AdminBuybacksService {
   constructor(
@@ -22,9 +22,14 @@ export class AdminBuybacksService {
     private env: Env
   ) {}
 
-  async list(query: AdminBuybackListQuery) {
+  /** `tournamentIds`: null = every tournament, [] = nothing in scope. */
+  async list(query: AdminBuybackListQuery & { tournamentIds?: string[] | null }) {
     const params: unknown[] = [];
     let where = 'WHERE 1=1';
+    if (query.tournamentIds) {
+      params.push(query.tournamentIds);
+      where += ` AND b.tournament_id = ANY($${params.length})`;
+    }
     if (query.tournamentId) {
       params.push(query.tournamentId);
       where += ` AND b.tournament_id = $${params.length}`;
@@ -128,18 +133,46 @@ export class AdminBuybacksService {
     if (!buyback.stripePaymentIntentId) {
       throw new AppError('BAD_REQUEST', 'No Stripe payment intent for this buyback', 400);
     }
-    if (buyback.status !== 'completed') {
-      throw new AppError('CONFLICT', 'Only completed buybacks can be refunded', 409);
+
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query(
+        `SELECT status, refunded_at, round_number FROM buybacks WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      const row = locked.rows[0];
+      if (!row) throw new AppError('NOT_FOUND', 'Buyback not found', 404);
+      if (row.refunded_at) throw new AppError('CONFLICT', 'Buyback has already been refunded', 409);
+
+      // Any status can hold real money: a `failed` row may have been paid on a retry.
+      const intentStatus = await getPaymentIntentStatus(this.env, buyback.stripePaymentIntentId);
+      if (intentStatus !== 'succeeded') {
+        throw new AppError('CONFLICT', 'This buyback has no successful payment to refund', 409);
+      }
+
+      await refundBuybackPayment(this.env, buyback.stripePaymentIntentId, id);
+
+      await client.query(
+        `UPDATE buybacks SET status = 'failed', refunded_at = NOW() WHERE id = $1`,
+        [id]
+      );
+      // Only undo the re-entry this buyback granted, and only if the player is still in it.
+      if (row.status === 'completed') {
+        await client.query(
+          `UPDATE tournament_participants
+           SET status = 'eliminated', buyback_count = GREATEST(buyback_count - 1, 0), updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2 AND status = 'active' AND round_number = $3`,
+          [buyback.tournamentId, buyback.userId, row.round_number]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    await refundBuybackPayment(this.env, buyback.stripePaymentIntentId);
-
-    await this.pool.query(`UPDATE buybacks SET status = 'failed' WHERE id = $1`, [id]);
-    await this.pool.query(
-      `UPDATE tournament_participants SET status = 'eliminated', updated_at = NOW()
-       WHERE tournament_id = $1 AND user_id = $2`,
-      [buyback.tournamentId, buyback.userId]
-    );
 
     await writeAudit(this.pool, {
       actorId,

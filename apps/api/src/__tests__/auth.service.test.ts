@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import { AuthService } from '../modules/auth/auth.service.js';
 
 const mockEnv = {

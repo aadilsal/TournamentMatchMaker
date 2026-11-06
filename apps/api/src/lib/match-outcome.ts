@@ -7,12 +7,28 @@ import {
   resolveMatchOutcome,
   winnerIdFromOutcome,
 } from '@vr-tournament/shared';
+import { matchNotificationDetails } from '@vr-tournament/shared';
 import { updateUserRating } from './rating.js';
 import { requeuePlayer, removeFromQueue } from './requeue-player.js';
 import { enqueueNotification } from './bullmq.js';
 import { TournamentsService } from '../modules/tournaments/tournaments.service.js';
 import { emitMatchUpdated } from '../socket/sync-events.js';
 import { AppError } from './response.js';
+
+/** The only states a result may be applied from; the guard makes resolution idempotent. */
+const OPEN_MATCH_STATUSES = `('pending_confirmation', 'confirmed', 'in_progress')`;
+
+/** What a resolution that lost the race returns: the match as it now stands. */
+async function readMatchState(
+  pool: Pool,
+  matchId: string
+): Promise<{ status: string; result: MatchResultExtended }> {
+  const row = await pool.query(`SELECT status, result FROM matches WHERE id = $1`, [matchId]);
+  return {
+    status: (row.rows[0]?.status as string) ?? 'unknown',
+    result: (row.rows[0]?.result ?? {}) as MatchResultExtended,
+  };
+}
 
 export async function applyMatchOutcome(
   pool: Pool,
@@ -52,20 +68,12 @@ export async function applyMatchOutcome(
   // resolves once both players have an innings on record, so a tie can never be
   // declared while one of them is still batting.
   if (outcome === 'rematch') {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query(
-        `UPDATE matches SET status = 'cancelled', result = $1, updated_at = NOW() WHERE id = $2`,
-        [JSON.stringify({ ...result, player1Score, player2Score, outcome: 'rematch' }), matchId]
-      );
-      await client.query('COMMIT');
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
+    const cancelled = await pool.query(
+      `UPDATE matches SET status = 'cancelled', result = $1, updated_at = NOW()
+       WHERE id = $2 AND status IN ${OPEN_MATCH_STATUSES} RETURNING id`,
+      [JSON.stringify({ ...result, player1Score, player2Score, outcome: 'rematch' }), matchId]
+    );
+    if (!cancelled.rowCount) return readMatchState(pool, matchId);
 
     if (match.tournament_id) {
       const roundNumber = match.round_number ?? 1;
@@ -150,52 +158,78 @@ export async function applyMatchWinner(
 
   try {
     await client.query('BEGIN');
-    await client.query(
-      `UPDATE matches SET result = $1, status = 'completed', updated_at = NOW() WHERE id = $2`,
+    const claimed = await client.query(
+      `UPDATE matches SET result = $1, status = 'completed', updated_at = NOW()
+       WHERE id = $2 AND status IN ${OPEN_MATCH_STATUSES} RETURNING id`,
       [JSON.stringify(finalResult), matchId]
     );
+    if (!claimed.rowCount) {
+      await client.query('ROLLBACK');
+      return readMatchState(pool, matchId);
+    }
 
-    await updateUserRating(client, winnerId, true);
-    await updateUserRating(client, loserId, false);
+    const bots = await client.query(`SELECT id FROM users WHERE id = ANY($1) AND is_bot = TRUE`, [
+      [winnerId, loserId],
+    ]);
+    const botIds = new Set<string>(bots.rows.map((r) => r.id as string));
+
+    // A bot is not a rated opponent, and it never takes a place in the standings.
+    if (botIds.size === 0) {
+      await updateUserRating(client, winnerId, true);
+      await updateUserRating(client, loserId, false);
+    }
 
     if (match.tournament_id && match.phase === 'normal') {
-      const wp = await client.query(
-        `SELECT round_number FROM tournament_participants
-         WHERE tournament_id = $1 AND user_id = $2 FOR UPDATE`,
-        [match.tournament_id, winnerId]
-      );
-      const currentRound = wp.rows[0]?.round_number ?? 1;
-      winnerNextRound = currentRound + 1;
+      let matchRound = match.round_number;
+      if (matchRound == null) {
+        const wp = await client.query(
+          `SELECT round_number FROM tournament_participants
+           WHERE tournament_id = $1 AND user_id = $2`,
+          [match.tournament_id, winnerId]
+        );
+        matchRound = (wp.rows[0]?.round_number as number | undefined) ?? 1;
+      }
 
-      await client.query(
-        `UPDATE tournament_participants
-         SET wins = wins + 1, round_number = $1, status = 'active',
-             solo_target = NULL, solo_played_at = NULL, updated_at = NOW()
-         WHERE tournament_id = $2 AND user_id = $3`,
-        [winnerNextRound, match.tournament_id, winnerId]
-      );
-      await client.query(
-        `UPDATE tournament_participants
-         SET losses = losses + 1, status = 'eliminated',
-             solo_target = NULL, solo_played_at = NULL, updated_at = NOW()
-         WHERE tournament_id = $1 AND user_id = $2`,
-        [match.tournament_id, loserId]
-      );
+      // Only a participant still in the match's round moves, so a late result cannot re-advance anyone.
+      if (!botIds.has(winnerId)) {
+        const won = await client.query(
+          `UPDATE tournament_participants
+           SET wins = wins + 1, round_number = $1, status = 'active',
+               solo_target = NULL, solo_played_at = NULL, updated_at = NOW()
+           WHERE tournament_id = $2 AND user_id = $3 AND round_number = $4
+             AND status IN ('active', 'advanced')
+           RETURNING id`,
+          [matchRound + 1, match.tournament_id, winnerId, matchRound]
+        );
+        if (won.rowCount) winnerNextRound = matchRound + 1;
+      }
+      if (!botIds.has(loserId)) {
+        await client.query(
+          `UPDATE tournament_participants
+           SET losses = losses + 1,
+               status = CASE WHEN status = 'out' THEN 'out' ELSE 'eliminated' END,
+               solo_target = NULL, solo_played_at = NULL, updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2 AND round_number = $3`,
+          [match.tournament_id, loserId, matchRound]
+        );
+      }
 
-      // The winner carries their previously chosen play window into the next
-      // round by default; requeuePlayer resolves it from tournament_round_slots.
-      await client.query(
-        `INSERT INTO tournament_round_slots
-           (tournament_id, user_id, round_number, time_slot_id, venue_id, booking_id)
-         SELECT rs.tournament_id, rs.user_id, $1, rs.time_slot_id, rs.venue_id, rs.booking_id
-         FROM tournament_round_slots rs
-         JOIN time_slots ts ON ts.id = rs.time_slot_id
-         WHERE rs.tournament_id = $2 AND rs.user_id = $3 AND ts.end_time > NOW()
-         ORDER BY rs.round_number DESC
-         LIMIT 1
-         ON CONFLICT (tournament_id, user_id, round_number) DO NOTHING`,
-        [winnerNextRound, match.tournament_id, winnerId]
-      );
+      if (winnerNextRound !== null) {
+        // The winner carries their previously chosen play window into the next
+        // round by default; requeuePlayer resolves it from tournament_round_slots.
+        await client.query(
+          `INSERT INTO tournament_round_slots
+             (tournament_id, user_id, round_number, time_slot_id, venue_id, booking_id)
+           SELECT rs.tournament_id, rs.user_id, $1, rs.time_slot_id, rs.venue_id, rs.booking_id
+           FROM tournament_round_slots rs
+           JOIN time_slots ts ON ts.id = rs.time_slot_id
+           WHERE rs.tournament_id = $2 AND rs.user_id = $3 AND ts.end_time > NOW()
+           ORDER BY rs.round_number DESC
+           LIMIT 1
+           ON CONFLICT (tournament_id, user_id, round_number) DO NOTHING`,
+          [winnerNextRound, match.tournament_id, winnerId]
+        );
+      }
     }
 
     await client.query('COMMIT');
@@ -209,11 +243,13 @@ export async function applyMatchWinner(
   if (match.tournament_id && match.phase === 'knockout') {
     const tournamentsService = new TournamentsService(pool, redis, env);
     await tournamentsService.advanceKnockoutWinner(matchId, winnerId);
-  } else if (winnerNextRound !== null && match.tournament_id) {
-    await requeuePlayer(pool, redis, winnerId, {
-      tournamentId: match.tournament_id,
-      roundNumber: winnerNextRound,
-    }, env);
+  } else if (match.tournament_id && match.phase === 'normal') {
+    if (winnerNextRound !== null) {
+      await requeuePlayer(pool, redis, winnerId, {
+        tournamentId: match.tournament_id,
+        roundNumber: winnerNextRound,
+      }, env);
+    }
     await removeFromQueue(redis, loserId);
   }
 
@@ -222,14 +258,18 @@ export async function applyMatchWinner(
       userId: winnerId,
       type: 'match_won',
       channels: ['in_app'],
-      payload: { matchId },
+      payload: { matchId, ...(await matchNotificationDetails(pool, 'match_won', matchId, winnerId)) },
       idempotencyKey: `match-won:${matchId}:${winnerId}`,
     }).catch(console.error);
     enqueueNotification(env, {
       userId: loserId,
       type: 'match_lost',
       channels: ['in_app'],
-      payload: { matchId, tournamentId: match.tournament_id },
+      payload: {
+        ...(await matchNotificationDetails(pool, 'match_lost', matchId, loserId)),
+        matchId,
+        tournamentId: match.tournament_id,
+      },
       idempotencyKey: `match-lost:${matchId}:${loserId}`,
     }).catch(console.error);
   }
@@ -303,6 +343,16 @@ export async function settleOpenMatches(
       [tournamentId, loserId]
     );
   }
+}
+
+/** Bots stand in for one match; they are out before standings, cuts and seeding are read. */
+export async function retireTournamentBots(client: Queryable, tournamentId: string): Promise<void> {
+  await client.query(
+    `UPDATE tournament_participants tp SET status = 'out', updated_at = NOW()
+     FROM users u
+     WHERE u.id = tp.user_id AND u.is_bot = TRUE AND tp.tournament_id = $1 AND tp.status <> 'out'`,
+    [tournamentId]
+  );
 }
 
 /** Accepts a pool or a checked-out client so callers can run it inside a transaction. */

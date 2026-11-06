@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type {
   BuybackInput,
+  MatchResultExtended,
   CreateTournamentInput,
   EnterTournamentInput,
   EnterTournamentResult,
@@ -40,11 +41,14 @@ import {
   isSlotEnded,
   isSlotStartPast,
   isSlotWithinWindow,
+  ROUND_PLAY_STARTS_AT_SQL,
+  matchNotificationDetails,
+  tournamentLink,
 } from '@vr-tournament/shared';
-import { createBuybackPaymentIntent } from '../../lib/stripe.js';
+import { createBuybackPaymentIntent, refundBuybackPayment } from '../../lib/stripe.js';
 import { emitTournamentUpdated } from '../../socket/sync-events.js';
 import { emitToUser } from '../../socket/emitters.js';
-import { settleOpenMatches } from '../../lib/match-outcome.js';
+import { applyMatchWinner, retireTournamentBots, settleOpenMatches } from '../../lib/match-outcome.js';
 
 const MATCH_SELECT = `
   SELECT m.*,
@@ -304,7 +308,6 @@ export class TournamentsService {
          AND tr.tournament_id = t.id
          AND tr.round_number = t.current_round_number
          AND tr.status = 'active'
-         AND (tr.starts_at > NOW() OR tr.ends_at <= NOW())
          AND NOT EXISTS (
            SELECT 1 FROM matches m
            WHERE m.tournament_id = t.id AND m.round_number = tr.round_number
@@ -453,6 +456,8 @@ export class TournamentsService {
             tournamentId,
             tournamentName: tournament.name,
             startDate: tournament.startDate,
+            message: `You’re registered for ${tournament.name}.`,
+            link: tournamentLink(tournamentId),
           },
           idempotencyKey: `tournament-reg:${tournamentId}:${userId}`,
         }).catch((err: unknown) => {
@@ -518,17 +523,18 @@ export class TournamentsService {
     }
 
     const roundWindow = await this.pool.query(
-      `SELECT tr.starts_at, tr.ends_at
+      `SELECT ${ROUND_PLAY_STARTS_AT_SQL} AS starts_at, tr.ends_at
        FROM tournament_rounds tr
+       JOIN tournaments t ON t.id = tr.tournament_id
        WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
       [tournamentId, roundNumber]
     );
     const round = roundWindow.rows[0];
     if (round && !isSlotWithinWindow(slot.start_time, slot.end_time, round.starts_at, round.ends_at)) {
       throw new AppError(
-        'BAD_REQUEST',
-        'Time slot must fall within the current tournament round window',
-        400
+        'CONFLICT',
+        "That time slot is outside this round's play window — pick a slot on one of the round's days",
+        409
       );
     }
 
@@ -551,10 +557,19 @@ export class TournamentsService {
        WHERE user_id = $1 AND time_slot_id = $2 AND status = 'confirmed'`,
       [userId, timeSlotId]
     );
-    if (existing.rows[0]) return mapBooking(existing.rows[0]);
+    if (existing.rows[0]) return { booking: mapBooking(existing.rows[0]), created: false };
 
     const bookingsService = new BookingsService(this.pool, this.redis!);
-    return bookingsService.create(userId, timeSlotId);
+    return { booking: await bookingsService.create(userId, timeSlotId), created: true };
+  }
+
+  /** Give back a seat this entry no longer uses; already-cancelled is fine. */
+  private async releaseBooking(userId: string, bookingId: string) {
+    try {
+      await new BookingsService(this.pool, this.redis!).cancel(userId, bookingId);
+    } catch (err) {
+      if (!(err instanceof AppError && (err.status === 409 || err.status === 404))) throw err;
+    }
   }
 
   async enter(
@@ -609,14 +624,23 @@ export class TournamentsService {
     const roundNumber = existingParticipant?.roundNumber ?? tournament.currentRoundNumber ?? 1;
     const slot = await this.resolveEntrySlot(tournamentId, userId, hasVr, roundNumber, input);
 
+    const previousRoundSlot = await this.getRoundSlot(tournamentId, userId, roundNumber);
+
     // VR players play from home: they own the play window but take no venue seat.
-    const booking = hasVr ? null : await this.ensureBooking(userId, slot.slotId);
+    const ensured = hasVr ? null : await this.ensureBooking(userId, slot.slotId);
+    const booking = ensured?.booking ?? null;
     const bookingId = booking?.id ?? null;
     const preferredVenueId = hasVr ? null : slot.venueId;
 
-    const registration = existingReg
-      ? existingReg
-      : await this.register(tournamentId, userId, { bookingId: bookingId ?? undefined });
+    let registration = existingReg;
+    if (!registration) {
+      try {
+        registration = await this.register(tournamentId, userId, { bookingId: bookingId ?? undefined });
+      } catch (err) {
+        if (ensured?.created && bookingId) await this.releaseBooking(userId, bookingId);
+        throw err;
+      }
+    }
 
     if (existingReg && bookingId && existingReg.bookingId !== bookingId) {
       await this.pool.query(
@@ -634,6 +658,11 @@ export class TournamentsService {
       venueId: preferredVenueId,
       bookingId,
     });
+
+    // Switching slots for this round gives the old seat back.
+    if (previousRoundSlot?.bookingId && previousRoundSlot.bookingId !== bookingId) {
+      await this.releaseBooking(userId, previousRoundSlot.bookingId);
+    }
 
     await removeFromQueue(this.redis, userId);
     await requeuePlayer(this.pool, this.redis, userId, {
@@ -734,8 +763,10 @@ export class TournamentsService {
     const roundNumber = participant?.roundNumber ?? tournament.currentRoundNumber ?? 1;
 
     const roundResult = await this.pool.query(
-      `SELECT starts_at, ends_at FROM tournament_rounds
-       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active'`,
+      `SELECT ${ROUND_PLAY_STARTS_AT_SQL} AS starts_at, tr.ends_at
+       FROM tournament_rounds tr
+       JOIN tournaments t ON t.id = tr.tournament_id
+       WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
       [tournamentId, roundNumber]
     );
     const round = roundResult.rows[0] ?? null;
@@ -840,7 +871,7 @@ export class TournamentsService {
     const result = await this.pool.query(
       `SELECT tp.*, u.username FROM tournament_participants tp
        JOIN users u ON u.id = tp.user_id
-       WHERE tp.tournament_id = $1
+       WHERE tp.tournament_id = $1 AND u.is_bot = FALSE
        ORDER BY tp.wins DESC, tp.losses ASC, tp.created_at ASC`,
       [tournamentId]
     );
@@ -870,8 +901,9 @@ export class TournamentsService {
 
   private async assertBuybackAllowed(tournamentId: string, tournament: Tournament) {
     const activeCountResult = await this.pool.query(
-      `SELECT COUNT(*)::int AS count FROM tournament_participants
-       WHERE tournament_id = $1 AND status IN ('active', 'advanced')`,
+      `SELECT COUNT(*)::int AS count FROM tournament_participants tp
+       JOIN users u ON u.id = tp.user_id AND u.is_bot = FALSE
+       WHERE tp.tournament_id = $1 AND tp.status IN ('active', 'advanced')`,
       [tournamentId]
     );
     const activeCount = activeCountResult.rows[0]?.count ?? 0;
@@ -943,6 +975,11 @@ export class TournamentsService {
     }
 
     await this.assertBuybackAllowed(tournamentId, tournament);
+    await this.assertNoOtherLiveTournament(userId, tournamentId);
+    // Stripe's USD minimum; below it the intent fails after the buyback row is written.
+    if (tournament.buybackPriceCents < 50) {
+      throw new AppError('CONFLICT', 'Buybacks are not available for this tournament', 409);
+    }
 
     // Buy back into the round that is running now, not the one the player went
     // out in. Only a match loser is still in the current round; a player cut at
@@ -975,10 +1012,8 @@ export class TournamentsService {
     const buybackRow = await this.pool.query(`SELECT * FROM buybacks WHERE id = $1`, [buybackId]);
     const buyback = buybackRow.rows[0];
     if (!buyback) throw new AppError('NOT_FOUND', 'Buyback not found', 404);
-    if (buyback.status === 'completed') return mapBuyback(buyback);
-    if (buyback.status === 'failed') {
-      throw new AppError('CONFLICT', 'Buyback payment failed', 409);
-    }
+    // `failed` is still fulfilled: a declined first attempt can be followed by a successful retry.
+    if (buyback.status === 'completed' || buyback.refunded_at) return mapBuyback(buyback);
     if (!buyback.stripe_payment_intent_id) {
       throw new AppError('BAD_REQUEST', 'Buyback must be paid via Stripe', 400);
     }
@@ -989,9 +1024,16 @@ export class TournamentsService {
     // Checkout validated the tournament phase and round, but the payment can
     // land minutes later — by which time the round may have closed, knockout
     // may have started, or the tournament may be over. Re-check at the moment
-    // the buyback is actually granted, or the player is re-activated into a
-    // phase that no longer exists.
-    await this.assertBuybackStillFulfillable(tournamentId, buyback.round_number);
+    // the buyback is actually granted; if it can no longer be granted, the money goes back.
+    try {
+      await this.assertBuybackStillFulfillable(tournamentId, buyback.round_number);
+      await this.assertNoOtherLiveTournament(userId, tournamentId);
+    } catch (err) {
+      if (err instanceof AppError && err.status === 409) {
+        return this.refundUnfulfillableBuyback(buyback, err.message);
+      }
+      throw err;
+    }
 
     const reg = await this.getRegistration(tournamentId, userId);
     const roundSlot = await this.getLatestRoundSlot(tournamentId, userId);
@@ -1006,19 +1048,28 @@ export class TournamentsService {
       // this both deliveries passed the unlocked check above and each added a
       // buyback, so the player got two re-entries for one payment.
       const locked = await client.query(
-        `SELECT status FROM buybacks WHERE id = $1 FOR UPDATE`,
+        `SELECT status, refunded_at FROM buybacks WHERE id = $1 FOR UPDATE`,
         [buybackId]
       );
-      if (locked.rows[0]?.status !== 'pending') {
+      const lockedRow = locked.rows[0];
+      if (!lockedRow || !['pending', 'failed'].includes(lockedRow.status) || lockedRow.refunded_at) {
         await client.query('ROLLBACK');
         const settled = await this.pool.query(`SELECT * FROM buybacks WHERE id = $1`, [buybackId]);
         return mapBuyback(settled.rows[0]);
       }
 
-      await client.query(
-        `UPDATE buybacks SET status = 'completed' WHERE id = $1 AND status = 'pending'`,
-        [buybackId]
+      // A second paid buyback (or a player already back in) has nothing left to buy.
+      const participantRow = await client.query(
+        `SELECT status FROM tournament_participants
+         WHERE tournament_id = $1 AND user_id = $2 FOR UPDATE`,
+        [tournamentId, userId]
       );
+      if (!['eliminated', 'out'].includes(participantRow.rows[0]?.status)) {
+        await client.query('ROLLBACK');
+        return this.refundUnfulfillableBuyback(buyback, 'Player is already back in the tournament');
+      }
+
+      await client.query(`UPDATE buybacks SET status = 'completed' WHERE id = $1`, [buybackId]);
 
       // The round number moves with them. A player cut at a round close still
       // carries the closed round's number, and enrolment only ever re-queues
@@ -1052,7 +1103,7 @@ export class TournamentsService {
           userId,
           type: 'buyback_completed',
           channels: ['in_app', 'email'],
-          payload: { tournamentId, amountCents: buyback.amount_cents },
+          payload: { tournamentId, amountCents: buyback.amount_cents, link: tournamentLink(tournamentId) },
           idempotencyKey: `buyback:${buybackId}`,
         }).catch(console.error);
       }
@@ -1061,10 +1112,42 @@ export class TournamentsService {
       return mapBuyback(updated.rows[0]);
     } catch (err) {
       await client.query('ROLLBACK');
+      // idx_one_live_tournament_per_user: they joined another tournament after paying.
+      if ((err as { code?: string }).code === '23505') {
+        return this.refundUnfulfillableBuyback(buyback, 'Player is live in another tournament');
+      }
       throw err;
     } finally {
       client.release();
     }
+  }
+
+  /** Return the money for a buyback that can no longer be granted, so the webhook can settle. */
+  private async refundUnfulfillableBuyback(
+    buyback: { id: string; stripe_payment_intent_id: string; user_id: string; tournament_id: string; amount_cents: number },
+    reason: string
+  ) {
+    if (!this.env) throw new AppError('INTERNAL', 'Env not configured', 500);
+    await refundBuybackPayment(this.env, buyback.stripe_payment_intent_id, buyback.id);
+    const updated = await this.pool.query(
+      `UPDATE buybacks SET status = 'failed', refunded_at = COALESCE(refunded_at, NOW())
+       WHERE id = $1 RETURNING *`,
+      [buyback.id]
+    );
+    console.warn(`Refunded buyback ${buyback.id}: ${reason}`);
+    enqueueNotification(this.env, {
+      userId: buyback.user_id,
+      type: 'buyback_refunded',
+      channels: ['in_app', 'email'],
+      payload: {
+        tournamentId: buyback.tournament_id,
+        amountCents: buyback.amount_cents,
+        reason,
+        link: tournamentLink(buyback.tournament_id),
+      },
+      idempotencyKey: `buyback-refunded:${buyback.id}`,
+    }).catch(console.error);
+    return mapBuyback(updated.rows[0]);
   }
 
   async withdraw(tournamentId: string, userId: string) {
@@ -1080,6 +1163,10 @@ export class TournamentsService {
     }
     const toNotify: MatchNotification[] = [];
     const toRequeue: string[] = [];
+    const toAward: Array<{
+      match: Parameters<typeof applyMatchWinner>[4] & { id: string; result: unknown };
+      winnerId: string;
+    }> = [];
 
     try {
       await client.query('BEGIN');
@@ -1131,16 +1218,8 @@ export class TournamentsService {
         const otherBatted = otherScore != null;
 
         if (otherBatted) {
-          await client.query(
-            `UPDATE matches SET status = 'completed', result = $1, updated_at = now() WHERE id = $2`,
-            [JSON.stringify({ ...res, winnerId: otherId }), m.id]
-          );
-          toNotify.push({
-            userId: otherId,
-            type: 'match_won',
-            payload: { matchId: m.id, reason: 'opponent_withdrew' },
-            idempotencyKey: `match-won:${m.id}:${otherId}`,
-          });
+          // Resolved after commit through applyMatchWinner, which credits the win and moves the bracket.
+          toAward.push({ match: m, winnerId: otherId });
         } else {
           await client.query(
             `UPDATE matches SET status = 'cancelled', updated_at = now() WHERE id = $1`,
@@ -1163,13 +1242,30 @@ export class TournamentsService {
 
       await removeFromQueue(this.redis, userId);
 
+      for (const { match, winnerId } of toAward) {
+        await applyMatchWinner(
+          this.pool,
+          this.redis,
+          this.env,
+          match.id,
+          match,
+          (match.result ?? {}) as MatchResultExtended,
+          winnerId
+        );
+      }
+
       for (const otherId of toRequeue) {
         await requeuePlayer(this.pool, this.redis, otherId, { tournamentId }, this.env);
       }
 
       if (this.env) {
         for (const n of toNotify) {
-          enqueueNotification(this.env, { ...n, channels: ['in_app', 'email'] }).catch(console.error);
+          const details = await matchNotificationDetails(this.pool, 'opponent_withdrew_requeued', String(n.payload.matchId), n.userId);
+          enqueueNotification(this.env, {
+            ...n,
+            payload: { ...details, ...n.payload },
+            channels: ['in_app', 'email'],
+          }).catch(console.error);
         }
       }
 
@@ -1213,7 +1309,7 @@ export class TournamentsService {
         label:
           roundNum >= KNOCKOUT_ROUNDS.ro16
             ? knockoutRoundLabel(roundNum)
-            : `Normal Round ${roundNum}`,
+            : `Round ${roundNum}`,
         phase: (roundNum >= KNOCKOUT_ROUNDS.ro16 ? 'knockout' : 'normal') as 'normal' | 'knockout',
         matches: matches.map((m) => ({
           matchId: m.id,
@@ -1240,7 +1336,7 @@ export class TournamentsService {
         rounds: [
           {
             round: tournament.currentRoundNumber,
-            label: `Normal Round ${tournament.currentRoundNumber}`,
+            label: `Round ${tournament.currentRoundNumber}`,
             phase: 'normal' as const,
             matches: [],
           },
@@ -1296,6 +1392,7 @@ export class TournamentsService {
       // shuts — `assertMatchSlotPlayable` refuses it — and while it stays open
       // the `hasActiveMatch` guard keeps both players out of the next round.
       await settleOpenMatches(client, tournamentId, roundNumber);
+      await retireTournamentBots(client, tournamentId);
 
       const tournamentResult = await client.query(
         `SELECT initial_player_count, round_duration_minutes FROM tournaments WHERE id = $1`,
@@ -1451,7 +1548,7 @@ export class TournamentsService {
           userId: playerId,
           type: 'match_found',
           channels: ['in_app', 'email'],
-          payload,
+          payload: { ...(await matchNotificationDetails(this.pool, 'match_found', matchId, playerId)), ...payload },
           idempotencyKey: `match-found:${matchId}:${playerId}`,
         }).catch(console.error);
       }

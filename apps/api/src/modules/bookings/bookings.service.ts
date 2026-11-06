@@ -4,6 +4,7 @@ import type { RedisClient } from '../../lib/redis.js';
 import { mapBooking, mapSlot, mapVenue } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 import { emitBookingUpdated, emitSlotUpdated } from '../../socket/sync-events.js';
+import { recountSlotSeats } from '../../lib/slot-lock.js';
 
 const SLOT_LOCK_TTL = 300;
 
@@ -67,13 +68,7 @@ export class BookingsService {
         [userId, timeSlotId]
       );
 
-      const newBookedCount = slot.booked_count + 1;
-      const newStatus = newBookedCount >= slot.max_capacity ? 'full' : 'available';
-
-      await client.query(
-        'UPDATE time_slots SET booked_count = $1, status = $2 WHERE id = $3',
-        [newBookedCount, newStatus, timeSlotId]
-      );
+      const newStatus = (await recountSlotSeats(client, timeSlotId)).status as 'available' | 'full';
 
       await client.query('COMMIT');
 
@@ -126,11 +121,8 @@ export class BookingsService {
         [bookingId]
       );
 
-      const newBookedCount = Math.max(0, booking.booked_count - 1);
-      await client.query(
-        `UPDATE time_slots SET booked_count = $1, status = 'available' WHERE id = $2`,
-        [newBookedCount, booking.time_slot_id]
-      );
+      // Derived, not decremented, and a slot locked for a match stays locked.
+      const seats = await recountSlotSeats(client, booking.time_slot_id);
 
       await client.query('COMMIT');
 
@@ -139,7 +131,7 @@ export class BookingsService {
       emitSlotUpdated({
         venueId: booking.venue_id,
         slotId: booking.time_slot_id,
-        status: 'available',
+        status: seats.status as 'available' | 'full' | 'locked',
         date: slotDateFromStartTime(booking.start_time),
       });
 
@@ -159,10 +151,21 @@ export class BookingsService {
               ts.max_capacity, ts.booked_count, ts.status AS slot_status, ts.created_at AS slot_created_at,
               v.id AS venue_id, v.name AS venue_name, v.address, v.city, v.country,
               v.capacity, v.active, v.created_at AS venue_created_at, v.updated_at AS venue_updated_at,
-              ST_Y(v.location) AS latitude, ST_X(v.location) AS longitude
+              ST_Y(v.location) AS latitude, ST_X(v.location) AS longitude,
+              bt.id AS tournament_id, bt.name AS tournament_name
        FROM bookings b
        JOIN time_slots ts ON ts.id = b.time_slot_id
        JOIN venues v ON v.id = ts.venue_id
+       -- The tournament this seat is for: via the round slot, the registration, or the match.
+       LEFT JOIN LATERAL (
+         SELECT t.id, t.name FROM tournaments t
+         WHERE t.id IN (
+           SELECT rs.tournament_id FROM tournament_round_slots rs WHERE rs.booking_id = b.id
+           UNION SELECT r.tournament_id FROM tournament_registrations r WHERE r.booking_id = b.id
+           UNION SELECT m.tournament_id FROM matches m WHERE m.id = b.match_id
+         )
+         LIMIT 1
+       ) bt ON TRUE
        WHERE b.user_id = $1 AND b.status != 'cancelled'
        ORDER BY ts.start_time ASC`,
       [userId]
@@ -193,6 +196,7 @@ export class BookingsService {
         created_at: row.venue_created_at,
         updated_at: row.venue_updated_at,
       }),
+      tournament: row.tournament_id ? { id: row.tournament_id as string, name: row.tournament_name as string } : null,
     }));
   }
 }

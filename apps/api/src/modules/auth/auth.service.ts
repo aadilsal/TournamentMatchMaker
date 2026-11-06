@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { createHash, randomBytes } from 'crypto';
 import type { Pool } from 'pg';
@@ -9,9 +9,15 @@ import type { Env } from '../../config/env.js';
 import type { AuthPayload } from '../../middleware/auth.js';
 import { mapUser } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
+import { sendEmail } from '../../lib/mailer.js';
+import { revokeUserTokens } from '../../lib/token-revocation.js';
+import { disconnectUser } from '../../socket/emitters.js';
 
 const BCRYPT_ROUNDS = 12;
 const REFRESH_COOKIE = 'refresh_token';
+// Compared against when there is no real hash, so unknown emails cost the same bcrypt time.
+const DUMMY_HASH = '$2b$12$jkptTrveB6DWy/7LIKG3dOdOdELxTVq1/9vjG76ifkdpBOngaIxXO';
+const INVALID_RESET = 'This reset link is invalid or has expired';
 
 const normaliseEmail = (email: string) => email.trim().toLowerCase();
 
@@ -100,6 +106,7 @@ export class AuthService {
     const row = result.rows[0];
 
     if (!row) {
+      await bcrypt.compare(password, DUMMY_HASH);
       throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);
     }
 
@@ -109,6 +116,7 @@ export class AuthService {
     // Phrased as a bad credential like every other failure, giving away
     // nothing about which addresses exist.
     if (row.is_bot) {
+      await bcrypt.compare(password, DUMMY_HASH);
       throw new AppError('UNAUTHORIZED', 'Invalid email or password', 401);
     }
 
@@ -168,6 +176,70 @@ export class AuthService {
         await this.redis.setex(`jwt:blacklist:${jti}`, ttl, '1');
       }
     }
+  }
+
+  /** Emails a single-use reset link; silently does nothing for unknown, bot or suspended accounts. */
+  async requestPasswordReset(email: string) {
+    const result = await this.pool.query(
+      `SELECT id, email FROM users
+       WHERE LOWER(email) = $1 AND NOT is_bot AND suspended_at IS NULL`,
+      [normaliseEmail(email)]
+    );
+    const user = result.rows[0];
+    if (!user) return;
+
+    const token = randomBytes(32).toString('hex');
+    await this.pool.query(
+      `INSERT INTO password_resets (user_id, token_hash, expires_at)
+       VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+      [user.id, this.hashToken(token)]
+    );
+
+    const link = `${this.env.APP_URL}/reset-password?token=${token}`;
+    await sendEmail(
+      this.env,
+      user.email,
+      'Reset your password',
+      `<p>Someone asked to reset the password for this account.</p>
+       <p><a href="${link}">Choose a new password</a> — the link works once and expires in 1 hour.</p>
+       <p>If this wasn't you, ignore this email; your password stays the same.</p>`
+    );
+  }
+
+  async resetPassword(token: string, password: string) {
+    const client = await this.pool.connect();
+    let userId: string;
+    try {
+      await client.query('BEGIN');
+      const claimed = await client.query(
+        `UPDATE password_resets SET used_at = NOW()
+         WHERE token_hash = $1 AND used_at IS NULL AND expires_at > NOW()
+         RETURNING user_id`,
+        [this.hashToken(token)]
+      );
+      if (!claimed.rows[0]) {
+        throw new AppError('INVALID_RESET_TOKEN', INVALID_RESET, 400);
+      }
+      userId = claimed.rows[0].user_id as string;
+
+      const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+      await client.query(`UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [
+        passwordHash,
+        userId,
+      ]);
+      // Any other outstanding link for this account dies with this one.
+      await client.query(`DELETE FROM password_resets WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [userId]);
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    await revokeUserTokens(this.redis, userId);
+    disconnectUser(userId, 'Your password was changed — sign in again');
   }
 
   private async issueTokens(userId: string, email: string, role: UserRole) {

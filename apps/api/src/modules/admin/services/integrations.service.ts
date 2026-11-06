@@ -1,11 +1,19 @@
+import type { Pool } from 'pg';
+import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback } from '@vr-tournament/shared/email';
 import type { Env } from '../../../config/env.js';
 import { isStripeConfigured } from '../../../lib/stripe.js';
-import { enqueueNotification } from '../../../lib/bullmq.js';
+import { AppError } from '../../../lib/response.js';
 
 export class AdminIntegrationsService {
-  constructor(private env: Env) {}
+  constructor(
+    private env: Env,
+    private pool: Pool
+  ) {}
 
   getConfig() {
+    const cfg = emailConfigFromEnv(this.env);
+    const providers = configuredEmailProviders(cfg);
+    const first = providers[0];
     return {
       meta: {
         configured: !!this.env.META_API_KEY,
@@ -15,8 +23,9 @@ export class AdminIntegrationsService {
       },
       email: {
         enabled: this.env.NOTIFICATION_EMAIL_ENABLED,
-        provider: this.env.RESEND_API_KEY ? 'resend' : this.env.AWS_ACCESS_KEY_ID ? 'ses' : 'console',
-        from: this.env.RESEND_FROM_EMAIL ?? this.env.AWS_SES_FROM_EMAIL ?? null,
+        provider: first ?? 'none',
+        from: first ? cfg[first]!.from : null,
+        providers,
       },
       stripe: {
         configured: isStripeConfigured(this.env),
@@ -25,14 +34,15 @@ export class AdminIntegrationsService {
     };
   }
 
+  /** Sends now, not via the queue, so the admin sees which provider delivered or why none did. */
   async sendTestEmail(userId: string) {
-    await enqueueNotification(this.env, {
-      userId,
-      type: 'admin_test',
-      channels: ['email', 'in_app'],
-      payload: { message: 'Admin test email from VR Cricket League' },
-      idempotencyKey: `admin-test:${userId}:${Date.now()}`,
+    const { rows } = await this.pool.query<{ email: string }>('SELECT email FROM users WHERE id = $1', [userId]);
+    if (!rows[0]) throw new AppError('NOT_FOUND', 'User not found', 404);
+    const result = await sendEmailWithFallback(emailConfigFromEnv(this.env), {
+      to: rows[0].email,
+      subject: 'VR Cricket League — test email',
+      html: '<p>This is a test email from the VR Cricket League admin panel. Email delivery works.</p>',
     });
-    return { queued: true };
+    return { sent: result.sent, provider: result.provider, failures: result.failures, to: rows[0].email };
   }
 }

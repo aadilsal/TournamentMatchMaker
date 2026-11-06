@@ -304,6 +304,30 @@ export class MetaIntegrationService {
     };
   }
 
+  /** Tournaments the headset's Tournament button can lead into: open or running. */
+  async listLiveTournaments() {
+    // Same window rule as TournamentsService.assertRegistrationWindowOpen.
+    const result = await this.pool.query(
+      `SELECT id, name, status, start_date, end_date,
+              (status = 'open'
+                AND (registration_opens_at IS NULL OR registration_opens_at <= NOW())
+                AND (registration_closes_at IS NULL OR registration_closes_at > NOW())) AS registration_open
+       FROM tournaments
+       WHERE status IN ('open', 'in_progress')
+       ORDER BY (status = 'in_progress') DESC, start_date ASC
+       LIMIT 20`
+    );
+    const tournaments = result.rows.map((r) => ({
+      id: r.id as string,
+      name: r.name as string,
+      status: r.status as 'open' | 'in_progress',
+      startDate: (r.start_date as Date).toISOString(),
+      endDate: (r.end_date as Date).toISOString(),
+      registrationOpen: r.registration_open === true,
+    }));
+    return { hasLiveTournament: tournaments.length > 0, tournaments };
+  }
+
   async getCurrentMatch(userId: string): Promise<MetaCurrentMatchResponse> {
     // Before anything is read: a bot opponent bats on the player's first poll,
     // so the answer below already reflects its innings — either as the target

@@ -1,3 +1,4 @@
+import { isIP } from 'net';
 import type { Request } from 'express';
 
 function normalizeIp(ip: string): string {
@@ -6,20 +7,10 @@ function normalizeIp(ip: string): string {
   return trimmed;
 }
 
+/** Proxy-resolved client IP (trust proxy = 1); '' when it is not a valid address. */
 export function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-    const first = raw.split(',')[0]?.trim();
-    if (first) return normalizeIp(first);
-  }
-
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) {
-    return normalizeIp(realIp);
-  }
-
-  return normalizeIp(req.ip || req.socket.remoteAddress || '');
+  const ip = normalizeIp(req.ip || req.socket?.remoteAddress || '');
+  return isIP(ip) ? ip : '';
 }
 
 export function isPrivateOrLoopback(ip: string): boolean {

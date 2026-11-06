@@ -9,7 +9,7 @@ import { Redis } from 'ioredis';
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), '../../../.env') });
 import { loadEnv } from './config/env.js';
 import { getPool, closePool } from './lib/db.js';
-import { getRedis, closeRedis } from './lib/redis.js';
+import { getRedis, closeRedis, logRedisErrors } from './lib/redis.js';
 import { createApp } from './app.js';
 import { socketAuth } from './socket/auth.middleware.js';
 import { registerSocketHandlers } from './socket/handlers.js';
@@ -29,6 +29,9 @@ const io = new Server(httpServer, {
 const pubClient = new Redis(env.REDIS_URL);
 const subClient = pubClient.duplicate();
 const bridgeSub = new Redis(env.REDIS_URL);
+logRedisErrors(pubClient, 'socket-pub');
+logRedisErrors(subClient, 'socket-sub');
+logRedisErrors(bridgeSub, 'socket-bridge');
 io.adapter(createAdapter(pubClient, subClient));
 
 io.use(socketAuth(env));

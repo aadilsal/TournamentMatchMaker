@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import {
   buybackSchema,
-  createTournamentSchema,
   enterTournamentSchema,
   registerTournamentSchema,
   tournamentListQuerySchema,
@@ -11,7 +10,7 @@ import {
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
 import type { RedisClient } from '../../lib/redis.js';
-import { authenticate, requireRole } from '../../middleware/auth.js';
+import { authenticate } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { TournamentsService } from './tournaments.service.js';
@@ -121,20 +120,7 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
     }
   });
 
-  router.post(
-    '/',
-    authenticate(env),
-    requireRole('tournament_admin', 'superadmin'),
-    validate(createTournamentSchema),
-    async (req, res, next) => {
-      try {
-        const tournament = await service.create(req.body);
-        sendSuccess(res, tournament, undefined, 201);
-      } catch (err) {
-        next(err);
-      }
-    }
-  );
+  // Tournament creation lives only under /admin/tournaments (superadmin-only).
 
   router.post(
     '/:id/register',

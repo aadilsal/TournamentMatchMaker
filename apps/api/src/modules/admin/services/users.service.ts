@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs';
+import bcrypt from 'bcrypt';
 import type { Pool } from 'pg';
 import type {
   AdminCreateUserInput,
@@ -33,9 +33,29 @@ export class AdminUsersService {
     disconnectUser(userId, 'Your access changed — sign in again');
   }
 
+  async lookup(query: { search?: string; id?: string; limit: number }) {
+    const params: unknown[] = [];
+    let where = 'WHERE is_bot = FALSE AND suspended_at IS NULL';
+    if (query.id) {
+      params.push(query.id);
+      where += ` AND id = $${params.length}`;
+    }
+    if (query.search) {
+      params.push(`%${query.search.replace(/[\\%_]/g, '\\$&')}%`);
+      where += ` AND username ILIKE $${params.length}`;
+    }
+    params.push(query.limit);
+    const result = await this.pool.query(
+      `SELECT id, username, city, country FROM users ${where} ORDER BY username LIMIT $${params.length}`,
+      params
+    );
+    return result.rows;
+  }
+
   async list(query: AdminListQuery & { role?: string }) {
     const params: unknown[] = [];
-    let where = 'WHERE 1=1';
+    // Bots are internal, and the dashboard user count leaves them out too.
+    let where = 'WHERE is_bot = FALSE';
 
     if (query.search) {
       params.push(`%${query.search}%`);
@@ -177,6 +197,10 @@ export class AdminUsersService {
 
   async update(actorId: string, id: string, input: AdminUpdateUserInput) {
     const before = await this.getById(id);
+    const changesRole = input.role !== undefined && input.role !== before.role;
+    if (actorId === id && (changesRole || input.suspended === true)) {
+      throw new AppError('CONFLICT', 'You cannot change your own role or suspend yourself', 409);
+    }
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -211,11 +235,35 @@ export class AdminUsersService {
     fields.push(`updated_at = NOW()`);
     values.push(id);
 
-    const result = await this.pool.query(
-      `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values
-    );
-    const user = mapUser(result.rows[0]);
+    const removesSuperadmin =
+      before.role === 'superadmin' &&
+      ((changesRole && input.role !== 'superadmin') || input.suspended === true);
+
+    const client = await this.pool.connect();
+    let user;
+    try {
+      await client.query('BEGIN');
+      if (removesSuperadmin) {
+        // Locking every active superadmin row serialises concurrent demotions.
+        const active = await client.query(
+          `SELECT id FROM users WHERE role = 'superadmin' AND suspended_at IS NULL FOR UPDATE`
+        );
+        if (!active.rows.some((r) => r.id !== id)) {
+          throw new AppError('CONFLICT', 'At least one active superadmin must remain', 409);
+        }
+      }
+      const result = await client.query(
+        `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values
+      );
+      await client.query('COMMIT');
+      user = mapUser(result.rows[0]);
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
 
     // A demotion or suspension that leaves existing tokens working is not a
     // demotion or suspension. Both edits end the user's current sessions.
@@ -245,6 +293,14 @@ export class AdminUsersService {
 
     const before = await this.getById(id);
 
+    // Bookings and matches keep their player FK, so such accounts are anonymised instead.
+    const history = await this.pool.query(
+      `SELECT EXISTS (SELECT 1 FROM bookings WHERE user_id = $1)
+           OR EXISTS (SELECT 1 FROM matches WHERE player1_id = $1 OR player2_id = $1) AS has_history`,
+      [id]
+    );
+    const anonymise = history.rows[0].has_history as boolean;
+
     // Audit first, then delete, both in one transaction: the trail can never be
     // lost to a partial failure, and a rollback takes the audit row with it.
     const client = await this.pool.connect();
@@ -252,13 +308,27 @@ export class AdminUsersService {
       await client.query('BEGIN');
       await writeAudit(client, {
         actorId,
-        action: 'user.delete',
+        action: anonymise ? 'user.anonymise' : 'user.delete',
         entityType: 'user',
         entityId: id,
         before: before as unknown as Record<string, unknown>,
       });
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
-      await client.query('DELETE FROM users WHERE id = $1', [id]);
+      if (anonymise) {
+        await client.query(
+          `UPDATE users SET
+             email = 'deleted+' || id || '@deleted.invalid',
+             username = 'deleted_' || replace(id::text, '-', ''),
+             password_hash = '!',
+             country = NULL, city = NULL, latitude = NULL, longitude = NULL,
+             vr_device_type = NULL, profile_picture = NULL, profile_picture_mime = NULL,
+             suspended_at = COALESCE(suspended_at, NOW()), updated_at = NOW()
+           WHERE id = $1`,
+          [id]
+        );
+      } else {
+        await client.query('DELETE FROM users WHERE id = $1', [id]);
+      }
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
@@ -266,6 +336,8 @@ export class AdminUsersService {
     } finally {
       client.release();
     }
+    if (anonymise) await this.invalidateSessions(id);
+    return { anonymised: anonymise };
   }
 
   async resetPassword(actorId: string, id: string, input: AdminResetPasswordInput) {
@@ -275,6 +347,7 @@ export class AdminUsersService {
       [hash, id]
     );
     await this.pool.query('DELETE FROM refresh_tokens WHERE user_id = $1', [id]);
+    await this.invalidateSessions(id);
     await writeAudit(this.pool, {
       actorId,
       action: 'user.reset_password',

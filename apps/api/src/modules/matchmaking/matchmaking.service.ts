@@ -7,6 +7,7 @@ import {
   QUEUE_TOURNAMENT_INDEX,
   queuePlayerKey,
   queueTournamentKey,
+  ROUND_PLAY_STARTS_AT_SQL,
 } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import {
@@ -117,12 +118,13 @@ export class MatchmakingService {
         `SELECT rs.time_slot_id, rs.venue_id, rs.booking_id, ts.start_time, ts.end_time
          FROM tournament_round_slots rs
          JOIN time_slots ts ON ts.id = rs.time_slot_id
+         JOIN tournaments t ON t.id = rs.tournament_id
          LEFT JOIN tournament_rounds tr
            ON tr.tournament_id = rs.tournament_id
           AND tr.round_number = $3
           AND tr.status = 'active'
          WHERE rs.tournament_id = $1 AND rs.user_id = $2 AND ts.end_time > NOW()
-           AND (tr.id IS NULL OR (ts.start_time >= tr.starts_at AND ts.end_time <= tr.ends_at))
+           AND (tr.id IS NULL OR (ts.start_time >= ${ROUND_PLAY_STARTS_AT_SQL} AND ts.end_time <= tr.ends_at))
          ORDER BY (rs.round_number = $3) DESC, rs.round_number DESC
          LIMIT 1`,
         [input.tournamentId, userId, roundNumber]

@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from 'crypto';
 import type { RequestHandler } from 'express';
 import type { Env } from '../config/env.js';
 import { AppError } from '../lib/response.js';
@@ -12,7 +13,8 @@ import { AppError } from '../lib/response.js';
  */
 function credentialMatches(presented: string | undefined, configured: string | undefined): boolean {
   if (!configured || !presented) return false;
-  return presented === configured;
+  const digest = (v: string) => createHash('sha256').update(v).digest();
+  return timingSafeEqual(digest(presented), digest(configured));
 }
 
 export function metaApiKey(env: Env): RequestHandler {

@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import type { RedisClient } from '../../../lib/redis.js';
 import type { Env } from '../../../config/env.js';
 import type {
@@ -12,8 +12,14 @@ import type {
   CreateTournamentInput,
   RoundWindow,
   Tournament,
+  TournamentStatusValue,
 } from '@vr-tournament/shared';
-import { roundWindowViolation, roundsOutsideWindow } from '@vr-tournament/shared';
+import {
+  TOURNAMENT_STATUS_LABELS,
+  isValidTournamentTransition,
+  roundWindowViolation,
+  roundsOutsideWindow,
+} from '@vr-tournament/shared';
 import {
   mapBuyback,
   mapParticipant,
@@ -36,13 +42,21 @@ export class AdminTournamentsService {
     this.tournaments = new TournamentsService(pool, redis, env);
   }
 
-  list(query: AdminTournamentListQuery) {
+  list(query: AdminTournamentListQuery & { tournamentIds?: string[] | null }) {
     return this.listAdmin(query);
   }
 
-  async listAdmin(query: AdminTournamentListQuery) {
+  async listAdmin(query: AdminTournamentListQuery & { tournamentIds?: string[] | null }) {
+    if (query.tournamentIds && query.tournamentIds.length === 0) {
+      return { items: [], nextCursor: null };
+    }
     const params: unknown[] = [];
     let where = 'WHERE 1=1';
+
+    if (query.tournamentIds) {
+      params.push(query.tournamentIds);
+      where += ` AND t.id = ANY($${params.length})`;
+    }
 
     if (query.status) {
       params.push(query.status);
@@ -140,19 +154,40 @@ export class AdminTournamentsService {
     fields.push('updated_at = NOW()');
     values.push(id);
 
-    const result = await this.pool.query(
-      `UPDATE tournaments SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
-      values
-    );
-    const tournament = mapTournament(result.rows[0]);
+    const client = await this.pool.connect();
+    let tournament: Tournament;
+    try {
+      await client.query('BEGIN');
+      // Re-read under lock so the transition check sees the status we are about to overwrite.
+      const locked = await client.query(`SELECT status FROM tournaments WHERE id = $1 FOR UPDATE`, [id]);
+      const from = locked.rows[0]?.status as TournamentStatusValue | undefined;
+      if (!from) throw new AppError('NOT_FOUND', 'Tournament not found', 404);
+      const to = input.status as TournamentStatusValue | undefined;
+      if (to !== undefined && !isValidTournamentTransition(from, to)) {
+        throw new AppError(
+          'CONFLICT',
+          `A ${TOURNAMENT_STATUS_LABELS[from].toLowerCase()} tournament cannot be moved to ${TOURNAMENT_STATUS_LABELS[to].toLowerCase()}`,
+          409
+        );
+      }
 
-    // Retire on the *transition*, not just in `complete()` — the raw status
-    // dropdown on the edit form reaches 'completed' through here without ever
-    // calling complete(). Players left holding a place in a finished tournament
-    // still occupy idx_one_live_tournament_per_user, so their next registration
-    // fails as a bare unique-violation.
-    if (before.status !== 'completed' && tournament.status === 'completed') {
-      await this.retireParticipants(id);
+      const result = await client.query(
+        `UPDATE tournaments SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+        values
+      );
+      tournament = mapTournament(result.rows[0]);
+
+      // Any route to 'completed' (action bar or edit form) settles the tournament atomically.
+      if (from !== 'completed' && tournament.status === 'completed') {
+        await this.settleCompletion(client, id);
+        tournament = { ...tournament, phase: 'completed' };
+      }
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
     }
 
     // The opening round was written from the start date this tournament had when
@@ -178,6 +213,18 @@ export class AdminTournamentsService {
 
   async delete(actorId: string, id: string) {
     const before = await this.getById(id);
+    const history = await this.pool.query(
+      `SELECT EXISTS (SELECT 1 FROM matches WHERE tournament_id = $1)
+           OR EXISTS (SELECT 1 FROM buybacks WHERE tournament_id = $1) AS has_history`,
+      [id]
+    );
+    if (history.rows[0].has_history) {
+      throw new AppError(
+        'CONFLICT',
+        'This tournament has matches or buybacks, so it cannot be deleted — complete it instead',
+        409
+      );
+    }
     await this.pool.query('DELETE FROM tournaments WHERE id = $1', [id]);
     await writeAudit(this.pool, {
       actorId,
@@ -202,9 +249,12 @@ export class AdminTournamentsService {
       [id]
     );
     const initialPlayerCount = countResult.rows[0]?.count ?? 0;
+    if (initialPlayerCount === 0) {
+      throw new AppError('CONFLICT', 'No players are registered yet', 409);
+    }
     const tournament = await this.update(actorId, id, {
       status: 'in_progress',
-      initialPlayerCount: initialPlayerCount > 0 ? initialPlayerCount : undefined,
+      initialPlayerCount,
     });
     // Pressing Start means play begins now, so the opening round opens now too.
     // Without this a tournament started ahead of its own start date was live with
@@ -215,21 +265,30 @@ export class AdminTournamentsService {
   }
 
   /**
-   * Nobody holds a place in a finished tournament. Leaving players at
-   * 'active'/'knockout' is what made completing a tournament lock every one of
-   * its players out of ever joining another.
+   * Same settlement as the worker's end-date completion: no live match, open
+   * round or participant place may outlive a finished tournament.
    */
-  private async retireParticipants(tournamentId: string) {
-    await this.pool.query(
-      `UPDATE tournament_participants
-       SET status = 'out', updated_at = NOW()
+  private async settleCompletion(client: PoolClient, tournamentId: string) {
+    await client.query(
+      `UPDATE matches SET status = 'expired', updated_at = NOW()
+       WHERE tournament_id = $1
+         AND status IN ('pending_confirmation', 'confirmed', 'in_progress')`,
+      [tournamentId]
+    );
+    await client.query(`UPDATE tournaments SET phase = 'completed' WHERE id = $1`, [tournamentId]);
+    await client.query(
+      `UPDATE tournament_rounds SET status = 'closed'
+       WHERE tournament_id = $1 AND status = 'active'`,
+      [tournamentId]
+    );
+    await client.query(
+      `UPDATE tournament_participants SET status = 'out', updated_at = NOW()
        WHERE tournament_id = $1 AND status <> 'out'`,
       [tournamentId]
     );
   }
 
   async complete(actorId: string, id: string) {
-    // `update` retires the participants as part of the transition to completed.
     return this.update(actorId, id, { status: 'completed', phase: 'completed' });
   }
 
@@ -422,7 +481,8 @@ export class AdminTournamentsService {
     return this.getById(tournamentId);
   }
 
-  listRegistrations(tournamentId: string) {
+  /** Player emails are superadmin-only; scoped admins get usernames. */
+  listRegistrations(tournamentId: string, includeEmail = false) {
     return this.pool
       .query(
         `SELECT tr.*, u.username, u.email
@@ -436,7 +496,7 @@ export class AdminTournamentsService {
         r.rows.map((row) => ({
           ...mapRegistration(row),
           username: row.username,
-          email: row.email,
+          ...(includeEmail ? { email: row.email } : {}),
         }))
       );
   }

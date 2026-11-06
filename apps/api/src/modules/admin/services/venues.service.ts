@@ -9,6 +9,7 @@ import type {
   CreateSlotsInput,
   CreateVenueInput,
 } from '@vr-tournament/shared';
+import { MAX_SLOT_CAPACITY } from '@vr-tournament/shared';
 import { mapSlot, mapVenue } from '../../../lib/mappers.js';
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
@@ -155,6 +156,23 @@ export class AdminVenuesService {
 
   async delete(actorId: string, id: string) {
     const before = await this.getById(id);
+    // Deleting cascades to slots and round slots; any booking history also blocks it via FK.
+    const inUse = await this.pool.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM time_slots ts
+         WHERE ts.venue_id = $1
+           AND (EXISTS (SELECT 1 FROM bookings b WHERE b.time_slot_id = ts.id)
+                OR EXISTS (SELECT 1 FROM tournament_round_slots trs WHERE trs.time_slot_id = ts.id))
+       ) AS in_use`,
+      [id]
+    );
+    if (inUse.rows[0].in_use) {
+      throw new AppError(
+        'CONFLICT',
+        'This venue has bookings or tournament round slots — deactivate it instead of deleting',
+        409
+      );
+    }
     await this.pool.query('DELETE FROM venues WHERE id = $1', [id]);
     await writeAudit(this.pool, {
       actorId,
@@ -165,25 +183,35 @@ export class AdminVenuesService {
     });
   }
 
-  listSlots(venueId: string, date: string) {
-    return this.slots.listByVenueAndDate(venueId, date);
+  listSlots(venueId: string, date: string, tz?: string) {
+    return this.slots.listByVenueAndDate(venueId, date, tz);
   }
 
   async listAllSlots(query: {
     venueId?: string;
     date?: string;
+    tz?: string;
     status?: string;
     limit: number;
+    /** `null` = unrestricted; `[]` = no venues in scope. */
+    venueIds?: string[] | null;
   }) {
+    if (query.venueIds && query.venueIds.length === 0) return [];
     const params: unknown[] = [];
     let where = 'WHERE 1=1';
     if (query.venueId) {
       params.push(query.venueId);
       where += ` AND venue_id = $${params.length}`;
     }
+    if (query.venueIds) {
+      params.push(query.venueIds);
+      where += ` AND venue_id = ANY($${params.length})`;
+    }
     if (query.date) {
-      params.push(query.date);
-      where += ` AND start_time >= $${params.length}::date AND start_time < ($${params.length}::date + INTERVAL '1 day')`;
+      params.push(query.date, query.tz ?? 'UTC');
+      const d = params.length - 1;
+      const z = params.length;
+      where += ` AND start_time >= ($${d}::date::timestamp AT TIME ZONE $${z}) AND start_time < (($${d}::date + 1)::timestamp AT TIME ZONE $${z})`;
     }
     if (query.status) {
       params.push(query.status);
@@ -211,23 +239,25 @@ export class AdminVenuesService {
 
   async generateSlots(actorId: string, venueId: string, input: AdminGenerateSlotsInput) {
     const venue = await this.getById(venueId);
-    const capacity = input.maxCapacity ?? venue.capacity;
-    const slots: CreateSlotsInput['slots'] = [];
-
-    const start = new Date(input.startDate);
-    const end = new Date(input.endDate);
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      for (let hour = input.startHour; hour < input.endHour; hour++) {
-        const slotStart = new Date(d);
-        slotStart.setHours(hour, 0, 0, 0);
-        const slotEnd = new Date(slotStart);
-        slotEnd.setHours(hour + 1, 0, 0, 0);
-        slots.push({
-          startTime: slotStart.toISOString(),
-          endTime: slotEnd.toISOString(),
-          maxCapacity: capacity,
-        });
-      }
+    const capacity = Math.min(input.maxCapacity ?? venue.capacity, MAX_SLOT_CAPACITY);
+    // Postgres resolves wall-clock hours in the admin's zone, DST included.
+    const generated = await this.pool.query<{ start_time: Date; end_time: Date }>(
+      `SELECT s AS start_time, s + INTERVAL '1 hour' AS end_time FROM (
+         SELECT ((d::date + make_interval(hours => h))::timestamp AT TIME ZONE $5) AS s
+         FROM generate_series($1::date, $2::date, INTERVAL '1 day') d,
+              generate_series($3::int, $4::int - 1) h
+       ) x
+       WHERE s > NOW()
+       ORDER BY s`,
+      [input.startDate, input.endDate, input.startHour, input.endHour, input.timeZone]
+    );
+    const slots: CreateSlotsInput['slots'] = generated.rows.map((r) => ({
+      startTime: r.start_time.toISOString(),
+      endTime: r.end_time.toISOString(),
+      maxCapacity: capacity,
+    }));
+    if (slots.length === 0) {
+      throw new AppError('VALIDATION', 'Every slot in that range has already started', 400);
     }
     return this.createSlots(actorId, venueId, { slots });
   }

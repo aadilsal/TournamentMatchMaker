@@ -31,6 +31,13 @@ const MATCH_SELECT = `
   LEFT JOIN tournaments t ON t.id = m.tournament_id
 `;
 
+/** List views (aliases `m`, `ts`); the dashboard counts use these same predicates. */
+export const MATCH_VIEW_FILTERS = {
+  ongoing: `m.status IN ('pending_confirmation', 'confirmed', 'in_progress')`,
+  upcoming: `m.status IN ('confirmed', 'pending_confirmation') AND (m.scheduled_at > NOW() OR ts.start_time > NOW())`,
+  past: `m.status IN ('completed', 'cancelled', 'expired')`,
+} as const;
+
 export class AdminMatchesService {
   private matches: MatchesService;
 
@@ -43,22 +50,18 @@ export class AdminMatchesService {
   }
 
   private viewFilter(view: AdminMatchListQuery['view']): string {
-    switch (view) {
-      case 'ongoing':
-        return `m.status IN ('pending_confirmation', 'confirmed', 'in_progress')`;
-      case 'upcoming':
-        return `m.status IN ('confirmed', 'pending_confirmation') AND (m.scheduled_at > NOW() OR ts.start_time > NOW())`;
-      case 'past':
-        return `m.status IN ('completed', 'cancelled', 'expired')`;
-      default:
-        return '1=1';
-    }
+    return view && view !== 'all' ? MATCH_VIEW_FILTERS[view] : '1=1';
   }
 
-  async list(query: AdminMatchListQuery) {
+  /** `tournamentIds`: null = every tournament, [] = nothing in scope. */
+  async list(query: AdminMatchListQuery & { tournamentIds?: string[] | null }) {
     const params: unknown[] = [];
     let where = `WHERE ${this.viewFilter(query.view)}`;
 
+    if (query.tournamentIds) {
+      params.push(query.tournamentIds);
+      where += ` AND m.tournament_id = ANY($${params.length})`;
+    }
     if (query.tournamentId) {
       params.push(query.tournamentId);
       where += ` AND m.tournament_id = $${params.length}`;
@@ -116,6 +119,15 @@ export class AdminMatchesService {
   }
 
   async create(actorId: string, input: AdminCreateMatchInput) {
+    // Schedule like a paired match: the slot gives venue and start, the tournament gives round and phase.
+    const slot = input.timeSlotId
+      ? (await this.pool.query(`SELECT venue_id, start_time FROM time_slots WHERE id = $1`, [input.timeSlotId])).rows[0]
+      : null;
+    if (input.timeSlotId && !slot) throw new AppError('BAD_REQUEST', 'Invalid time slot', 400);
+    const tournament = input.tournamentId
+      ? (await this.pool.query(`SELECT current_round_number, phase FROM tournaments WHERE id = $1`, [input.tournamentId])).rows[0]
+      : null;
+    if (input.tournamentId && !tournament) throw new AppError('BAD_REQUEST', 'Invalid tournament', 400);
     const result = await this.pool.query(
       `INSERT INTO matches (tournament_id, player1_id, player2_id, venue_id, time_slot_id,
         status, scheduled_at, round_number, phase, bracket_slot)
@@ -124,12 +136,12 @@ export class AdminMatchesService {
         input.tournamentId ?? null,
         input.player1Id,
         input.player2Id,
-        input.venueId ?? null,
+        input.venueId ?? slot?.venue_id ?? null,
         input.timeSlotId ?? null,
         input.status ?? 'pending_confirmation',
-        input.scheduledAt ?? null,
-        input.roundNumber ?? null,
-        input.phase ?? null,
+        input.scheduledAt ?? slot?.start_time ?? null,
+        input.roundNumber ?? tournament?.current_round_number ?? null,
+        input.phase ?? (tournament ? (tournament.phase === 'knockout' ? 'knockout' : 'normal') : null),
         input.bracketSlot ?? null,
       ]
     );
@@ -145,6 +157,12 @@ export class AdminMatchesService {
 
   async update(actorId: string, id: string, input: AdminUpdateMatchInput) {
     const before = await this.getById(id);
+    if (
+      (input.player1Id || input.player2Id) &&
+      (input.player1Id ?? before.player1Id) === (input.player2Id ?? before.player2Id)
+    ) {
+      throw new AppError('BAD_REQUEST', 'A player cannot be matched against themselves', 400);
+    }
     const fields: string[] = [];
     const values: unknown[] = [];
     let idx = 1;
@@ -204,11 +222,15 @@ export class AdminMatchesService {
 
   async forceConfirm(actorId: string, id: string) {
     const match = await this.getById(id);
-    await this.redis.hset(matchConfirmKey(id), match.player1Id, '1', match.player2Id, '1');
-    await this.pool.query(
-      `UPDATE matches SET status = 'confirmed', updated_at = NOW() WHERE id = $1`,
+    const updated = await this.pool.query(
+      `UPDATE matches SET status = 'confirmed', updated_at = NOW()
+       WHERE id = $1 AND status = 'pending_confirmation' RETURNING id`,
       [id]
     );
+    if (!updated.rowCount) {
+      throw new AppError('CONFLICT', 'Only a match awaiting confirmation can be force-confirmed', 409);
+    }
+    await this.redis.hset(matchConfirmKey(id), match.player1Id, '1', match.player2Id, '1');
     await writeAudit(this.pool, {
       actorId,
       action: 'match.force_confirm',
@@ -220,14 +242,18 @@ export class AdminMatchesService {
 
   async forceExpire(actorId: string, id: string) {
     const match = await this.getById(id);
+    const updated = await this.pool.query(
+      `UPDATE matches SET status = 'expired', updated_at = NOW()
+       WHERE id = $1 AND status IN ('pending_confirmation', 'confirmed', 'in_progress') RETURNING id`,
+      [id]
+    );
+    if (!updated.rowCount) {
+      throw new AppError('CONFLICT', `Match is already ${match.status}`, 409);
+    }
     if (match.timeSlotId) {
       await releaseSlotLock(this.pool, this.redis, match.timeSlotId);
     }
     await this.redis.del(matchConfirmKey(id));
-    await this.pool.query(
-      `UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
-      [id]
-    );
     await writeAudit(this.pool, {
       actorId,
       action: 'match.force_expire',
@@ -241,6 +267,13 @@ export class AdminMatchesService {
     const row = await this.pool.query('SELECT * FROM matches WHERE id = $1', [id]);
     const match = row.rows[0];
     if (!match) throw new AppError('NOT_FOUND', 'Match not found', 404);
+    // Re-applying an outcome double-counts ratings, wins and advancement; there is no safe reversal.
+    if (match.status === 'completed') {
+      throw new AppError('CONFLICT', 'Match already has a result', 409);
+    }
+    if (!['pending_confirmation', 'confirmed', 'in_progress'].includes(match.status)) {
+      throw new AppError('CONFLICT', `Match is ${match.status} — a result can only be set on an open match`, 409);
+    }
 
     const existing = (match.result as MatchResultExtended) ?? {};
     const result: MatchResultExtended = {

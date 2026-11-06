@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 import { BULLMQ_NOTIFICATIONS_QUEUE } from '@vr-tournament/shared';
 import type { Env } from '../config/env.js';
+import { logRedisErrors } from './redis.js';
 
 let notificationQueue: Queue | null = null;
 
@@ -15,6 +16,7 @@ export function getNotificationQueue(env: Env): Queue {
         removeOnFail: 200,
       },
     });
+    logRedisErrors(notificationQueue, 'notificationQueue');
   }
   return notificationQueue;
 }

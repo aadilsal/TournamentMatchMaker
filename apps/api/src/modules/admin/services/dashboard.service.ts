@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import type { RedisClient } from '../../../lib/redis.js';
 import type { AdminDashboardStats } from '@vr-tournament/shared';
 import { QUEUE_MEMBER } from '@vr-tournament/shared';
+import { MATCH_VIEW_FILTERS } from './matches.service.js';
 
 export class AdminDashboardService {
   constructor(
@@ -9,47 +10,77 @@ export class AdminDashboardService {
     private redis: RedisClient
   ) {}
 
-  async getStats(): Promise<AdminDashboardStats> {
+  /** Counts limited to the caller's scope; `null` ids mean unrestricted (superadmin). */
+  async getStats(
+    scope: { venueIds: string[] | null; tournamentIds: string[] | null } = {
+      venueIds: null,
+      tournamentIds: null,
+    }
+  ): Promise<AdminDashboardStats> {
+    const all = scope.venueIds === null && scope.tournamentIds === null;
+    const v = scope.venueIds ?? [];
+    const t = scope.tournamentIds ?? [];
     const [counts, matchCounts, bookingCounts, buybackCounts, notifFailed, queueSize] =
       await Promise.all([
-        this.pool.query(`
-          SELECT
-            (SELECT COUNT(*)::int FROM users) AS users,
-            (SELECT COUNT(*)::int FROM users WHERE role = 'player') AS players,
-            (SELECT COUNT(*)::int FROM venues) AS venues,
-            (SELECT COUNT(*)::int FROM venues WHERE active = TRUE) AS active_venues
-        `),
-        this.pool.query(`
-          SELECT
-            COUNT(*) FILTER (WHERE status IN ('pending_confirmation', 'confirmed', 'in_progress'))::int AS ongoing,
-            COUNT(*) FILTER (WHERE status = 'confirmed' AND scheduled_at > NOW())::int AS upcoming,
-            COUNT(*) FILTER (WHERE status IN ('completed', 'cancelled', 'expired'))::int AS past,
+        this.pool.query(
+          `WITH scoped AS (
+             SELECT u.id, u.role FROM users u
+             WHERE u.is_bot = FALSE AND ($1 OR u.id IN (
+               SELECT b.user_id FROM bookings b
+               JOIN time_slots ts ON ts.id = b.time_slot_id WHERE ts.venue_id = ANY($2::uuid[])
+               UNION
+               SELECT tr.user_id FROM tournament_registrations tr WHERE tr.tournament_id = ANY($3::uuid[])
+             ))
+           )
+           SELECT
+             (SELECT COUNT(*)::int FROM scoped) AS users,
+             (SELECT COUNT(*)::int FROM scoped WHERE role = 'player') AS players,
+             (SELECT COUNT(*)::int FROM venues WHERE $1 OR id = ANY($2::uuid[])) AS venues,
+             (SELECT COUNT(*)::int FROM venues WHERE active = TRUE AND ($1 OR id = ANY($2::uuid[]))) AS active_venues`,
+          [all, v, t]
+        ),
+        // Same predicates and tournament-only scope as GET /admin/matches?view=…
+        this.pool.query(
+          `SELECT
+            COUNT(*) FILTER (WHERE ${MATCH_VIEW_FILTERS.ongoing})::int AS ongoing,
+            COUNT(*) FILTER (WHERE ${MATCH_VIEW_FILTERS.upcoming})::int AS upcoming,
+            COUNT(*) FILTER (WHERE ${MATCH_VIEW_FILTERS.past})::int AS past,
             COUNT(*)::int AS total
-          FROM matches
-        `),
-        this.pool.query(`
-          SELECT
-            COUNT(*) FILTER (WHERE status = 'confirmed')::int AS confirmed,
-            COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
-            COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled
-          FROM bookings
-        `),
-        this.pool.query(`
-          SELECT
+          FROM matches m
+          LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
+          WHERE $1 OR m.tournament_id = ANY($2::uuid[])`,
+          [all, t]
+        ),
+        this.pool.query(
+          `SELECT
+            COUNT(*) FILTER (WHERE b.status = 'confirmed')::int AS confirmed,
+            COUNT(*) FILTER (WHERE b.status = 'pending')::int AS pending,
+            COUNT(*) FILTER (WHERE b.status = 'cancelled')::int AS cancelled
+          FROM bookings b JOIN time_slots ts ON ts.id = b.time_slot_id
+          WHERE $1 OR ts.venue_id = ANY($2::uuid[])`,
+          [all, v]
+        ),
+        this.pool.query(
+          `SELECT
             COUNT(*) FILTER (WHERE status = 'completed')::int AS completed,
             COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
             COUNT(*) FILTER (WHERE status = 'failed')::int AS failed
           FROM buybacks
-        `),
-        this.pool.query(
-          `SELECT COUNT(*)::int AS c FROM notifications WHERE status = 'failed'`
+          WHERE $1 OR tournament_id = ANY($2::uuid[])`,
+          [all, t]
         ),
-        this.redis.scard(QUEUE_MEMBER),
+        // Notifications and the queue are superadmin-only sections.
+        all
+          ? this.pool.query(`SELECT COUNT(*)::int AS c FROM notifications WHERE status = 'failed'`)
+          : Promise.resolve({ rows: [{ c: 0 }] }),
+        all ? this.redis.scard(QUEUE_MEMBER) : Promise.resolve(0),
       ]);
 
-    const tournamentStatus = await this.pool.query(`
-      SELECT status, COUNT(*)::int AS c FROM tournaments GROUP BY status
-    `);
+    const tournamentStatus = await this.pool.query(
+      `SELECT status, COUNT(*)::int AS c FROM tournaments
+       WHERE $1 OR id = ANY($2::uuid[]) GROUP BY status`,
+      [all, t]
+    );
     const tournaments: AdminDashboardStats['tournaments'] = {
       draft: 0,
       open: 0,
