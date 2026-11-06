@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
-import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
+import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback } from '@vr-tournament/shared/email';
 import type { WorkerEnv } from '../config/env.js';
 import { emitToUser } from '../lib/socket-bridge.js';
 import { matchFoundEmailHtml } from '../templates/match-found.email.js';
@@ -43,36 +43,23 @@ async function upsertNotification(
   return result.rows[0];
 }
 
-async function sendEmail(env: WorkerEnv, to: string, subject: string, html: string) {
-  if (!env.NOTIFICATION_EMAIL_ENABLED) return true;
+/** error is null once a provider accepted the email; retryable when every configured provider failed. */
+async function sendEmail(
+  env: WorkerEnv,
+  to: string,
+  subject: string,
+  html: string
+): Promise<{ error: string | null; retryable: boolean }> {
+  if (!env.NOTIFICATION_EMAIL_ENABLED) return { error: 'email notifications are disabled', retryable: false };
 
-  const isSampleKey =
-    env.AWS_ACCESS_KEY_ID.startsWith('sample') || env.AWS_SECRET_ACCESS_KEY.startsWith('sample');
-
-  if (isSampleKey) {
+  const cfg = emailConfigFromEnv(env);
+  if (configuredEmailProviders(cfg).length === 0) {
     console.log(`[email:dev] To: ${to} | Subject: ${subject}\n${html}`);
-    return true;
+    return { error: 'no email provider is configured; email was only logged', retryable: false };
   }
-
-  const ses = new SESClient({
-    region: env.AWS_REGION,
-    credentials: {
-      accessKeyId: env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: env.AWS_SECRET_ACCESS_KEY,
-    },
-  });
-
-  await ses.send(
-    new SendEmailCommand({
-      Source: env.AWS_SES_FROM_EMAIL,
-      Destination: { ToAddresses: [to] },
-      Message: {
-        Subject: { Data: subject, Charset: 'UTF-8' },
-        Body: { Html: { Data: html, Charset: 'UTF-8' } },
-      },
-    })
-  );
-  return true;
+  const result = await sendEmailWithFallback(cfg, { to, subject, html });
+  if (result.failures.length) console.warn(`[email] fallbacks used for ${to}: ${result.failures.join(' | ')}`);
+  return { error: result.sent ? null : result.failures.join(' | '), retryable: !result.sent };
 }
 
 export async function processDispatchNotificationJob(
@@ -153,12 +140,25 @@ export async function processDispatchNotificationJob(
       html = `<p>Your match confirmation window expired. <a href="${env.APP_URL}/matchmaking">Rejoin queue</a></p>`;
     }
 
+    let retryError: Error | null = null;
     try {
-      await sendEmail(env, user.email, subject, html);
-      await upsertNotification(pool, userId, type, 'email', payload, `${idempotencyKey}:email`, 'sent');
+      const { error: notSent, retryable } = await sendEmail(env, user.email, subject, html);
+      // The status enum has no 'skipped'; an email that never left must not read as sent.
+      await upsertNotification(
+        pool,
+        userId,
+        type,
+        'email',
+        notSent ? { ...payload, deliveryError: notSent } : payload,
+        `${idempotencyKey}:email`,
+        notSent ? 'failed' : 'sent'
+      );
+      // Every provider failed: let BullMQ retry with backoff (a later success upserts 'sent').
+      if (notSent && retryable) retryError = new Error(`email not delivered: ${notSent}`);
     } catch (err) {
       await upsertNotification(pool, userId, type, 'email', payload, `${idempotencyKey}:email`, 'failed');
       throw err;
     }
+    if (retryError) throw retryError;
   }
 }

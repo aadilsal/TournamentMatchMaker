@@ -14,10 +14,12 @@ import {
   pickEarlierSlot,
   resolveChaseOnPair,
   initialScoresForChase,
+  ROUND_PLAY_STARTS_AT_SQL,
+  matchNotificationDetails,
 } from '@vr-tournament/shared';
 import type { WorkerEnv } from '../config/env.js';
 import { MATCHMAKING_PAIR_LOCK } from '../lib/queue-keys.js';
-import { acquireLock, releaseLock } from '../lib/redlock.js';
+import { acquireLock, lockPlayersForMatch, releaseLock } from '../lib/redlock.js';
 import { lockSlot, finalizeMatchSlotBookings, SLOT_LOCK_TTL_SEC } from '../lib/slot-lock.js';
 import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
 import { pairLeftoversWithBot } from '../lib/bot-opponent.js';
@@ -314,6 +316,7 @@ async function pairInQueue(
 
   try {
     await client.query('BEGIN');
+    await lockPlayersForMatch(client, [candidate.userId, partner.userId]);
 
     // The queue and the matches table are written in separate stores, so a
     // membership can outlive the match that should have removed it: a crash
@@ -366,8 +369,9 @@ async function pairInQueue(
       // findBestPair only pairs equal round numbers, so either side serves.
       const pairRoundNumber = candidate.roundNumber;
       const roundResult = await client.query(
-        `SELECT tr.starts_at, tr.ends_at
+        `SELECT ${ROUND_PLAY_STARTS_AT_SQL} AS starts_at, tr.ends_at
          FROM tournament_rounds tr
+         JOIN tournaments t ON t.id = tr.tournament_id
          WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
         [tournamentId, pairRoundNumber]
       );
@@ -590,7 +594,7 @@ async function pairInQueue(
     }
 
     if (slotId && autoConfirm && attendingPlayerIds.length > 0) {
-      await finalizeMatchSlotBookings(client, redis, slotId, attendingPlayerIds);
+      await finalizeMatchSlotBookings(client, redis, slotId, attendingPlayerIds, matchId);
     }
 
     if (tournamentId) {
@@ -680,7 +684,7 @@ async function pairInQueue(
           userId: playerId,
           type: 'match_found',
           channels: ['in_app', 'email'],
-          payload: eventPayload,
+          payload: { ...(await matchNotificationDetails(pool, 'match_found', matchId, playerId)), ...eventPayload },
           idempotencyKey: `match-found:${matchId}:${playerId}`,
         },
         { jobId: `match-found~${matchId}~${playerId}` }
@@ -820,6 +824,6 @@ export async function processPairPlayersJob(
       await drainQueue(pool, redis, queueTournamentKey(tournamentId), tournamentId, notificationQueue);
     }
   } finally {
-    await releaseLock(redis, MATCHMAKING_PAIR_LOCK);
+    await releaseLock(redis, MATCHMAKING_PAIR_LOCK, acquired);
   }
 }

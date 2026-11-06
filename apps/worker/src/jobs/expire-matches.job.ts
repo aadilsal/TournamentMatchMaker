@@ -4,6 +4,7 @@ import type { Redis } from 'ioredis';
 import { matchConfirmKey } from '../lib/queue-keys.js';
 import { releaseSlotLock } from '../lib/slot-lock.js';
 import { emitToUser, emitBroadcast } from '../lib/socket-bridge.js';
+import { matchNotificationDetails } from '@vr-tournament/shared';
 
 export async function processExpireMatchesJob(
   _job: Job,
@@ -26,22 +27,29 @@ export async function processExpireMatchesJob(
       `SELECT m.*
        FROM matches m
        WHERE m.status = 'pending_confirmation'
-         AND m.phase <> 'knockout'
+         AND m.phase IS DISTINCT FROM 'knockout'
          AND m.created_at < NOW() - INTERVAL '5 minutes'`
     );
 
     for (const match of expired.rows) {
       await client.query('BEGIN');
       try {
-        await client.query(
-          `UPDATE matches SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        // Re-checked at write time: the match may have been confirmed since the scan.
+        const updated = await client.query(
+          `UPDATE matches SET status = 'expired', updated_at = NOW()
+           WHERE id = $1 AND status = 'pending_confirmation' RETURNING id`,
           [match.id]
         );
+        if (!updated.rowCount) {
+          await client.query('ROLLBACK');
+          continue;
+        }
         await releaseSlotLock(client, redis, match.time_slot_id);
         await redis.del(matchConfirmKey(match.id));
         await client.query('COMMIT');
 
         for (const userId of [match.player1_id, match.player2_id]) {
+          const payload = { matchId: match.id, ...(await matchNotificationDetails(pool, 'match_expired', match.id, userId)) };
           await emitToUser(redis, userId, 'match:updated', {
             matchId: match.id,
             status: 'expired',
@@ -49,7 +57,7 @@ export async function processExpireMatchesJob(
           await emitToUser(redis, userId, 'notification:new', {
             notification: {
               type: 'match_expired',
-              payload: { matchId: match.id },
+              payload,
             },
           });
           await notificationQueue.add(
@@ -58,7 +66,7 @@ export async function processExpireMatchesJob(
               userId,
               type: 'match_expired',
               channels: ['in_app', 'email'],
-              payload: { matchId: match.id },
+              payload,
               idempotencyKey: `match-expired:${match.id}:${userId}`,
             },
             { jobId: `match-expired~${match.id}~${userId}` }

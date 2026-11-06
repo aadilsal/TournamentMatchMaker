@@ -12,6 +12,7 @@ import {
   winnerIdFromOutcome,
   resolveFieldSize,
   shouldStartKnockout,
+  matchNotificationDetails,
 } from '@vr-tournament/shared';
 
 /**
@@ -99,7 +100,7 @@ async function announceBracketMatches(
           userId: playerId,
           type: 'match_found',
           channels: ['in_app', 'email'],
-          payload,
+          payload: { ...(await matchNotificationDetails(pool, 'match_found', match.matchId, playerId)), ...payload },
           idempotencyKey: `match-found:${match.matchId}:${playerId}`,
         },
         { jobId: `match-found~${match.matchId}~${playerId}` }
@@ -545,6 +546,14 @@ async function closeRound(
     // be finished once the round shuts, and leaving it open locks both players
     // out of the next one.
     await settleOpenMatches(client, tournamentId, roundNumber);
+
+    // Bots stand in for one match; they never count toward the cut or the bracket.
+    await client.query(
+      `UPDATE tournament_participants tp SET status = 'out', updated_at = NOW()
+       FROM users u
+       WHERE u.id = tp.user_id AND u.is_bot = TRUE AND tp.tournament_id = $1 AND tp.status <> 'out'`,
+      [tournamentId]
+    );
 
     // A solo innings belongs to the round it was played in. Carrying it across
     // the boundary is what made the next round unplayable: the target is what

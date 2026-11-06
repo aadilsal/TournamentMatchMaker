@@ -45,7 +45,8 @@ export async function finalizeMatchSlotBookings(
   client: PoolClient,
   redis: Redis,
   slotId: string,
-  playerIds: string[]
+  playerIds: string[],
+  matchId: string
 ): Promise<void> {
   const uniquePlayers = [...new Set(playerIds.filter(Boolean))];
 
@@ -56,23 +57,23 @@ export async function finalizeMatchSlotBookings(
   const slot = slotResult.rows[0];
   if (!slot) throw new Error('Slot not found');
 
-  let bookedCount = slot.booked_count;
-
   for (const userId of uniquePlayers) {
-    const existing = await client.query(
-      `SELECT id FROM bookings
-       WHERE user_id = $1 AND time_slot_id = $2 AND status != 'cancelled'`,
-      [userId, slotId]
+    await client.query(
+      `INSERT INTO bookings (user_id, time_slot_id, status, match_id)
+       VALUES ($1, $2, 'confirmed', $3)
+       ON CONFLICT (user_id, time_slot_id) WHERE status <> 'cancelled'
+       DO UPDATE SET status = 'confirmed'`,
+      [userId, slotId, matchId]
     );
-    if (!existing.rows[0]) {
-      await client.query(
-        `INSERT INTO bookings (user_id, time_slot_id, status)
-         VALUES ($1, $2, 'confirmed')`,
-        [userId, slotId]
-      );
-      bookedCount += 1;
-    }
   }
+
+  // Derived from the bookings, never incremented, so the seat count cannot drift or overbook.
+  const counted = await client.query(
+    `SELECT COUNT(*)::int AS n FROM bookings WHERE time_slot_id = $1 AND status = 'confirmed'`,
+    [slotId]
+  );
+  const bookedCount: number = counted.rows[0].n;
+  if (bookedCount > slot.max_capacity) throw new Error(`Slot ${slotId} has no room for this match`);
 
   const newStatus = bookedCount >= slot.max_capacity ? 'full' : 'available';
   await client.query(

@@ -11,8 +11,11 @@ import {
   pickBotUsername,
   queuePlayerKey,
   queueTournamentKey,
+  ROUND_PLAY_STARTS_AT_SQL,
+  matchNotificationDetails,
 } from '@vr-tournament/shared';
 import { emitToUser } from './socket-bridge.js';
+import { lockPlayersForMatch } from './redlock.js';
 
 type NotificationQueue = {
   add: (name: string, data: unknown, opts?: { jobId?: string }) => Promise<unknown>;
@@ -128,12 +131,16 @@ export async function pairLeftoversWithBot(
       await client.query('BEGIN');
 
       const roundResult = await client.query(
-        `SELECT starts_at, ends_at FROM tournament_rounds
-         WHERE tournament_id = $1 AND round_number = $2 AND status = 'active'`,
+        `SELECT ${ROUND_PLAY_STARTS_AT_SQL} AS starts_at, tr.ends_at
+         FROM tournament_rounds tr
+         JOIN tournaments t ON t.id = tr.tournament_id
+         WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active'`,
         [tournamentId, roundNumber]
       );
       const round = roundResult.rows[0];
-      if (!round) {
+      // No bot match for a slot that opens before the round's play window.
+      const slotStartAt = meta.slotStartAt ? parseInt(meta.slotStartAt, 10) : null;
+      if (!round || (slotStartAt !== null && slotStartAt < new Date(round.starts_at).getTime())) {
         await client.query('ROLLBACK');
         continue;
       }
@@ -149,6 +156,8 @@ export async function pairLeftoversWithBot(
         await client.query('ROLLBACK');
         continue;
       }
+
+      await lockPlayersForMatch(client, [userId]);
 
       // The same guard ordinary pairing keeps: the queue and the matches table
       // are separate stores, and a membership can outlive the match that should
@@ -273,7 +282,7 @@ export async function pairLeftoversWithBot(
           userId,
           type: 'match_found',
           channels: ['in_app', 'email'],
-          payload,
+          payload: { ...(await matchNotificationDetails(pool, 'match_found', matchId, userId)), ...payload },
           idempotencyKey: `match-found:${matchId}:${userId}`,
         },
         { jobId: `match-found~${matchId}~${userId}` }

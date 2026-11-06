@@ -27,6 +27,8 @@ import { processDispatchNotificationJob } from './jobs/dispatch-notification.job
 const env = loadEnv();
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
 const redis = new Redis(env.REDIS_URL);
+// An unhandled 'error' event would crash the worker on a Redis blip; ioredis reconnects by itself.
+redis.on('error', (err) => console.error('Redis error:', err.message));
 const connection = { url: env.REDIS_URL };
 
 const notificationQueue = new Queue(BULLMQ_NOTIFICATIONS_QUEUE, {
@@ -123,6 +125,12 @@ const notificationWorker = new Worker(
   },
   { connection, concurrency: 5 }
 );
+
+const logError = (name: string) => (err: Error) => console.error(`Redis error (${name}):`, err.message);
+notificationQueue.on('error', logError('notification queue'));
+matchmakingQueue.on('error', logError('matchmaking queue'));
+matchmakingWorker.on('error', logError('matchmaking worker'));
+notificationWorker.on('error', logError('notification worker'));
 
 matchmakingWorker.on('failed', (job, err) => {
   console.error(`Matchmaking job ${job?.id} failed:`, err.message);

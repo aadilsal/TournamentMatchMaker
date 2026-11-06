@@ -98,7 +98,8 @@ const TRANSITIONS: Transition[] = [
   {
     from: 'closed',
     to: 'in_progress',
-    due: `start_date <= NOW()`,
+    // An empty field stays closed for an admin to decide, as the admin Start action refuses it too.
+    due: `start_date <= NOW() AND EXISTS (SELECT 1 FROM tournament_registrations r WHERE r.tournament_id = tournaments.id)`,
     reason: 'status_changed',
     apply: async (client, tournamentId) => {
       // Fix the field size the knockout threshold is measured against, exactly

@@ -7,6 +7,8 @@ import {
   QUEUE_TOURNAMENT_INDEX,
   queuePlayerKey,
   queueTournamentKey,
+  knockoutRoundLabel,
+  tournamentLink,
 } from '@vr-tournament/shared';
 import { acquireLock, releaseLock } from '../lib/redlock.js';
 import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
@@ -257,6 +259,8 @@ async function enrollTournament(
           roundNumber: player.round_number,
           roundEndsAt: round.endsAt.toISOString(),
           needsSlot: !window,
+          message: `${round.tournamentName} has started — ${knockoutRoundLabel(player.round_number)} is open.${window ? '' : ' Pick your play slot.'}`,
+          link: window ? tournamentLink(round.tournamentId) : `/play?tournament=${round.tournamentId}`,
         },
         idempotencyKey: `tournament-live:${round.tournamentId}:${player.round_number}:${player.user_id}`,
       },
@@ -321,6 +325,6 @@ export async function processEnrollParticipantsJob(
       }
     }
   } finally {
-    await releaseLock(redis, ENROLL_LOCK);
+    await releaseLock(redis, ENROLL_LOCK, acquired);
   }
 }
