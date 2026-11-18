@@ -69,8 +69,11 @@ Run `pnpm seed` to print a full feature checklist and tournament IDs.
 
 | Doc | Audience |
 |---|---|
-| [User Guide](docs/USER_GUIDE.md) | First-time players — site navigation and full tournament flow |
-| [Meta Integration API](docs/META_INTEGRATION_API.md) | Meta Quest app developers |
+| [Documentation index](docs/README.md) | Everything below, plus QA reports and audits |
+| [Player Guide](docs/guides/player-guide.md) | First-time players — site navigation and full tournament flow |
+| [Operations Manual](docs/guides/operations-manual.md) | Organisers, venue partners and support staff |
+| [Deployment](docs/operations/deployment.md) | Engineers deploying to production |
+| [Meta Integration API](docs/integrations/meta/integration-api.md) | Meta Quest app developers |
 | [apps/api/README.md](apps/api/README.md) | API server |
 | [apps/web/README.md](apps/web/README.md) | React SPA |
 | [apps/worker/README.md](apps/worker/README.md) | Background jobs |
@@ -89,7 +92,7 @@ Run `pnpm seed` to print a full feature checklist and tournament IDs.
 6. **Play in VR** — scores are submitted from the Meta Quest app (not the website).
 7. **Advance or buy back** — winners move up; eliminated players can buy a life back (Stripe) during normal rounds before knockout.
 
-See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for the complete walkthrough.
+See [docs/guides/player-guide.md](docs/guides/player-guide.md) for the complete walkthrough.
 
 ## Web Routes
 
@@ -168,8 +171,13 @@ packages/
   db/       SQL migrations & dev seed
   shared/   Zod schemas, types, domain logic (pairing, ratings, rounds)
 docs/
-  USER_GUIDE.md
-  META_INTEGRATION_API.md
+  guides/        player guide, operations manual
+  flows/         flow diagrams
+  integrations/  Meta Quest API and client notes
+  operations/    deployment
+  plans/         design and implementation plans
+  qa/            dated QA reports
+  audits/        UX and readiness audits
 ```
 
 ## Scripts

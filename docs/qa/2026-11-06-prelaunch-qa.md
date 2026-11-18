@@ -16,7 +16,7 @@
 |---|---|
 | Verified | C1, C2, C3, C4, C5, H1, H2, H8, H12, M1, M2, M3, M4, M5, M16, M19, M20, M21 |
 | Fixed | C6, H3, H4, H5, H6, H10, H11, H13, H14, M6–M15, M17, M18 |
-| Prod step | H7 (rotate the Meta key — it is in git history since `6518ac0`; prod `.env` must not hold dev/sample JWT or Meta secrets or the API now refuses to start), H9 (apply the nginx header block now in `docs/DEPLOYMENT.md`) |
+| Prod step | H7 (rotate the Meta key — it is in git history since `6518ac0`; prod `.env` must not hold dev/sample JWT or Meta secrets or the API now refuses to start), H9 (apply the nginx header block now in `docs/operations/deployment.md`) |
 | Open | M22 (lint is still a no-op — needs an ESLint setup) |
 
 **Re-test highlights:** set-result twice → 409, rating unchanged · scoped admins see 0 out-of-scope rows (was 41/42 bookings with 22 emails) · completed tournament can't be reopened (409) · book → cancel → rebook works, seat counter stays exact under a 15-way race · slot garbage and >200-slot requests rejected · weak passwords rejected · password reset works once, kills old sessions, no timing leak · no bearer tokens in logs · tap targets <32 px: 425 → 81 (remaining are inline text links) · 404 page, zero overflow, zero console errors on all 108 page loads · public tournament list 170 → 435 req/s.
@@ -29,20 +29,20 @@
 - **Tournament admins got a 403 adding players** — new `GET /admin/users/lookup` (any admin, public fields only, LIKE-escaped).
 - **Play flow dead end** — a closed or knockout tournament let a non-registered player pick venue + slot before failing; now refused up front. Players saw "Round 101" / "Normal Round 1"; now "Quarter-finals" / "Round 1".
 - **Market copy** — "Canada's first…" in 6 places while all venues are in Pakistan; made market-neutral.
-- **VR Tournament button** — new `GET /api/v1/integrations/meta/tournaments/live` (Meta API key) returns `hasLiveTournament` for open or in-progress tournaments; documented in `docs/META_INTEGRATION_API.md` §5.5. Verified both states.
+- **VR Tournament button** — new `GET /api/v1/integrations/meta/tournaments/live` (Meta API key) returns `hasLiveTournament` for open or in-progress tournaments; documented in `docs/integrations/meta/integration-api.md` §5.5. Verified both states.
 
 **Third pass — real-browser click-through (14 flows × phone 390 px + desktop 1366 px):**
 - Round 1 found 5 failing flows: admin "Generate slots" silently did nothing (critical — a form schema demanded fields the page never sends); a completed tournament still offered "Pick slot"/"Withdraw"; players could enter and be paired *before* a tournament started (and an admin could start one with 0 players, as could the auto-start job); a match card showed two different times; register hid "Passwords do not match"; dashboard counts didn't match their lists; notifications were vague and went nowhere; no "You're in" confirmation. All fixed.
 - Round 2 (rebuilt, clean reseed): **all 14 flows PASS at both widths, no regressions.** Three new lows (scoped-admin copy, a contradictory bookings footer, clipped usernames on phones) were fixed the same day.
 - Gates after all fixes: typecheck clean (5 packages); tests api 78/78, worker 60/61 (1 pre-existing skip), web 13/13.
 
-**Email:** sending now goes Resend → SMTP (nodemailer 7.x) → SES — first configured provider that accepts wins; all-failed sends retry 3× with backoff and are recorded `failed`, never `sent`. Admin → Integrations shows the real send order (red warning when none) and "Send test to me" reports which provider delivered or each error. Production no longer logs reset links. **Not yet sending:** the Resend account has zero verified domains — verify `pixelpaddle.com` in Resend or set `SMTP_*` (steps in `docs/DEPLOYMENT.md`).
+**Email:** sending now goes Resend → SMTP (nodemailer 7.x) → SES — first configured provider that accepts wins; all-failed sends retry 3× with backoff and are recorded `failed`, never `sent`. Admin → Integrations shows the real send order (red warning when none) and "Send test to me" reports which provider delivered or each error. Production no longer logs reset links. **Not yet sending:** the Resend account has zero verified domains — verify `pixelpaddle.com` in Resend or set `SMTP_*` (steps in `docs/operations/deployment.md`).
 
 **Meta API key:** removed from tracked files; it lives only in the gitignored `.env`, which `docker-compose.yml` now reads. It remains in public git history (`6518ac0`, `origin/main` + `upstream/main`). Decision (2026-11-06): leave history and **do not rotate** for now — accepted risk: anyone can read the key and call the Meta endpoints (submit scores, read a player's current match). A full-history scan found no other real secrets.
 
 **Before launch (owner: you / ops):**
 1. Confirm prod JWT secrets and `META_API_KEY` are not dev/sample values (the API now refuses to start with them). Key rotation deferred by decision — see above.
-2. Apply the nginx security headers (`docs/DEPLOYMENT.md`) and check the console for CSP violations on the payment form.
+2. Apply the nginx security headers (`docs/operations/deployment.md`) and check the console for CSP violations on the payment form.
 3. Deploy migrations 017–018 (back up the DB first, per the runbook); `pnpm install` is needed for `bcrypt` and `nodemailer`, and `packages/shared` must be built before api/worker/web.
 4. Email: verify `pixelpaddle.com` in Resend (or set `SMTP_*`), restart api + worker, then admin → Integrations → "Send test to me". Until then no email is sent (recorded as `failed`).
 5. Legal review of `apps/web/src/content/legal.ts`; replace the placeholder `support@pixelpaddle.com`.

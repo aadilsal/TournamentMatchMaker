@@ -23,6 +23,7 @@ import { processReconcileQueueJob } from './jobs/reconcile-queue.job.js';
 import { processEnrollParticipantsJob } from './jobs/enroll-participants.job.js';
 import { processTournamentLifecycleJob } from './jobs/tournament-lifecycle.job.js';
 import { processDispatchNotificationJob } from './jobs/dispatch-notification.job.js';
+import { processDrawRoundsJob } from './jobs/draw-rounds.job.js';
 
 const env = loadEnv();
 const pool = new pg.Pool({ connectionString: env.DATABASE_URL });
@@ -72,6 +73,8 @@ const REPEAT_JOBS = [
   // step that joins the two, and it repeats so a queue lost to a Redis restart
   // or a worker outage refills itself.
   { name: 'enroll-participants-repeat', every: 10000, jobId: 'matchmaking-enroll-participants-repeat' },
+  // Draw-format tournaments: start at start time, close rounds at their deadline, draw the next.
+  { name: 'draw-rounds-repeat', every: 15000, jobId: 'matchmaking-draw-rounds-repeat' },
 ] as const;
 
 // A repeat interval is part of the schedule's identity in Redis, not a property
@@ -102,6 +105,9 @@ const matchmakingWorker = new Worker(
       await processExpireUnplayedSlotsJob(job, pool, redis);
     } else if (job.name === 'close-round-repeat' || job.name === MATCHMAKING_JOB_CLOSE_ROUND_NOW) {
       await processCloseRoundJob(job, pool, redis, notificationQueue);
+      if (job.name === MATCHMAKING_JOB_CLOSE_ROUND_NOW) await processDrawRoundsJob(job, pool, redis, notificationQueue);
+    } else if (job.name === 'draw-rounds-repeat') {
+      await processDrawRoundsJob(job, pool, redis, notificationQueue);
     } else if (job.name === 'reconcile-queue-repeat') {
       await processReconcileQueueJob(job, pool, redis);
     } else if (job.name === 'tournament-lifecycle-repeat') {

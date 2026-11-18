@@ -276,6 +276,18 @@ export interface MetaCurrentMatchResponse {
    * being played. Additive — a client that ignores it behaves exactly as before.
    */
   lastResult: MetaMatchDecision | null;
+  /** Every open match the player has, soonest deadline first; `match` is the first. Additive. */
+  matches?: MetaOpenMatchSummary[];
+}
+
+/** One open match in `MetaCurrentMatchResponse.matches`. */
+export interface MetaOpenMatchSummary {
+  id: string;
+  tournamentId: string | null;
+  tournamentName: string | null;
+  opponent: string;
+  /** ISO time the match must be played by; null outside a tournament round. */
+  deadline: string | null;
 }
 
 /**

@@ -86,4 +86,4 @@ All routes under `/admin/*`, guarded by `AdminGuard`:
 
 ## User Documentation
 
-First-time player guide: [docs/USER_GUIDE.md](../../docs/USER_GUIDE.md)
+First-time player guide: [docs/guides/player-guide.md](../../docs/guides/player-guide.md)

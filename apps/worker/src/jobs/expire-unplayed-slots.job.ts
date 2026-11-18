@@ -30,6 +30,8 @@ export async function processExpireUnplayedSlotsJob(
        FROM matches m
        LEFT JOIN time_slots ts ON ts.id = m.time_slot_id
        WHERE m.status IN ('confirmed', 'in_progress')
+         -- Draw matches run to their round's deadline; draw-rounds settles them.
+         AND m.phase IS DISTINCT FROM 'draw'
          AND (
            (ts.id IS NOT NULL AND ts.end_time < NOW())
            OR (m.time_slot_id IS NULL AND m.created_at < NOW() - INTERVAL '2 hours')

@@ -97,7 +97,7 @@ POST   /api/v1/integrations/meta/matches/:id/scores
 POST   /api/v1/integrations/meta/solo-target
 ```
 
-Auth: `x-meta-api-key` header. See [docs/META_INTEGRATION_API.md](../../docs/META_INTEGRATION_API.md).
+Auth: `x-meta-api-key` header. See [docs/integrations/meta/integration-api.md](../../docs/integrations/meta/integration-api.md).
 
 ## Socket.IO
 

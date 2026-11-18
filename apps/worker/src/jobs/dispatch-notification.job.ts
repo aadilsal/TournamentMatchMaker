@@ -70,6 +70,11 @@ export async function processDispatchNotificationJob(
 ) {
   const { userId, type, channels, payload, idempotencyKey } = job.data;
 
+  const userResult = await pool.query(`SELECT email, username, is_bot FROM users WHERE id = $1`, [userId]);
+  const user = userResult.rows[0];
+  // Bots have no inbox: skip every channel.
+  if (!user || user.is_bot) return;
+
   if (channels.includes('in_app')) {
     const row = await upsertNotification(
       pool,
@@ -96,10 +101,6 @@ export async function processDispatchNotificationJob(
   }
 
   if (channels.includes('email')) {
-    const userResult = await pool.query(`SELECT email, username FROM users WHERE id = $1`, [userId]);
-    const user = userResult.rows[0];
-    if (!user) return;
-
     let subject = 'VR Tournament Notification';
     let html = `<p>You have a new notification: ${type}</p>`;
 

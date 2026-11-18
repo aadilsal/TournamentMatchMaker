@@ -1,7 +1,7 @@
 # Meta Quest client — what changed, August 2026
 
 **Audience:** Meta Quest / VR game integration team
-**Companion doc:** `META_INTEGRATION_API.md` (v2.3) — updated alongside this, and
+**Companion doc:** `integration-api.md` (v2.3) — updated alongside this, and
 authoritative for the full contract.
 
 Five server-side changes went in. **One is breaking for the headset**, one needs

@@ -4,7 +4,7 @@
 
 No engineering knowledge is assumed. Where something is worth knowing but technical, it sits in a *"Behind the scenes"* note you can skip.
 
-> There is also `docs/USER_GUIDE.md`, written for **players**. This document is the operator's view and supersedes it wherever the two disagree — the platform changed after that guide was written (see [What changed recently](#what-changed-recently)).
+> There is also `docs/guides/player-guide.md`, written for **players**. This document is the operator's view and supersedes it wherever the two disagree — the platform changed after that guide was written (see [What changed recently](#what-changed-recently)).
 
 ---
 
@@ -450,7 +450,7 @@ The Quest app talks to the platform over a small dedicated API.
 - Submit a match score
 - Submit a solo-innings target while waiting
 
-The Quest app authenticates with a shared API key. Full technical detail is in `docs/META_INTEGRATION_API.md`.
+The Quest app authenticates with a shared API key. Full technical detail is in `docs/integrations/meta/integration-api.md`.
 
 ---
 
@@ -485,7 +485,7 @@ The Quest app authenticates with a shared API key. Full technical detail is in `
 
 ## What changed recently
 
-If you read `docs/USER_GUIDE.md`, these behaviours have changed since it was written:
+If you read `docs/guides/player-guide.md`, these behaviours have changed since it was written:
 
 1. **The lifecycle is now automatic.** Registration closing, the tournament starting, and the tournament completing all happen on schedule. Previously every step needed an admin.
 2. **Tournaments have a registration window** (opens / closes) — the buffer before play begins. Previously registration simply ran until an admin closed it.
@@ -500,7 +500,7 @@ If you read `docs/USER_GUIDE.md`, these behaviours have changed since it was wri
 
 ## 16. Known limitations & open items
 
-Carried over from the QA reports (`QA_RUN_2026-08-04.md`, `QA_RUN_2026-08-04b.md`) — worth knowing before launch.
+Carried over from the QA reports (`docs/qa/2026-08-04-qa-run.md`, `docs/qa/2026-08-04-qa-full-pass.md`) — worth knowing before launch.
 
 | Item | Impact | Action |
 |---|---|---|
@@ -517,4 +517,4 @@ The following were tested hard and hold up, including under real concurrency: ma
 
 ---
 
-**Questions on anything here?** The two QA reports in the repository root record exactly what was tested and how. `docs/META_INTEGRATION_API.md` covers the headset API, and `docs/USER_GUIDE.md` is the player-facing walkthrough.
+**Questions on anything here?** The two QA reports in the repository root record exactly what was tested and how. `docs/integrations/meta/integration-api.md` covers the headset API, and `docs/guides/player-guide.md` is the player-facing walkthrough.

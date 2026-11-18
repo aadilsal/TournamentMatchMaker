@@ -59,8 +59,8 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     validate(metaCurrentMatchQuerySchema, 'query'),
     async (req, res, next) => {
       try {
-        const { userId } = req.query as { userId: string };
-        const data = await service.getCurrentMatch(userId);
+        const { userId, tournamentId } = req.query as { userId: string; tournamentId?: string };
+        const data = await service.getCurrentMatch(userId, tournamentId ?? null);
         sendSuccess(res, data);
       } catch (err) {
         next(err);

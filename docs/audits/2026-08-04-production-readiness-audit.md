@@ -56,7 +56,7 @@ Eligibility (round still open, knockout not yet started) is checked only when ch
 
 **1.8 — Score submission is a lost-update race, contradicting the documented idempotency guarantee**
 `apps/api/src/modules/integrations/meta.service.ts:127-195`; independently confirmed as a matchmaking-integrity issue too (double rating/win-loss updates via `apps/api/src/lib/match-outcome.ts`)
-Read-check-write on `matches.result` with no transaction, no row lock, no compare-and-swap. Two concurrent/retried score submissions (real scenario on flaky venue Wi-Fi, which headsets will retry on timeout) can both read "not yet submitted," both proceed, and both trigger rating/win-loss updates — double-counted, and can stomp one player's score with the other's stale read. This directly contradicts the documented behavior in `docs/META_INTEGRATION_API.md` that a duplicate submission returns 409 rather than double-processing.
+Read-check-write on `matches.result` with no transaction, no row lock, no compare-and-swap. Two concurrent/retried score submissions (real scenario on flaky venue Wi-Fi, which headsets will retry on timeout) can both read "not yet submitted," both proceed, and both trigger rating/win-loss updates — double-counted, and can stomp one player's score with the other's stale read. This directly contradicts the documented behavior in `docs/integrations/meta/integration-api.md` that a duplicate submission returns 409 rather than double-processing.
 **Fix:** `SELECT ... FOR UPDATE` in a transaction, or an atomic conditional `UPDATE ... WHERE result->>'playerXScore' IS NULL`.
 
 ### Matchmaking / tournament integrity

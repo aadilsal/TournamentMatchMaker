@@ -13,6 +13,8 @@ export const metaSoloTargetSchema = z.object({
 
 export const metaCurrentMatchQuerySchema = z.object({
   userId: z.string().uuid(),
+  /** Optional: only this tournament's match, for a player in several. */
+  tournamentId: z.string().uuid().optional(),
 });
 
 /**

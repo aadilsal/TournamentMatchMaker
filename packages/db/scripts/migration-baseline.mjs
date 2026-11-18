@@ -48,6 +48,9 @@ const MIGRATION_MARKERS = {
   '1738000000018_booking-rebook-and-buyback-guards': {
     column: { table: 'buybacks', name: 'refunded_at' },
   },
+  '1738000000019_draw-format-and-play-location': {
+    column: { table: 'tournaments', name: 'play_format' },
+  },
 };
 
 async function tableExists(client, table) {

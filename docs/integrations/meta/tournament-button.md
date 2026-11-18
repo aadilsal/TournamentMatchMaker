@@ -184,7 +184,7 @@ public class TournamentButtonPoller : MonoBehaviour
 
 ## Reference
 
-Full Meta integration guide: `docs/META_INTEGRATION_API.md`, section 5.5 (this endpoint) —
+Full Meta integration guide: `docs/integrations/meta/integration-api.md`, section 5.5 (this endpoint) —
 including authentication (section 3), the response envelope (section 4) and the other
 endpoints (current match, score submission, solo target, headset link code).
 

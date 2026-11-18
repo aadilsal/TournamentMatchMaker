@@ -1,7 +1,7 @@
 /**
  * End-to-end VR walkthrough against the seeded dev data, in the exact order the
  * Quest app performs it. Prints the real request/response for every step so the
- * output can be handed to the VR team alongside docs/META_INTEGRATION_API.md.
+ * output can be handed to the VR team alongside docs/integrations/meta/integration-api.md.
  *
  *   node packages/db/scripts/qa-vr-walkthrough.mjs
  */

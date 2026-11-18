@@ -43,7 +43,7 @@ Also: API unit tests 25/25, worker 12/12, typecheck clean across 5 packages, `pn
 ### [Medium] A venue admin could read every player's notifications through the API
 
 **Where:** `apps/api/src/modules/admin/admin.routes.ts` — the `/notifications`, `/matches` and `/buybacks` **list** endpoints
-**Found:** while fact-checking the permissions table for `HANDOVER.md` — the admin sidebar hides these sections from a `venue_admin`, so it was worth confirming the server agreed.
+**Found:** while fact-checking the permissions table for `docs/guides/operations-manual.md` — the admin sidebar hides these sections from a `venue_admin`, so it was worth confirming the server agreed.
 **Steps to reproduce:** as a `venue_admin`, `GET /api/v1/admin/notifications`.
 **Expected:** 403 — the section is not part of that role.
 **Actual:** **200 with 100 rows** (page limit) out of 168 in the system, including other players' personal notification payloads. `/matches` returned all 48; `/buybacks` was likewise open.

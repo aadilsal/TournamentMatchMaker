@@ -308,4 +308,4 @@ Contact an administrator — self-service password reset is not yet available.
 - Review your bookings at `/bookings`
 - Update your profile at `/profile`
 
-For technical integration (Meta Quest app), see [META_INTEGRATION_API.md](META_INTEGRATION_API.md).
+For technical integration (Meta Quest app), see [Meta integration API](../integrations/meta/integration-api.md).

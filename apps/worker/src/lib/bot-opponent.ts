@@ -31,7 +31,7 @@ type NotificationQueue = {
  * bracket slot with it. A bot advances or is eliminated on exactly the same
  * terms as a human, so it has to be described the same way.
  */
-async function ensureTournamentBot(
+export async function ensureTournamentBot(
   client: PoolClient,
   tournamentId: string,
   roundNumber: number

@@ -46,7 +46,7 @@ You'll also want at least one **scoped** admin account (`venue_admin`/`tournamen
 - **Use the real UI, not just the API**, for anything the audits flagged as UI-layer (confirm dialogs, toasts, loading states, error messages). API-only testing will miss whether a fix that's "done" on paper actually shows up on screen.
 - **Try real concurrency, not sequential requests that look concurrent.** `Promise.all([...])` firing N genuinely simultaneous requests, or two actual browser tabs racing each other, not a for-loop with awaits in between.
 - **Try to break state machines, not just individual endpoints.** The tournament lifecycle (draft → open → in_progress → round loop → knockout → completed) and the buyback flow are where the interesting bugs live — test transitions, not just states.
-- **Note what you can't test** (e.g., Meta Quest score submission requires the real S2S flow — simulate it via `curl`/API calls with the documented headers per `docs/META_INTEGRATION_API.md` rather than skipping it).
+- **Note what you can't test** (e.g., Meta Quest score submission requires the real S2S flow — simulate it via `curl`/API calls with the documented headers per `docs/integrations/meta/integration-api.md` rather than skipping it).
 - When something breaks, **capture enough to reproduce it**: exact steps, exact input, account used, timestamp, and (for API-level bugs) the raw request/response.
 
 ---
@@ -107,9 +107,9 @@ For each flow: test the happy path once to confirm it works, then spend most of 
 
 ## Part 2 — Admin panel: re-verify fixes, then hammer role boundaries
 
-`ADMIN_UX_FIXES.md` in this repo claims every item on the original admin UX punch list is now implemented and verified (confirm dialogs, toast feedback, route-level role gating, deduplicated components, etc.). **Don't take that at face value — verify it live, in the browser, as each role.** Specifically:
+`docs/audits/2026-08-04-admin-ux-fixes.md` in this repo claims every item on the original admin UX punch list is now implemented and verified (confirm dialogs, toast feedback, route-level role gating, deduplicated components, etc.). **Don't take that at face value — verify it live, in the browser, as each role.** Specifically:
 
-- For every action listed in `ADMIN_UX_FIXES.md` section 2 (tournament lifecycle actions, match force-confirm/expire/apply-result, buyback refund, user role change, suspend, booking cancel, broadcast, expire-stale-matches, generate slots): **click it and confirm a real confirmation dialog appears**, that cancelling it does nothing, and that confirming it actually performs the action and shows a success/failure toast.
+- For every action listed in `docs/audits/2026-08-04-admin-ux-fixes.md` section 2 (tournament lifecycle actions, match force-confirm/expire/apply-result, buyback refund, user role change, suspend, booking cancel, broadcast, expire-stale-matches, generate slots): **click it and confirm a real confirmation dialog appears**, that cancelling it does nothing, and that confirming it actually performs the action and shows a success/failure toast.
 - For every mutation in section 3: trigger a failure condition (e.g., attempt an action you don't have permission for, or submit invalid data) and confirm an error toast/message actually appears — not just that the button re-enables silently.
 - Log in as a **scoped** `venue_admin`/`tournament_admin` (not superadmin) and:
   - Try navigating directly to admin URLs outside your scope (a different venue's slot management, `/admin/users`, `/admin/system`) by typing the URL — confirm you're blocked with a real permission message, not shown an empty table.
@@ -189,6 +189,6 @@ For every genuine bug found, log it like this:
 **Suspected cause:** file:line if you can identify it, otherwise "unknown — needs investigation"
 ```
 
-Group findings by Part (1-4), and at the top of the report give a one-line summary: **X critical, Y high, Z medium/low found**, plus which of the Part 4 known-risk items reproduced vs. did not reproduce vs. couldn't be tested. Save the report as `QA_RUN_<date>.md` in the repo root so it's easy to diff against the next run.
+Group findings by Part (1-4), and at the top of the report give a one-line summary: **X critical, Y high, Z medium/low found**, plus which of the Part 4 known-risk items reproduced vs. did not reproduce vs. couldn't be tested. Save the report as `docs/qa/<date>-qa-run.md` so it's easy to diff against the next run.
 
 If you extend `scripts/qa-brutal.mjs` / `scripts/qa-brutal-extended.mjs` with new automated checks while doing this (recommended for anything in Part 3/4 that's cheap to script), note which findings are now covered by an automated regression check versus which still require manual/browser verification each time.
