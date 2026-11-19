@@ -26,5 +26,7 @@ export * from './match-resolution.js';
 export * from './match-turn.js';
 export * from './bot-player.js';
 export * from './draw-format.js';
+export * from './player-card.js';
+export * from './draw-notifications.js';
 export * from './notification-copy.js';
 export * from './types.js';

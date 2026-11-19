@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { AdminDashboardStats } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
-import { AdminPageHeader, AdminQueryError, StatCard } from '@/components/admin/AdminUi';
+import { AdminCard, AdminPageHeader, AdminQueryError, StatCard } from '@/components/admin/AdminUi';
 import { buttonVariants } from '@/components/ui/button';
 import { GridSkeleton } from '@/components/ui/skeleton';
 import { useAuthUser } from '@/hooks/useAuthUser';
@@ -57,7 +57,6 @@ export function AdminDashboardPage() {
           value: data.matches.ongoing,
           sub: `${data.matches.total} total`,
         })}
-        {card('/admin/queue', { label: 'In queue', value: data.queueSize })}
       </div>
 
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -65,11 +64,6 @@ export function AdminDashboardPage() {
           label: 'Open tournaments',
           value: data.tournaments.open,
           sub: `${data.tournaments.in_progress} in progress`,
-        })}
-        {card('/admin/bookings?status=confirmed', {
-          label: 'Bookings',
-          value: data.bookings.confirmed,
-          sub: `${data.bookings.pending} pending`,
         })}
         {card('/admin/buybacks?status=completed', {
           label: 'Buybacks',
@@ -83,6 +77,32 @@ export function AdminDashboardPage() {
           value: data.notificationsFailed,
         })}
       </div>
+
+      <AdminCard className="p-5 mt-6">
+        <h2 className="font-semibold">Where players are playing</h2>
+        <p className="text-xs text-[var(--color-muted-foreground)] mb-3">
+          Players still in open or live tournaments, by venue (Home = their own headset).
+        </p>
+        {data.playersByVenue.length === 0 ? (
+          <p className="text-sm text-[var(--color-muted-foreground)]">No players in open or live tournaments yet.</p>
+        ) : (
+          <ul className="divide-y divide-[var(--color-border)]">
+            {data.playersByVenue.map((v) => (
+              <li key={v.venueId ?? 'home'} className="flex items-center justify-between py-2 text-sm">
+                {v.venueId ? (
+                  <Link to={`/admin/venues/${v.venueId}`} className="hover:underline">
+                    {v.name}
+                    {v.city ? <span className="text-[var(--color-muted-foreground)]">, {v.city}</span> : null}
+                  </Link>
+                ) : (
+                  <span>Home (own headset)</span>
+                )}
+                <span className="font-semibold">{v.players}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </AdminCard>
     </div>
   );
 }

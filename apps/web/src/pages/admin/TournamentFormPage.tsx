@@ -20,6 +20,7 @@ import {
 } from '@/lib/admin-form-validation';
 import { AdminPageHeader, AdminCard, AdminFieldError, AdminSkillTierSelect } from '@/components/admin/AdminUi';
 import { TournamentFlowGuide } from '@/components/admin/TournamentFlowGuide';
+import { DrawTournamentForm } from '@/components/admin/DrawTournamentForm';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -95,7 +96,22 @@ const REVEALED_BY: Record<string, string[]> = {
   roundDurationDays: ['startDate', 'endDate'],
 };
 
+/** New tournaments, and edits of new-format ones, use the five-field form; older ones keep the full form. */
 export function AdminTournamentFormPage() {
+  const { id } = useParams<{ id: string }>();
+  const isEdit = !!id && id !== 'new';
+  const { data: tournament, isLoading } = useQuery({
+    queryKey: ['admin', 'tournament', id],
+    queryFn: () => apiGet<Tournament>(`/admin/tournaments/${id}`),
+    enabled: isEdit,
+  });
+  if (!isEdit) return <DrawTournamentForm />;
+  if (isLoading || !tournament) return null;
+  if (tournament.playFormat === 'draw') return <DrawTournamentForm tournament={tournament} />;
+  return <ClassicTournamentForm />;
+}
+
+function ClassicTournamentForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = !!id && id !== 'new';
   const navigate = useNavigate();

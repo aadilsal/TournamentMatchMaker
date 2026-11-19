@@ -1,7 +1,7 @@
 # Pixel Paddle / VR Cricket League — Meta Quest Integration API
 
-**Version:** 2.3  
-**Last updated:** August 2026  
+**Version:** 2.5  
+**Last updated:** November 2026  
 **Audience:** Meta Quest / VR game integration team  
 **Contact:** aadilsalman786@gmail.com
 
@@ -153,6 +153,7 @@ GET /matches/current?userId={userId}
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `userId` | UUID string | Yes | Pixel Paddle user ID |
+| `tournamentId` | UUID string | No | Only this tournament's match — use it after the player picks one (see *Players in more than one tournament*) |
 
 #### Example request
 
@@ -343,6 +344,34 @@ error: `soloTargetState` reads `round_closed` throughout, and it clears within s
 Keep polling and leave whatever the player is looking at on screen.
 
 ---
+
+#### Players in more than one tournament
+
+A player can be registered in several live tournaments and have an open match in each. Every
+match has its own `id`, and a score is always submitted to one match id, so a score can never
+land in the wrong tournament.
+
+- `match` is the match with the **soonest deadline**, and now names its tournament and round:
+  `match.tournamentName` (e.g. `"Lahore Open"`) and `match.roundLabel` (e.g. `"Semi-final"`).
+  Show both in the match HUD and on the result screen.
+- `matches[]` lists **every** open match, soonest deadline first:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | UUID | Match id — submit scores to this |
+| `tournamentId` / `tournamentName` | UUID / string | The tournament it belongs to |
+| `roundLabel` | string \| null | `"Round 1"`, `"Quarter-final"`, `"Semi-final"`, `"Final"` |
+| `opponent` | string | Opponent username |
+| `state` | string | `your_turn` (still to bat) or `waiting_for_opponent` (already batted) |
+| `deadline` | ISO-8601 | Play before this time |
+
+**Recommended flow:** when `matches` has more than one entry, show a *Choose your match* screen
+(tournament · round · opponent · state · deadline). When the player picks one, call
+`GET /matches/current?userId=…&tournamentId=…` to load that match's full state, then play and
+submit as usual. With a single entry, go straight into the match. A client that ignores `matches`
+still works: it plays the soonest-deadline match, which is labelled with its tournament.
+
+Each match keeps its own turn lock and deadline; playing one never blocks or changes the other.
 
 ### 5.2 Submit Match Score
 
@@ -636,6 +665,7 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/identi
 |-------|------|-------------|
 | `userId` | UUID | **The Pixel Paddle user ID** — store it and use in all other endpoints |
 | `username` | string | Player's display name |
+| `player` | object \| null | The personalised player card (§5.6), so the headset can greet the player straight away. `null` only if it could not be built — the link itself still succeeded |
 
 ##### Errors
 
@@ -717,6 +747,77 @@ When nothing is live: `"hasLiveTournament": false, "tournaments": []`.
   answer yet, show it disabled.
 - When enabled, the existing flow is unchanged: `GET /matches/current` still decides what the player
   can do next.
+
+---
+
+### 5.6 Player profile — personalised card
+
+Everything the headset needs to greet and guide a linked player: name, skill tier, record, and
+their standing in each tournament (where they play, round, status and match). The same object is
+returned as `player` by `POST /identity/verify-link-code` (§5.4). Call this each time the main
+menu opens to refresh it. No email or other private data is included.
+
+```
+GET /players/profile?userId=<uuid>&timeZone=Asia/Karachi
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `userId` | UUID | Yes | Pixel Paddle user ID |
+| `timeZone` | IANA zone | No | Times inside `statusText` are written in this zone; UTC when omitted |
+
+#### Example response
+
+```json
+{
+  "success": true,
+  "data": {
+    "userId": "8fe6f2c1-ea04-41a8-a076-8754a696bd16",
+    "username": "ali_khan",
+    "city": "Lahore",
+    "greeting": "Welcome back, ali_khan — your match is ready!",
+    "hasVrHeadset": true,
+    "skillTier": 3,
+    "skillTierLabel": "Tier 3",
+    "ratingPoints": 812,
+    "record": { "played": 10, "wins": 7, "losses": 3 },
+    "tournaments": [
+      {
+        "id": "0c160535-eddf-45ab-a1f9-0040316b4f63",
+        "name": "Lahore Open",
+        "status": "live",
+        "startDate": "2026-11-20T15:00:00.000Z",
+        "playingAt": { "type": "venue", "name": "Super Over Arena", "city": "Lahore" },
+        "myStatus": "active",
+        "statusText": "Semi-final: play zara_vr before Sat 20:00.",
+        "round": { "number": 2, "label": "Semi-final", "state": "open",
+                   "opensAt": "2026-11-21T15:00:00.000Z", "closesAt": "2026-11-22T15:00:00.000Z" },
+        "match": { "id": "5b1d…", "opponent": "zara_vr", "state": "your_turn",
+                   "myScore": -1, "opponentScore": -1 }
+      }
+    ]
+  },
+  "error": null,
+  "meta": {}
+}
+```
+
+#### Fields
+
+| Field | Description |
+|-------|-------------|
+| `greeting` | Ready-made hello for the menu |
+| `skillTier` / `skillTierLabel` / `ratingPoints` | Current tier (1–5) and rating |
+| `record` | All-time decided matches |
+| `tournaments[]` | Upcoming, live, and finished in the last 7 days; live first |
+| `tournaments[].status` | `upcoming`, `live` or `finished` |
+| `tournaments[].playingAt` | `{type:"venue", name, city}`, `{type:"home", name:"Home"}`, or `null` (older tournaments) |
+| `tournaments[].myStatus` | `registered`, `active`, `through` (won this round, waiting for the next draw), `knocked_out`, `champion`, `finished` |
+| `tournaments[].statusText` | One plain sentence to show the player |
+| `tournaments[].round` | Current round: `label`, `state` (`upcoming`/`open`/`closed`), `opensAt`, `closesAt`; `null` unless live |
+| `tournaments[].match` | This round's match: `state` is `your_turn`, `waiting_for_opponent` or `decided`; scores use `-1` for "not played" |
+
+`404 NOT_FOUND` when the user does not exist. Rate-limited like `GET /matches/current`.
 
 ---
 
@@ -974,6 +1075,7 @@ get `409`, or it did not and the retry succeeds.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.5 | November 2026 | **Added** §5.6 `GET /players/profile` and a `player` card on `POST /identity/verify-link-code`, for a personalised headset (name, tier, record, where they play, round and match status per tournament). **Added** multi-tournament support to `GET /matches/current`: optional `tournamentId` filter, `match.tournamentName` / `match.roundLabel`, and a `matches[]` list (see §5.1 *Players in more than one tournament*). All additive. |
 | 2.4 | November 2026 | **Added** §5.5 `GET /tournaments/live` so the Quest app can enable its Tournament button only while a tournament is open for registration or in progress. Additive; no existing endpoint changed. |
 | 2.3 | August 2026 | **Added** §6.5 walkovers and §6.6 knockout matches. A match that runs out of time with one score on the board now completes as a walkover for the player who batted, instead of expiring and discarding a played innings. Knockout matches are created confirmed, so they reach the headset through `GET /matches/current` — previously the bracket was only visible on the web, and a bracket match was expired five minutes after it was created, unannounced, so no tournament could finish its bracket. An odd field now gives a bye rather than dropping the extra player out of the draw. |
 | 2.2 | August 2026 | **Fixed:** a chase now completes on the chaser's score alone. The target-setter's solo innings is recorded as their score when the pair is made, so the scoreline is half-filled from the start (`myScore` for the setter, `opponentScore` for the chaser). Previously both scores were left null, and the match sat unresolved until the setter submitted a *second* innings that the "defend" UI never asks for — in practice until the round or slot expired. A setter who does submit now gets a `409` naming the reason. Chase matches created before this change still resolve on the chaser's submission. |

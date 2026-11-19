@@ -76,6 +76,22 @@ export class AdminDashboardService {
         all ? this.redis.scard(QUEUE_MEMBER) : Promise.resolve(0),
       ]);
 
+    const byVenue = await this.pool.query(
+      `SELECT v.id AS venue_id, COALESCE(v.name, 'Home') AS name, COALESCE(v.city, '') AS city,
+              COUNT(*)::int AS players
+       FROM tournament_registrations r
+       JOIN tournaments t ON t.id = r.tournament_id AND t.play_format = 'draw' AND t.status IN ('open', 'in_progress')
+       JOIN users u ON u.id = r.user_id AND u.is_bot = FALSE
+       LEFT JOIN tournament_participants tp ON tp.tournament_id = r.tournament_id AND tp.user_id = r.user_id
+       LEFT JOIN venues v ON v.id = r.venue_id
+       WHERE r.play_location IS NOT NULL
+         AND (t.status = 'open' OR tp.status IN ('active', 'advanced'))
+         AND ($1 OR v.id = ANY($2::uuid[]) OR t.id = ANY($3::uuid[]))
+       GROUP BY v.id, v.name, v.city
+       ORDER BY players DESC, name ASC`,
+      [all, v, t]
+    );
+
     const tournamentStatus = await this.pool.query(
       `SELECT status, COUNT(*)::int AS c FROM tournaments
        WHERE $1 OR id = ANY($2::uuid[]) GROUP BY status`,
@@ -120,6 +136,12 @@ export class AdminDashboardService {
         failed: bb.failed,
       },
       queueSize: queueSize ?? 0,
+      playersByVenue: byVenue.rows.map((r) => ({
+        venueId: (r.venue_id as string | null) ?? null,
+        name: r.name as string,
+        city: r.city as string,
+        players: Number(r.players),
+      })),
       notificationsFailed: notifFailed.rows[0]?.c ?? 0,
     };
   }

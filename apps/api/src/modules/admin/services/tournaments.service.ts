@@ -9,6 +9,7 @@ import type {
   AdminUpdateParticipantInput,
   AdminUpdateRoundInput,
   AdminUpdateTournamentInput,
+  CreateDrawTournamentInput,
   CreateTournamentInput,
   RoundWindow,
   Tournament,
@@ -30,6 +31,7 @@ import {
 import { AppError } from '../../../lib/response.js';
 import { writeAudit } from '../../../lib/audit.js';
 import { TournamentsService, statusRank } from '../../tournaments/tournaments.service.js';
+import { enqueueCloseRoundNow } from '../../../lib/matchmaking-queue.js';
 
 export class AdminTournamentsService {
   private tournaments: TournamentsService;
@@ -37,9 +39,61 @@ export class AdminTournamentsService {
   constructor(
     private pool: Pool,
     redis: RedisClient,
-    env: Env
+    private env: Env
   ) {
     this.tournaments = new TournamentsService(pool, redis, env);
+  }
+
+  async createDraw(actorId: string, input: CreateDrawTournamentInput) {
+    const tournament = await this.tournaments.createDraw(input);
+    await writeAudit(this.pool, {
+      actorId,
+      action: 'tournament.create',
+      entityType: 'tournament',
+      entityId: tournament.id,
+      after: tournament as unknown as Record<string, unknown>,
+    });
+    return tournament;
+  }
+
+  /** Draw format "Start now": move the start to now; the draw engine opens round 1 within seconds. */
+  private async startDrawNow(actorId: string, tournament: Tournament) {
+    if (tournament.status !== 'open') {
+      throw new AppError('CONFLICT', 'Publish the tournament before starting it', 409);
+    }
+    const players = await this.pool.query(
+      `SELECT COUNT(*)::int AS n FROM tournament_registrations r JOIN users u ON u.id = r.user_id
+       WHERE r.tournament_id = $1 AND u.is_bot = FALSE`,
+      [tournament.id]
+    );
+    if ((players.rows[0]?.n ?? 0) < 2) throw new AppError('CONFLICT', 'At least 2 players are needed to start', 409);
+    await this.pool.query(
+      `UPDATE tournaments SET start_date = LEAST(start_date, NOW()), registration_closes_at = NOW(), updated_at = NOW()
+       WHERE id = $1`,
+      [tournament.id]
+    );
+    await enqueueCloseRoundNow(this.env, tournament.id).catch((err) => console.error('Draw nudge failed:', err));
+    await writeAudit(this.pool, { actorId, action: 'tournament.start', entityType: 'tournament', entityId: tournament.id });
+    return this.getById(tournament.id);
+  }
+
+  /** Draw format "Close round now": end the round; the engine settles it and draws the next. */
+  private async closeDrawRoundNow(actorId: string, tournament: Tournament) {
+    const closed = await this.pool.query(
+      `UPDATE tournament_rounds SET ends_at = NOW()
+       WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' RETURNING round_number`,
+      [tournament.id, tournament.currentRoundNumber]
+    );
+    if (!closed.rowCount) throw new AppError('CONFLICT', 'There is no open round to close', 409);
+    await enqueueCloseRoundNow(this.env, tournament.id).catch((err) => console.error('Draw nudge failed:', err));
+    await writeAudit(this.pool, {
+      actorId,
+      action: 'round.close',
+      entityType: 'tournament',
+      entityId: tournament.id,
+      after: { roundNumber: tournament.currentRoundNumber },
+    });
+    return this.getById(tournament.id);
   }
 
   list(query: AdminTournamentListQuery & { tournamentIds?: string[] | null }) {
@@ -198,6 +252,7 @@ export class AdminTournamentsService {
     if (input.startDate !== undefined || input.roundDurationMinutes !== undefined) {
       await this.tournaments.syncOpeningRoundWindow(id);
     }
+    if (tournament.playFormat === 'draw') await this.tournaments.syncDrawSchedule(id);
 
     await writeAudit(this.pool, {
       actorId,
@@ -240,10 +295,15 @@ export class AdminTournamentsService {
   }
 
   async closeRegistration(actorId: string, id: string) {
+    if ((await this.getById(id)).playFormat === 'draw') {
+      throw new AppError('CONFLICT', 'Registration closes by itself when the tournament starts', 409);
+    }
     return this.update(actorId, id, { status: 'closed' });
   }
 
   async start(actorId: string, id: string) {
+    const current = await this.getById(id);
+    if (current.playFormat === 'draw') return this.startDrawNow(actorId, current);
     const countResult = await this.pool.query(
       `SELECT COUNT(*)::int AS count FROM tournament_registrations WHERE tournament_id = $1`,
       [id]
@@ -470,6 +530,8 @@ export class AdminTournamentsService {
   }
 
   async closeRound(actorId: string, tournamentId: string, roundNumber: number) {
+    const current = await this.getById(tournamentId);
+    if (current.playFormat === 'draw') return this.closeDrawRoundNow(actorId, current);
     await this.tournaments.closeRound(tournamentId, roundNumber);
     await writeAudit(this.pool, {
       actorId,
@@ -485,9 +547,11 @@ export class AdminTournamentsService {
   listRegistrations(tournamentId: string, includeEmail = false) {
     return this.pool
       .query(
-        `SELECT tr.*, u.username, u.email
+        `SELECT tr.*, u.username, u.email,
+                CASE tr.play_location WHEN 'home' THEN 'Home' WHEN 'venue' THEN v.name END AS plays_at
          FROM tournament_registrations tr
          JOIN users u ON u.id = tr.user_id
+         LEFT JOIN venues v ON v.id = tr.venue_id
          WHERE tr.tournament_id = $1
          ORDER BY tr.registered_at`,
         [tournamentId]
@@ -495,6 +559,7 @@ export class AdminTournamentsService {
       .then((r) =>
         r.rows.map((row) => ({
           ...mapRegistration(row),
+          playsAt: (row.plays_at as string | null) ?? null,
           username: row.username,
           ...(includeEmail ? { email: row.email } : {}),
         }))

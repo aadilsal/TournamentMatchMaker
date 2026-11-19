@@ -142,6 +142,26 @@ export const tournamentFieldsSchema = z.object({
 
 export const createTournamentSchema = applyTournamentWindowRules(tournamentFieldsSchema);
 
+/** New tournaments (draw format): five fields; the end date is calculated. */
+export const createDrawTournamentSchema = z.object({
+  playFormat: z.literal('draw'),
+  name: z.string().trim().min(1).max(200),
+  startDate: z
+    .string()
+    .datetime()
+    .refine((d) => new Date(d).getTime() > Date.now() - 60_000, 'Start time must be in the future'),
+  roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60),
+  maxPlayers: z.number().int().min(2).max(512).optional(),
+  buybackPriceCents: z
+    .number()
+    .int()
+    .min(0)
+    .refine((v) => v === 0 || v >= 50, 'Buyback price must be 0 (off) or at least 50 cents')
+    .optional(),
+});
+
+export type CreateDrawTournamentInput = z.infer<typeof createDrawTournamentSchema>;
+
 export const tournamentListQuerySchema = z.object({
   status: tournamentStatusSchema.optional(),
   tier: z.coerce.number().int().min(1).max(5).optional(),
@@ -168,6 +188,18 @@ export const enterTournamentSchema = z.object({
   venueId: z.string().uuid().optional(),
   timeSlotId: z.string().uuid().optional(),
 });
+
+/** Join a draw-format tournament: pick a venue, or Home (VR headset owners only). */
+export const joinTournamentSchema = z
+  .object({
+    venueId: z.string().uuid().optional(),
+    home: z.literal(true).optional(),
+  })
+  .refine((v) => (v.venueId ? 1 : 0) + (v.home ? 1 : 0) === 1, {
+    message: 'Choose a venue or Home',
+  });
+
+export type JoinTournamentInput = z.infer<typeof joinTournamentSchema>;
 
 export const tournamentSlotOptionsQuerySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

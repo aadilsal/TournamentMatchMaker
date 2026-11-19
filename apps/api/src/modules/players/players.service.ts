@@ -56,6 +56,24 @@ export class PlayersService {
       return this.getProfile(userId);
     }
 
+    // Home play needs the headset; it cannot be switched off mid-tournament.
+    if (input.hasVrHeadset === false) {
+      const home = await this.pool.query(
+        `SELECT t.name FROM tournament_registrations r
+         JOIN tournaments t ON t.id = r.tournament_id
+         WHERE r.user_id = $1 AND r.play_location = 'home' AND t.status IN ('open', 'closed', 'in_progress')
+         LIMIT 1`,
+        [userId]
+      );
+      if (home.rows[0]) {
+        throw new AppError(
+          'CONFLICT',
+          `You're playing "${home.rows[0].name}" from Home, which needs your VR headset. Change where you play or wait until it finishes.`,
+          409
+        );
+      }
+    }
+
     fields.push(`updated_at = NOW()`);
     values.push(userId);
 
@@ -180,15 +198,20 @@ export class PlayersService {
        JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = tp.round_number
        WHERE tp.user_id = $1
          AND tp.status = 'eliminated'
-         AND t.phase = 'normal'
          AND tr.status = 'active'
          AND tr.ends_at > NOW()
+         AND t.buyback_price_cents >= 50
          AND (
+           -- Draw format: buybacks only while round 1 is open.
+           (t.play_format = 'draw' AND t.status = 'in_progress' AND t.current_round_number = 1
+            AND (SELECT COUNT(*) FROM matches r1 WHERE r1.tournament_id = t.id AND r1.round_number = 1 AND r1.phase = 'draw') > 1)
+           OR (t.play_format = 'classic' AND t.phase = 'normal' AND (
            t.initial_player_count IS NULL
            OR (
              SELECT COUNT(*)::int FROM tournament_participants ap
              WHERE ap.tournament_id = t.id AND ap.status IN ('active', 'advanced')
            ) > FLOOR(t.initial_player_count::numeric / 2)
+           ))
          )
        ORDER BY t.name ASC`,
       [userId]

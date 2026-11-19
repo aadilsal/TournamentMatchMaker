@@ -16,7 +16,7 @@ is accepted, when a match expires and when a bot appears.
 | D1 | **No time slots anywhere for players** — tournaments and casual bookings. Slot/booking tables stay in the database, unused. No admin slot editor. |
 | D2 | **Draw-based rounds** (named opponent each round) replace the live queue for new tournaments. Matchmaking must stay correct: covered by the test plan below. |
 | D3 | **Join before round 1 starts only.** Registration closes automatically at the start time. |
-| D4 | **Videos are not committed.** `docs/flows/` links to them. |
+| D4 | **No videos for now (2026-11-19).** Instead a full user manual (players and admins) with flow diagrams, written once the new flow is built. |
 | D5 | **A player can be in several tournaments at once.** The one-live-tournament rule is removed. |
 | D6 | **Same flow for VR and arena players.** "Home" is a place to play, shown only to players with a VR headset. |
 | D7 | **Personalised headset.** Once the link code identifies a player, the headset gets their name, place to play, status, skill tier, round status and tournaments. |
@@ -137,4 +137,4 @@ on every menu open. No email or other private data is sent.
 | 3 | Draw-based rounds, four states, short admin form | L |
 | 4 | Guided ① → ② → ③ journey, navigation lock, plain copy | M |
 | 5 | Admin clean-up: slots and bookings hidden, dashboard shows players per venue | S |
-| 6 | Flow diagrams, per-flow videos (outside git), VR-team change note | M |
+| 6 | User manual for players and admins, flow diagrams, VR-team change note | M |

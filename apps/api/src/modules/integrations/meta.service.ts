@@ -4,6 +4,8 @@ import type {
   MetaCurrentMatchResponse,
   MetaMatchResponseData,
   MetaMatchDecision,
+  MetaOpenMatchSummary,
+  PlayerCard,
   MetaSoloTargetInput,
   MetaSoloTargetState,
   MetaSubmitScoreInput,
@@ -17,6 +19,7 @@ import {
   chaseTargetFor,
   generateBotInnings,
   isSlotEnded,
+  knockoutRoundLabel,
   isSlotStartPast,
   isTurnHoldActive,
   parseQueuePlayerMeta,
@@ -25,10 +28,19 @@ import {
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
 import { mapMatch } from '../../lib/mappers.js';
+import { buildPlayerCard } from '../../lib/player-card.js';
+import { notifyOpponentPlayed } from '../../lib/draw-notify.js';
 import { AppError } from '../../lib/response.js';
 import { applyMatchOutcome, assertMatchSlotPlayable } from '../../lib/match-outcome.js';
 import { requeuePlayer } from '../../lib/requeue-player.js';
 import { enqueueCloseRoundNow, enqueuePairNow } from '../../lib/matchmaking-queue.js';
+
+/** "Semi-final", "Round 2"…; draw matches carry their label, classic ones derive it from the round. */
+function matchRoundLabel(row: Record<string, unknown>): string | null {
+  const stored = ((row.result ?? {}) as { roundLabel?: string }).roundLabel;
+  if (stored) return stored;
+  return row.tournament_id && row.round_number != null ? knockoutRoundLabel(Number(row.round_number)) : null;
+}
 
 /** The tie that sent a draw match back to be replayed, shown until either player bats again. */
 function drawTieReplay(
@@ -365,6 +377,11 @@ export class MetaIntegrationService {
     };
   }
 
+  /** Personalised card for the headset: profile, record and standing in each tournament. No private data. */
+  async getPlayerCard(userId: string, timeZone?: string): Promise<PlayerCard> {
+    return buildPlayerCard(this.pool, userId, timeZone);
+  }
+
   /** Tournaments the headset's Tournament button can lead into: open or running. */
   async listLiveTournaments() {
     // Same window rule as TournamentsService.assertRegistrationWindowOpen.
@@ -401,7 +418,7 @@ export class MetaIntegrationService {
     // would 409 on.
     // A player can be in several tournaments: list every open match, soonest deadline first.
     const activeMatch = await this.pool.query(
-      `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.status, m.result, m.phase,
+      `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.status, m.result, m.phase, m.round_number,
               m.active_player_id, m.active_player_since,
               m.venue_id, m.time_slot_id,
               opp.username AS opponent_username,
@@ -424,15 +441,23 @@ export class MetaIntegrationService {
       [userId, tournamentId ?? null]
     );
 
-    const matches = activeMatch.rows
-      .filter((r) => r.status !== 'pending_confirmation')
-      .map((r) => ({
-        id: r.id as string,
-        tournamentId: (r.tournament_id as string | null) ?? null,
-        tournamentName: (r.tournament_name as string | null) ?? null,
-        opponent: r.opponent_username as string,
-        deadline: ((r.slot_end ?? r.round_ends) as Date | null)?.toISOString() ?? null,
-      }));
+    const playable = activeMatch.rows.filter((r) => r.status !== 'pending_confirmation');
+    const batted = playable.length
+      ? await this.pool.query(`SELECT match_id FROM match_innings WHERE user_id = $1 AND match_id = ANY($2)`, [
+          userId,
+          playable.map((r) => r.id),
+        ])
+      : { rows: [] as Array<{ match_id: string }> };
+    const battedIn = new Set<string>(batted.rows.map((r) => r.match_id as string));
+    const matches: MetaOpenMatchSummary[] = playable.map((r) => ({
+      id: r.id as string,
+      tournamentId: (r.tournament_id as string | null) ?? null,
+      tournamentName: (r.tournament_name as string | null) ?? null,
+      roundLabel: matchRoundLabel(r),
+      opponent: r.opponent_username as string,
+      state: battedIn.has(r.id as string) ? 'waiting_for_opponent' : 'your_turn',
+      deadline: ((r.slot_end ?? r.round_ends) as Date | null)?.toISOString() ?? null,
+    }));
 
     const row = activeMatch.rows[0];
     if (row && row.status !== 'pending_confirmation') {
@@ -501,6 +526,8 @@ export class MetaIntegrationService {
         match: {
           id: row.id,
           status: row.status as string,
+          tournamentName: (row.tournament_name as string | null) ?? null,
+          roundLabel: matchRoundLabel(row),
           opponent: row.opponent_username,
           // A headset owner plays from home, so they hold a slot but no venue.
           // Both flows carry the same fields either way; the ones that do not
@@ -825,6 +852,9 @@ export class MetaIntegrationService {
     // has an innings to play there is nothing to decide, and in particular no
     // tie to declare. The first submission always returns here.
     if (!bothInningsIn || p1 === null || p2 === null) {
+      if (!bothInningsIn && match.phase === DRAW_PHASE && this.env) {
+        await notifyOpponentPlayed(this.pool, this.env, matchId, userId, score);
+      }
       const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
       return toMetaMatchResponse(full.rows[0], userId);
     }

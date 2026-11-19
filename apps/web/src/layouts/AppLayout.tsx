@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trophy, LogOut, User, MapPin, Calendar, Menu, X, Shield, Swords } from 'lucide-react';
+import { Trophy, LogOut, User, Menu, X, Shield, Swords } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SocketSyncProvider } from '@/components/sync/SocketSyncProvider';
@@ -11,12 +11,9 @@ import { disconnectSocket } from '@/hooks/useSocket';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { cn } from '@/lib/utils';
 
-const navItems = [
-  { href: '/tournaments', label: 'Tournaments', icon: Trophy, auth: false },
-  { href: '/venues', label: 'Venues', icon: MapPin, auth: false },
-  { href: '/matches', label: 'Matches', icon: Swords, auth: true },
-  { href: '/bookings', label: 'Bookings', icon: Calendar, auth: true },
-];
+// Players get one place to go; guests can browse tournaments.
+const playerNav = [{ href: '/my-tournaments', label: 'My tournaments', icon: Swords }];
+const guestNav = [{ href: '/tournaments', label: 'Tournaments', icon: Trophy }];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();
@@ -37,7 +34,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const isActive = (href: string) =>
     location.pathname === href || location.pathname.startsWith(href + '/');
 
-  const visibleItems = navItems.filter((item) => !item.auth || isLoggedIn);
+  const visibleItems = isLoggedIn ? playerNav : guestNav;
 
   return (
     <SocketSyncProvider>
@@ -46,7 +43,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-card)]/90 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
           {/* Logo */}
-          <Link to={isLoggedIn ? '/tournaments' : '/'} className="flex items-center gap-2.5 font-bold text-base shrink-0">
+          <Link to={isLoggedIn ? '/start' : '/'} className="flex items-center gap-2.5 font-bold text-base shrink-0">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-primary)]/15 border border-[var(--color-primary)]/30">
               <Trophy className="h-4 w-4 text-[var(--color-primary)]" />
             </span>

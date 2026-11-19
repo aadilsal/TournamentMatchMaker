@@ -16,9 +16,9 @@ export function sanitizeReturnTo(raw: string | null | undefined): string | null 
 
 const AUTH_PAGES = ['/login', '/register', '/forgot-password', '/reset-password'];
 
-/** Where to land after sign-in: a safe returnTo, else /admin for admins, else /venues. */
+/** Where to land after sign-in: a safe returnTo, else /admin for admins, else the guided flow. */
 export function postLoginPath(raw: string | null | undefined, isAdmin: boolean): string {
   const safe = sanitizeReturnTo(raw);
   if (safe && !AUTH_PAGES.some((p) => safe === p || safe.startsWith(`${p}?`))) return safe;
-  return isAdmin ? '/admin' : '/venues';
+  return isAdmin ? '/admin' : '/start';
 }

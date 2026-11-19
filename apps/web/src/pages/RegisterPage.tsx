@@ -309,15 +309,9 @@ function RegisterForm() {
     onSuccess: async (data, variables) => {
       setAccessToken(data.accessToken);
       connectSocket();
-      navigate('/welcome', {
-        state: {
-          hasVrHeadset: variables.hasVrHeadset ?? false,
-          city: variables.city,
-          latitude: variables.latitude,
-          longitude: variables.longitude,
-          returnTo: returnTo ?? undefined,
-        },
-      });
+      // New players go straight into the guided flow (choose a tournament first).
+      void variables;
+      navigate(returnTo ?? '/start', { replace: true });
     },
     onError: (err: Error) => {
       const conflict = getRegisterConflict(err);

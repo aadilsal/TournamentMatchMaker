@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   buybackSchema,
   enterTournamentSchema,
+  joinTournamentSchema,
   registerTournamentSchema,
   tournamentListQuerySchema,
   tournamentMatchesQuerySchema,
@@ -14,10 +15,30 @@ import { authenticate } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { TournamentsService } from './tournaments.service.js';
+import { DrawEntryService } from './draw-entry.service.js';
 
 export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
   const service = new TournamentsService(pool, redis, env);
+  const entry = new DrawEntryService(pool, env);
+
+  // Draw-format entry: a venue or Home, no slots. Repeating it before the start changes where you play.
+  router.post('/:id/join', authenticate(env), validate(joinTournamentSchema), async (req, res, next) => {
+    try {
+      const result = await entry.join(req.params.id as string, req.user!.sub, req.body);
+      sendSuccess(res, result, undefined, result.created ? 201 : 200);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.delete('/:id/join', authenticate(env), async (req, res, next) => {
+    try {
+      sendSuccess(res, await entry.leave(req.params.id as string, req.user!.sub));
+    } catch (err) {
+      next(err);
+    }
+  });
 
   router.get('/', validate(tournamentListQuerySchema, 'query'), async (req, res, next) => {
     try {

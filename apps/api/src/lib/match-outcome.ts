@@ -15,6 +15,7 @@ import { enqueueNotification } from './bullmq.js';
 import { TournamentsService } from '../modules/tournaments/tournaments.service.js';
 import { emitMatchUpdated } from '../socket/sync-events.js';
 import { AppError } from './response.js';
+import { notifyDrawResult, notifyDrawTie } from './draw-notify.js';
 
 /** The only states a result may be applied from; the guard makes resolution idempotent. */
 const OPEN_MATCH_STATUSES = `('pending_confirmation', 'confirmed', 'in_progress')`;
@@ -69,7 +70,7 @@ export async function applyMatchOutcome(
   // resolves once both players have an innings on record, so a tie can never be
   // declared while one of them is still batting.
   if (outcome === 'rematch' && match.phase === DRAW_PHASE) {
-    return replayDrawMatch(pool, matchId, match, result, player1Score, player2Score);
+    return replayDrawMatch(pool, env, matchId, match, result, player1Score, player2Score);
   }
 
   if (outcome === 'rematch') {
@@ -127,6 +128,7 @@ export async function applyMatchOutcome(
 /** A tied draw match is replayed in place: innings wiped, the tie remembered for the deadline rule. */
 async function replayDrawMatch(
   pool: Pool,
+  env: Env | undefined,
   matchId: string,
   match: { player1_id: string; player2_id: string; tournament_id: string | null },
   result: MatchResultExtended,
@@ -177,6 +179,7 @@ async function replayDrawMatch(
     status: 'confirmed',
     tournamentId: match.tournament_id,
   });
+  if (env) await notifyDrawTie(pool, env, matchId, player1Score, Number((replay as { tieCount?: number }).tieCount ?? 1));
   return { status: 'confirmed', result: replay! };
 }
 
@@ -334,7 +337,9 @@ export async function applyMatchWinner(
     await removeFromQueue(redis, loserId);
   }
 
-  if (env) {
+  if (env && match.phase === DRAW_PHASE) {
+    await notifyDrawResult(pool, env, matchId, winnerId, loserId);
+  } else if (env) {
     enqueueNotification(env, {
       userId: winnerId,
       type: 'match_won',

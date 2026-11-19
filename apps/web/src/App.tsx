@@ -13,15 +13,13 @@ const LandingPage = lazyNamed(() => import('@/pages/LandingPage'), 'LandingPage'
 const LoginPage = lazyNamed(() => import('@/pages/LoginPage'), 'LoginPage');
 const RegisterPage = lazyNamed(() => import('@/pages/RegisterPage'), 'RegisterPage');
 const ProfilePage = lazyNamed(() => import('@/pages/ProfilePage'), 'ProfilePage');
-const VenuesPage = lazyNamed(() => import('@/pages/VenuesPage'), 'VenuesPage');
-const VenueDetailPage = lazyNamed(() => import('@/pages/VenueDetailPage'), 'VenueDetailPage');
-const BookingsPage = lazyNamed(() => import('@/pages/BookingsPage'), 'BookingsPage');
+const StartPage = lazyNamed(() => import('@/pages/StartPage'), 'StartPage');
+const ChooseTournamentPage = lazyNamed(() => import('@/pages/ChooseTournamentPage'), 'ChooseTournamentPage');
+const ChooseWherePage = lazyNamed(() => import('@/pages/ChooseWherePage'), 'ChooseWherePage');
+const MyTournamentsPage = lazyNamed(() => import('@/pages/MyTournamentsPage'), 'MyTournamentsPage');
 const TournamentsPage = lazyNamed(() => import('@/pages/TournamentsPage'), 'TournamentsPage');
 const TournamentDetailPage = lazyNamed(() => import('@/pages/TournamentDetailPage'), 'TournamentDetailPage');
-const MatchesPage = lazyNamed(() => import('@/pages/MatchesPage'), 'MatchesPage');
-const PlayFlowPage = lazyNamed(() => import('@/pages/PlayFlowPage'), 'PlayFlowPage');
 const PublicProfilePage = lazyNamed(() => import('@/pages/PublicProfilePage'), 'PublicProfilePage');
-const WelcomePage = lazyNamed(() => import('@/pages/WelcomePage'), 'WelcomePage');
 const ForgotPasswordPage = lazyNamed(() => import('@/pages/ForgotPasswordPage'), 'ForgotPasswordPage');
 const ResetPasswordPage = lazyNamed(() => import('@/pages/ResetPasswordPage'), 'ResetPasswordPage');
 const TermsPage = lazyNamed(() => import('@/pages/LegalPage'), 'TermsPage');
@@ -110,17 +108,19 @@ export function App() {
         <Route path="/reset-password" element={<AppShell><ResetPasswordPage /></AppShell>} />
         <Route path="/terms" element={<AppShell><TermsPage /></AppShell>} />
         <Route path="/privacy" element={<AppShell><PrivacyPage /></AppShell>} />
-        <Route path="/play" element={<AppShell><PlayFlowPage /></AppShell>} />
         <Route path="/players/:username" element={<AppShell><PublicProfilePage /></AppShell>} />
-        <Route path="/welcome" element={<AppShell><WelcomePage /></AppShell>} />
         <Route path="/profile" element={<AppShell><ProfilePage /></AppShell>} />
-        <Route path="/venues" element={<AppShell><VenuesPage /></AppShell>} />
-        <Route path="/venues/:id" element={<AppShell><VenueDetailPage /></AppShell>} />
-        <Route path="/bookings" element={<AppShell><BookingsPage /></AppShell>} />
+        {/* Guided flow: start → choose a tournament → where you play → my tournaments. */}
+        <Route path="/start" element={<AppShell><StartPage /></AppShell>} />
+        <Route path="/join" element={<AppShell><ChooseTournamentPage /></AppShell>} />
+        <Route path="/join/:tournamentId" element={<AppShell><ChooseWherePage /></AppShell>} />
+        <Route path="/my-tournaments" element={<AppShell><MyTournamentsPage /></AppShell>} />
         <Route path="/tournaments" element={<AppShell><TournamentsPage /></AppShell>} />
         <Route path="/tournaments/:id" element={<AppShell><TournamentDetailPage /></AppShell>} />
-        <Route path="/matchmaking" element={<Navigate to="/tournaments" replace />} />
-        <Route path="/matches" element={<AppShell><MatchesPage /></AppShell>} />
+        {/* Old player pages (slots, bookings, queue) now lead into the guided flow. */}
+        {['/play', '/welcome', '/venues', '/venues/:id', '/bookings', '/matches', '/matchmaking'].map((path) => (
+          <Route key={path} path={path} element={<Navigate to="/start" replace />} />
+        ))}
 
         <Route path="/admin" element={<AdminShell><AdminDashboardPage /></AdminShell>} />
         <Route path="/admin/matches" element={<AdminShell><AdminMatchesPage /></AdminShell>} />

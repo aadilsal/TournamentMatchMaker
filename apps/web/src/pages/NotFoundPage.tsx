@@ -14,11 +14,11 @@ export function NotFoundPage() {
           The link may be mistyped or out of date.
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-2">
-          <Link to="/tournaments" className={buttonVariants()}>
-            Browse tournaments
+          <Link to="/start" className={buttonVariants()}>
+            Go to my tournaments
           </Link>
-          <Link to="/venues" className={buttonVariants({ variant: 'outline' })}>
-            Find a venue
+          <Link to="/tournaments" className={buttonVariants({ variant: 'outline' })}>
+            Browse tournaments
           </Link>
         </div>
       </div>

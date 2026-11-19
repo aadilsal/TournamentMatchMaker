@@ -84,9 +84,9 @@ export function HeroSection() {
               Register for Season 1
               <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link to="/venues" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-8 text-base gap-2 border-[var(--color-border)] bg-white/5 backdrop-blur-sm' })}>
+            <Link to="/tournaments" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-8 text-base gap-2 border-[var(--color-border)] bg-white/5 backdrop-blur-sm' })}>
               <Play className="h-4 w-4" />
-              Browse venues
+              Browse tournaments
             </Link>
           </motion.div>
 

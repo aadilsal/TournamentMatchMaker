@@ -3,11 +3,17 @@ import type { Pool, PoolClient } from 'pg';
 import type { Redis } from 'ioredis';
 import {
   DRAW_PHASE,
+  STARTING_SOON_MS,
+  drawLostNotice,
   drawRound,
   drawRoundLabel,
-  matchNotificationDetails,
+  drawWonNotice,
+  roundClosingSoonNotice,
+  roundStartedNotice,
+  roundsRemaining,
   settleDrawMatch,
   tournamentLink,
+  tournamentStartingSoonNotice,
   type DrawPairing,
 } from '@vr-tournament/shared';
 import { ensureTournamentBot } from '../lib/bot-opponent.js';
@@ -27,6 +33,24 @@ interface Outbox {
 
 const emptyOutbox = (): Outbox => ({ newMatches: [], decided: [], finished: [], touched: new Set() });
 
+/**
+ * A round is due to close at its deadline, or earlier once every match in it is decided —
+ * except round 1 with buybacks on (and not the final), which keeps its window for buybacks. Uses aliases t, tr.
+ */
+const ROUND_DUE_SQL = `(
+  tr.ends_at <= NOW()
+  OR (
+    EXISTS (SELECT 1 FROM matches dm WHERE dm.tournament_id = t.id AND dm.round_number = tr.round_number AND dm.phase = 'draw')
+    AND NOT EXISTS (
+      SELECT 1 FROM matches om
+      WHERE om.tournament_id = t.id AND om.round_number = tr.round_number AND om.phase = 'draw'
+        AND om.status IN ('pending_confirmation', 'confirmed', 'in_progress')
+    )
+    AND NOT (tr.round_number = 1 AND t.buyback_price_cents >= 50
+             AND (SELECT COUNT(*) FROM matches r1 WHERE r1.tournament_id = t.id AND r1.round_number = 1 AND r1.phase = 'draw') > 1)
+  )
+)`;
+
 /** Draw-format engine: start tournaments at their start time, close rounds at their deadline, draw the next. */
 export async function processDrawRoundsJob(
   _job: Job | null,
@@ -35,6 +59,7 @@ export async function processDrawRoundsJob(
   notificationQueue: NotificationQueue
 ): Promise<void> {
   const outbox = emptyOutbox();
+  await sendDrawReminders(pool, notificationQueue).catch((err) => console.error('[draw-rounds] reminders failed:', err));
 
   const starting = await pool.query(
     `SELECT id FROM tournaments
@@ -49,7 +74,7 @@ export async function processDrawRoundsJob(
      FROM tournaments t
      JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number
      WHERE t.play_format = 'draw' AND t.status = 'in_progress'
-       AND tr.status = 'active' AND tr.ends_at <= NOW()`
+       AND tr.status = 'active' AND ${ROUND_DUE_SQL}`
   );
   for (const row of closing.rows) {
     await inTransaction(pool, outbox, (client, box) => closeRound(client, row.id as string, box));
@@ -109,10 +134,12 @@ async function startTournament(client: PoolClient, tournamentId: string, outbox:
     return;
   }
 
+  // The real field is known now, so replace the creation-time estimate of the finish.
   await client.query(
-    `UPDATE tournaments SET status = 'in_progress', phase = $2, current_round_number = 1, updated_at = NOW()
+    `UPDATE tournaments SET status = 'in_progress', phase = $2, current_round_number = 1,
+            end_date = NOW() + make_interval(mins => $3), updated_at = NOW()
      WHERE id = $1`,
-    [tournamentId, DRAW_PHASE]
+    [tournamentId, DRAW_PHASE, roundsRemaining(field.length) * Number(t.round_duration_minutes)]
   );
   await openRound(client, tournamentId, 1, Number(t.round_duration_minutes), null, field, outbox);
   outbox.touched.add(tournamentId);
@@ -125,8 +152,9 @@ async function closeRound(client: PoolClient, tournamentId: string, outbox: Outb
   const roundNumber = Number(t.current_round_number);
 
   const round = await client.query(
-    `SELECT ends_at FROM tournament_rounds
-     WHERE tournament_id = $1 AND round_number = $2 AND status = 'active' AND ends_at <= NOW()`,
+    `SELECT tr.ends_at FROM tournament_rounds tr
+     JOIN tournaments t ON t.id = tr.tournament_id
+     WHERE tr.tournament_id = $1 AND tr.round_number = $2 AND tr.status = 'active' AND ${ROUND_DUE_SQL}`,
     [tournamentId, roundNumber]
   );
   if (!round.rows[0]) return;
@@ -380,6 +408,60 @@ async function finishTournament(
   console.log(`[draw-rounds] finished "${t.name}" — champion ${championId ?? 'none'}`);
 }
 
+type Send = (userId: string, type: string, payload: Record<string, unknown>, key: string, email?: boolean) => Promise<void>;
+
+const sender = (notificationQueue: NotificationQueue, isBot: Set<string>): Send => async (userId, type, payload, key, email = false) => {
+  if (isBot.has(userId)) return;
+  await notificationQueue
+    .add(
+      'dispatch',
+      { userId, type, channels: email ? ['in_app', 'email'] : ['in_app'], payload, idempotencyKey: key },
+      { jobId: key.replace(/:/g, '~') }
+    )
+    .catch((err) => console.error('[draw-rounds] notification failed:', err));
+};
+
+/** Names, places, scores and the round deadline for one draw match, for notification copy. */
+async function matchDetails(pool: Pool, matchId: string) {
+  const r = await pool.query(
+    `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.result, t.name AS tournament_name, tr.ends_at,
+            u1.username AS p1_name, u2.username AS p2_name,
+            CASE WHEN r1.play_location = 'venue' THEN v1.name END AS p1_place,
+            CASE WHEN r2.play_location = 'venue' THEN v2.name END AS p2_place
+     FROM matches m
+     JOIN tournaments t ON t.id = m.tournament_id
+     LEFT JOIN tournament_rounds tr ON tr.tournament_id = m.tournament_id AND tr.round_number = m.round_number
+     JOIN users u1 ON u1.id = m.player1_id
+     JOIN users u2 ON u2.id = m.player2_id
+     LEFT JOIN tournament_registrations r1 ON r1.tournament_id = m.tournament_id AND r1.user_id = m.player1_id
+     LEFT JOIN venues v1 ON v1.id = r1.venue_id
+     LEFT JOIN tournament_registrations r2 ON r2.tournament_id = m.tournament_id AND r2.user_id = m.player2_id
+     LEFT JOIN venues v2 ON v2.id = r2.venue_id
+     WHERE m.id = $1`,
+    [matchId]
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  const result = (row.result ?? {}) as Record<string, unknown>;
+  const side = (id: string) => {
+    const isP1 = id === row.player1_id;
+    return {
+      opponent: (isP1 ? row.p2_name : row.p1_name) as string,
+      place: ((isP1 ? row.p1_place : row.p2_place) as string | null) ?? null,
+      myScore: ((isP1 ? result.player1Score : result.player2Score) as number | null) ?? null,
+      opponentScore: ((isP1 ? result.player2Score : result.player1Score) as number | null) ?? null,
+    };
+  };
+  return {
+    tournamentId: row.tournament_id as string,
+    tournamentName: row.tournament_name as string,
+    roundLabel: (result.roundLabel as string | undefined) ?? 'match',
+    closesAt: row.ends_at as Date,
+    walkover: result.walkover === true,
+    side,
+  };
+}
+
 async function flushOutbox(
   pool: Pool,
   redis: Redis,
@@ -395,33 +477,75 @@ async function flushOutbox(
 
   const bots = await pool.query(`SELECT id FROM users WHERE id = ANY($1) AND is_bot = TRUE`, [ids]);
   const isBot = new Set<string>(bots.rows.map((r) => r.id as string));
-  const send = async (userId: string, type: string, payload: Record<string, unknown>, key: string, email = false) => {
-    if (isBot.has(userId)) return;
-    await notificationQueue
-      .add(
-        'dispatch',
-        { userId, type, channels: email ? ['in_app', 'email'] : ['in_app'], payload, idempotencyKey: key },
-        { jobId: key.replace(/:/g, '~') }
-      )
-      .catch((err) => console.error('[draw-rounds] notification failed:', err));
-  };
+  const send = sender(notificationQueue, isBot);
 
   for (const m of outbox.newMatches) {
+    const d = await matchDetails(pool, m.matchId);
+    if (!d) continue;
     for (const playerId of [m.player1Id, m.player2Id]) {
       if (isBot.has(playerId)) continue;
-      const details = await matchNotificationDetails(pool, 'match_found', m.matchId, playerId);
+      const me = d.side(playerId);
+      const notice = roundStartedNotice({
+        tournamentName: d.tournamentName,
+        roundLabel: d.roundLabel,
+        opponent: me.opponent,
+        closesAt: d.closesAt,
+        playingAt: me.place,
+      });
       await emitToUser(redis, playerId, 'match:found', { matchId: m.matchId, autoConfirmed: true });
-      await send(playerId, 'match_found', { matchId: m.matchId, autoConfirmed: true, ...details }, `match-found:${m.matchId}:${playerId}`, true);
+      await send(
+        playerId,
+        'round_started',
+        { ...notice, matchId: m.matchId, tournamentId: d.tournamentId, opponent: me.opponent, link: tournamentLink(d.tournamentId) },
+        `round-started:${m.matchId}:${playerId}`,
+        true
+      );
     }
   }
 
-  for (const d of outbox.decided) {
-    for (const [userId, type] of [[d.winnerId, 'match_won'], [d.loserId, 'match_lost']] as const) {
-      if (isBot.has(userId)) continue;
-      const details = await matchNotificationDetails(pool, type, d.matchId, userId);
-      await emitToUser(redis, userId, 'match:updated', { matchId: d.matchId, status: 'completed' });
-      await send(userId, type, { matchId: d.matchId, ...details }, `${type}:${d.matchId}:${userId}`);
-    }
+  for (const decided of outbox.decided) {
+    const d = await matchDetails(pool, decided.matchId);
+    if (!d) continue;
+    const base = { matchId: decided.matchId, tournamentId: d.tournamentId, link: tournamentLink(d.tournamentId) };
+    const winner = d.side(decided.winnerId);
+    const loser = d.side(decided.loserId);
+    await emitToUser(redis, decided.winnerId, 'match:updated', { matchId: decided.matchId, status: 'completed' });
+    await emitToUser(redis, decided.loserId, 'match:updated', { matchId: decided.matchId, status: 'completed' });
+    await send(
+      decided.winnerId,
+      'match_won',
+      {
+        ...base,
+        ...drawWonNotice({
+          tournamentName: d.tournamentName,
+          roundLabel: d.roundLabel,
+          opponent: winner.opponent,
+          myScore: winner.myScore,
+          opponentScore: winner.opponentScore,
+          walkover: d.walkover,
+          isFinal: d.roundLabel === 'Final',
+          nextDrawAt: null,
+        }),
+      },
+      `match_won:${decided.matchId}:${decided.winnerId}`
+    );
+    await send(
+      decided.loserId,
+      'match_lost',
+      {
+        ...base,
+        ...drawLostNotice({
+          tournamentName: d.tournamentName,
+          roundLabel: d.roundLabel,
+          opponent: loser.opponent,
+          myScore: loser.myScore,
+          opponentScore: loser.opponentScore,
+          walkover: d.walkover,
+          buyback: null,
+        }),
+      },
+      `match_lost:${decided.matchId}:${decided.loserId}`
+    );
   }
 
   for (const f of outbox.finished) {
@@ -429,22 +553,87 @@ async function flushOutbox(
       ? (await pool.query(`SELECT username FROM users WHERE id = $1`, [f.championId])).rows[0]?.username
       : null;
     for (const userId of f.playerIds) {
-      const message =
-        userId === f.championId
-          ? `You won ${f.name}! 🏆`
-          : champion
-            ? `${f.name} is over — ${champion} is the champion.`
-            : `${f.name} has finished.`;
+      const isChampion = userId === f.championId;
+      const message = isChampion
+        ? `You won ${f.name}! 🏆 Congratulations, champion.`
+        : champion
+          ? `${f.name} is over — ${champion} is the champion. Thanks for playing!`
+          : `${f.name} has finished. Thanks for playing!`;
       await send(
         userId,
-        'tournament_update',
-        { tournamentId: f.tournamentId, message, link: tournamentLink(f.tournamentId) },
-        `tournament-finished:${f.tournamentId}:${userId}`
+        'tournament_finished',
+        { title: isChampion ? `You won ${f.name}! 🏆` : `${f.name} has finished`, message, tournamentId: f.tournamentId, link: tournamentLink(f.tournamentId) },
+        `tournament-finished:${f.tournamentId}:${userId}`,
+        isChampion
       );
     }
   }
 
   for (const tournamentId of outbox.touched) {
     await emitBroadcast(redis, 'tournament:updated', { tournamentId, reason: 'status_changed' }).catch(() => {});
+  }
+}
+
+/** Once-only reminders: tournament starting within the hour, and round closing soon for players yet to bat. */
+export async function sendDrawReminders(pool: Pool, notificationQueue: NotificationQueue): Promise<void> {
+  const send = sender(notificationQueue, new Set());
+
+  const starting = await pool.query(
+    `SELECT t.id, t.name, t.start_date, r.user_id
+     FROM tournaments t
+     JOIN tournament_registrations r ON r.tournament_id = t.id
+     JOIN users u ON u.id = r.user_id AND u.is_bot = FALSE
+     WHERE t.play_format = 'draw' AND t.status = 'open'
+       AND t.start_date > NOW() AND t.start_date <= NOW() + ($1::bigint * INTERVAL '1 millisecond')
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id = r.user_id AND n.idempotency_key = 'tournament-starting:' || t.id || ':' || r.user_id || ':in_app'
+       )`,
+    [STARTING_SOON_MS]
+  );
+  for (const row of starting.rows) {
+    await send(
+      row.user_id,
+      'tournament_starting_soon',
+      { ...tournamentStartingSoonNotice({ tournamentName: row.name, startsAt: row.start_date }), tournamentId: row.id, link: tournamentLink(row.id) },
+      `tournament-starting:${row.id}:${row.user_id}`,
+      true
+    );
+  }
+
+  // Reminder window matches closingReminderMs: a quarter of the round, between 10 minutes and 2 hours.
+  const closing = await pool.query(
+    `SELECT m.id AS match_id, m.result->>'roundLabel' AS round_label, t.id AS tournament_id, t.name, tr.ends_at,
+            p.id AS user_id, opp.username AS opponent
+     FROM matches m
+     JOIN tournaments t ON t.id = m.tournament_id AND t.play_format = 'draw' AND t.status = 'in_progress'
+     JOIN tournament_rounds tr ON tr.tournament_id = m.tournament_id AND tr.round_number = m.round_number
+     CROSS JOIN LATERAL (VALUES (m.player1_id, m.player2_id), (m.player2_id, m.player1_id)) AS pair(me, them)
+     JOIN users p ON p.id = pair.me AND p.is_bot = FALSE
+     JOIN users opp ON opp.id = pair.them
+     WHERE m.phase = 'draw' AND m.status IN ('confirmed', 'in_progress')
+       AND tr.status = 'active' AND tr.ends_at > NOW()
+       AND tr.ends_at <= NOW() + (
+         LEAST(7200000, GREATEST(600000, t.round_duration_minutes * 15000))::bigint * INTERVAL '1 millisecond'
+       )
+       AND NOT EXISTS (SELECT 1 FROM match_innings mi WHERE mi.match_id = m.id AND mi.user_id = p.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM notifications n
+         WHERE n.user_id = p.id AND n.idempotency_key = 'round-closing:' || m.id || ':' || p.id || ':in_app'
+       )`
+  );
+  for (const row of closing.rows) {
+    await send(
+      row.user_id,
+      'round_closing_soon',
+      {
+        ...roundClosingSoonNotice({ tournamentName: row.name, roundLabel: row.round_label ?? 'match', opponent: row.opponent, closesAt: row.ends_at }),
+        matchId: row.match_id,
+        tournamentId: row.tournament_id,
+        link: tournamentLink(row.tournament_id),
+      },
+      `round-closing:${row.match_id}:${row.user_id}`,
+      true
+    );
   }
 }

@@ -11,6 +11,26 @@ export const metaSoloTargetSchema = z.object({
   target: z.number().int().min(0).max(999),
 });
 
+const isTimeZone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Optional IANA time zone for human-readable times in responses. */
+export const timeZoneQuerySchema = z.object({
+  timeZone: z.string().max(64).refine(isTimeZone, 'Unknown time zone').optional(),
+});
+
+export const metaPlayerCardQuerySchema = z.object({
+  userId: z.string().uuid(),
+  /** IANA zone (e.g. Asia/Karachi) for the times in `statusText`; UTC when omitted. */
+  timeZone: z.string().max(64).refine(isTimeZone, 'Unknown time zone').optional(),
+});
+
 export const metaCurrentMatchQuerySchema = z.object({
   userId: z.string().uuid(),
   /** Optional: only this tournament's match, for a player in several. */
