@@ -1,6 +1,6 @@
 # Simplified player flow and tournament format
 
-**Date:** 2026-11-18 · **Status:** approved, in progress · **Branch:** `feat/simplified-flow`
+**Date:** 2026-11-18 · **Status:** phases 0–6 built and tested locally (2026-11-19), not yet deployed · **Branch:** `feat/simplified-flow`
 
 ## Why
 

@@ -1,5 +1,7 @@
 # VR Cricket League — Handover & Operations Manual
 
+> **Classic format only.** This manual describes tournaments created before November 2026 (time slots, bookings, matchmaking queue). For the current format see the [Admin Guide](admin-guide.md) and [Player Guide](player-guide.md).
+
 **Who this is for:** anyone taking over the platform — product owner, tournament organiser, venue partner or support staff. It explains what the product does, how a player experiences it, what runs automatically, and how to operate every part of the admin panel.
 
 No engineering knowledge is assumed. Where something is worth knowing but technical, it sits in a *"Behind the scenes"* note you can skip.

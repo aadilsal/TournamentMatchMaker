@@ -70,8 +70,9 @@ Run `pnpm seed` to print a full feature checklist and tournament IDs.
 | Doc | Audience |
 |---|---|
 | [Documentation index](docs/README.md) | Everything below, plus QA reports and audits |
-| [Player Guide](docs/guides/player-guide.md) | First-time players — site navigation and full tournament flow |
-| [Operations Manual](docs/guides/operations-manual.md) | Organisers, venue partners and support staff |
+| [Player Guide](docs/guides/player-guide.md) | Players — joining, playing, buybacks, headset |
+| [Admin Guide](docs/guides/admin-guide.md) | Admins, venue partners and support staff |
+| [Flow diagrams](docs/flows/README.md) | Everyone — how the app works, as pictures |
 | [Deployment](docs/operations/deployment.md) | Engineers deploying to production |
 | [Meta Integration API](docs/integrations/meta/integration-api.md) | Meta Quest app developers |
 | [apps/api/README.md](apps/api/README.md) | API server |
@@ -82,17 +83,14 @@ Run `pnpm seed` to print a full feature checklist and tournament IDs.
 
 ## Player Journey (summary)
 
-1. **Register** at `/register` — set city, VR headset status, skill profile.
-2. **Browse tournaments** at `/tournaments` — open, in-progress, and completed events.
-3. **Enter a tournament** via `/play?tournament=:id`:
-   - **VR players:** one-click "Find my match" — auto-enqueued, no venue booking.
-   - **Non-VR players:** pick a nearby venue → date → time slot within the active round window → confirm booking.
-4. **Get matched** automatically — the worker pairs players by skill tier and city preference.
-5. **Confirm the match** on `/matches` when notified (bell icon + real-time updates).
-6. **Play in VR** — scores are submitted from the Meta Quest app (not the website).
-7. **Advance or buy back** — winners move up; eliminated players can buy a life back (Stripe) during normal rounds before knockout.
+1. **Register or log in** — the app sends you to the right step automatically.
+2. **Choose a tournament** — only tournaments still taking players are listed.
+3. **Choose where you play** — a venue, or **Home** if you have a VR headset.
+4. **My tournaments** — one card per tournament says what to do next; link your headset with the 4-digit code.
+5. **Play** — each round you get one opponent; play your innings any time before the round closes.
+6. **Win to go through** — the last player standing is champion. Lost in round 1? Buy back in.
 
-See [docs/guides/player-guide.md](docs/guides/player-guide.md) for the complete walkthrough.
+See [docs/guides/player-guide.md](docs/guides/player-guide.md) for the full walkthrough.
 
 ## Web Routes
 
@@ -102,19 +100,18 @@ See [docs/guides/player-guide.md](docs/guides/player-guide.md) for the complete 
 |---|---|
 | `/` | Marketing landing page |
 | `/login`, `/register` | Authentication |
-| `/welcome` | Post-registration onboarding |
-| `/tournaments` | Tournament hub |
-| `/tournaments/:id` | Detail, bracket, join/withdraw, buyback |
-| `/play?tournament=:id` | Enter flow (venue + slot or VR quick-enter) |
-| `/venues`, `/venues/:id` | Browse and book venue slots |
-| `/bookings` | Your confirmed bookings |
-| `/matches` | Active matches — confirm, decline, buyback prompts |
+| `/start` | Sends a player to the right step of the guided flow |
+| `/join` | ① Choose a tournament |
+| `/join/:tournamentId` | ② Where you play (a venue, or Home for headset owners) |
+| `/my-tournaments` | ③ My tournaments — one card per tournament, headset code |
+| `/tournaments`, `/tournaments/:id` | Browse tournaments; rounds and results |
+| `/play`, `/venues`, `/bookings`, `/matches`, `/welcome` | Old pages — redirect into the guided flow |
 | `/profile` | Private profile, avatar, rating tier |
 | `/players/:username` | Public player profile |
 
 ### Admin (`/admin/*`)
 
-Dashboard, users, venues, bookings, tournaments (full lifecycle), matches, buybacks, queue monitor, notifications, integrations status, system health. Requires `venue_admin`, `tournament_admin`, or `superadmin` role.
+Dashboard (incl. where players are playing), users, venues (incl. players at each venue), tournaments (create, publish, start now, close round now), matches, buybacks, notifications, integrations status, system health. Requires `venue_admin`, `tournament_admin`, or `superadmin` role.
 
 ## API Overview
 
@@ -123,14 +120,14 @@ All versioned routes mount under `/api/v1`. Additional: `GET /health`, `POST /we
 | Area | Key endpoints |
 |---|---|
 | **Auth** | `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `POST /auth/logout` |
-| **Players** | `GET /players/me`, `PATCH /players/me`, `GET /players/:username` |
+| **Players** | `GET /players/me`, `PATCH /players/me`, `GET /players/me/journey`, `GET /players/me/tournaments`, `GET /players/:username` |
 | **Geo** | `GET /geo/location`, `GET /geo/reverse`, `GET /geo/countries`, `GET /geo/cities` |
 | **Venues & slots** | `GET /venues`, `GET /venues/:id/slots?date=`, `POST /bookings` |
-| **Tournaments** | `GET /tournaments`, `POST /tournaments/:id/enter`, `POST /tournaments/:id/buyback/checkout`, `GET /tournaments/:id/bracket` |
+| **Tournaments** | `GET /tournaments`, `POST`/`DELETE /tournaments/:id/join`, `POST /tournaments/:id/buyback/checkout`, `GET /tournaments/:id/rounds`, `GET /tournaments/:id/matches` |
 | **Matchmaking** | `GET /matchmaking/status` (automatic — no manual queue UI for players) |
 | **Matches** | `GET /matches/me`, `POST /matches/:id/confirm`, `POST /matches/:id/decline` |
 | **Notifications** | `GET /notifications`, `PATCH /notifications/:id/read` |
-| **Meta** | `GET /integrations/meta/matches/current`, `POST /integrations/meta/matches/:id/scores` |
+| **Meta** | `POST /integrations/meta/identity/verify-link-code`, `GET /integrations/meta/players/profile`, `GET /integrations/meta/matches/current`, `POST /integrations/meta/matches/:id/scores`, `GET /integrations/meta/tournaments/live` |
 | **Admin** | `/admin/*` — full CRUD for all resources |
 
 Full route listing: [apps/api/README.md](apps/api/README.md).
@@ -152,13 +149,15 @@ Full route listing: [apps/api/README.md](apps/api/README.md).
 
 ## Tournament Format
 
-All tournaments follow a unified flow (see `packages/shared/src/tournament-flow.ts`):
+New tournaments use the **draw format** (see [docs/flows/match-and-round.md](docs/flows/match-and-round.md)):
 
-1. **Normal rounds** — players queue and get matched by skill tier within a round deadline.
-2. **Advancement** — when a round closes, top performers advance.
-3. **Buybacks** — eliminated players can re-enter (Stripe) during normal rounds while >50% of the original field remains.
-4. **Knockout** — when active players drop to ≤50% of the starting field, a bracket begins (RO16 → QF → SF → Final).
-5. **Venue slots** — non-VR bookings must fall within the active round window.
+1. **Draft → Open → Live → Finished.** Registration closes at the start time; round 1 is drawn automatically.
+2. **Every round is a knockout draw** — re-seeded by rating, top vs bottom; an odd field gives the lowest seed a computer opponent.
+3. **Play any time inside the round.** One innings each; the second player chases. Ties are replayed.
+4. **Rounds close at their deadline** (or early once every match is decided); unplayed matches are settled and the next round is drawn.
+5. **Buybacks** only in round 1, never in a final.
+
+Tournaments created before November 2026 keep the classic format (slots, bookings, queue) until they finish.
 
 ## Project Structure
 
