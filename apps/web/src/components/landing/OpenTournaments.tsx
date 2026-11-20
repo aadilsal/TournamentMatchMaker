@@ -44,7 +44,7 @@ export function OpenTournaments() {
             <Trophy className="mx-auto h-8 w-8 text-[var(--color-primary)]" />
             <p className="mt-4 text-lg font-semibold">New tournaments are on the way</p>
             <p className="mt-2 text-[var(--color-muted-foreground)]">
-              Create your account now and we&rsquo;ll email you the moment one opens.
+              Create your account now so youCreate your account now and we&rsquo;ll email you the moment one opens.rsquo;re ready to join the moment one opens.
             </p>
             <Link to="/register" className={buttonVariants({ size: 'lg', className: 'mt-6 gap-2' })}>
               Create my account <ArrowRight className="h-4 w-4" />
