@@ -1,7 +1,7 @@
 import type { Job } from 'bullmq';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
-import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback } from '@vr-tournament/shared/email';
+import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback, renderNotificationEmail } from '@vr-tournament/shared/email';
 import type { WorkerEnv } from '../config/env.js';
 import { emitToUser } from '../lib/socket-bridge.js';
 import { matchFoundEmailHtml } from '../templates/match-found.email.js';
@@ -46,20 +46,13 @@ async function upsertNotification(
 const escapeHtml = (text: string) =>
   text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-/** Plain notice email: the message and one button back into the app. */
-function noticeEmailHtml(message: string, url: string): string {
-  return `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#111">
-  <p>${escapeHtml(message)}</p>
-  <p><a href="${escapeHtml(url)}" style="display:inline-block;background:#10b981;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Pixel Paddle</a></p>
-</div>`;
-}
-
 /** error is null once a provider accepted the email; retryable when every configured provider failed. */
 async function sendEmail(
   env: WorkerEnv,
   to: string,
   subject: string,
-  html: string
+  html: string,
+  text?: string
 ): Promise<{ error: string | null; retryable: boolean }> {
   if (!env.NOTIFICATION_EMAIL_ENABLED) return { error: 'email notifications are disabled', retryable: false };
 
@@ -68,7 +61,7 @@ async function sendEmail(
     console.log(`[email:dev] To: ${to} | Subject: ${subject}\n${html}`);
     return { error: 'no email provider is configured; email was only logged', retryable: false };
   }
-  const result = await sendEmailWithFallback(cfg, { to, subject, html });
+  const result = await sendEmailWithFallback(cfg, { to, subject, html, text });
   if (result.failures.length) console.warn(`[email] fallbacks used for ${to}: ${result.failures.join(' | ')}`);
   return { error: result.sent ? null : result.failures.join(' | '), retryable: !result.sent };
 }
@@ -112,14 +105,15 @@ export async function processDispatchNotificationJob(
   }
 
   if (channels.includes('email')) {
-    // Types without their own template: send the notice's own title and message.
-    let subject = typeof payload.title === 'string' ? payload.title : 'Pixel Paddle update';
-    let html =
-      typeof payload.message === 'string'
-        ? noticeEmailHtml(payload.message, typeof payload.link === 'string' ? `${env.APP_URL}${payload.link}` : env.APP_URL)
-        : `<p>You have a new notification: ${escapeHtml(type)}</p>`;
+    // Branded layout for every notification; legacy templates only when it has nothing to render.
+    const branded = renderNotificationEmail(type, payload as Record<string, unknown>, env.APP_URL);
+    let subject = branded?.subject ?? 'VR Cricket League update';
+    let html = branded?.html ?? `<p>You have a new notification: ${escapeHtml(type)}</p>`;
+    const text: string | undefined = branded?.text;
 
-    if (type === 'match_found') {
+    if (branded) {
+      // Branded email already built above.
+    } else if (type === 'match_found') {
       const opponent = payload.opponent as { username?: string } | undefined;
       const venue = payload.venue as { name?: string } | undefined;
       const slot = payload.slot as { startTime?: string } | undefined;
@@ -158,7 +152,7 @@ export async function processDispatchNotificationJob(
 
     let retryError: Error | null = null;
     try {
-      const { error: notSent, retryable } = await sendEmail(env, user.email, subject, html);
+      const { error: notSent, retryable } = await sendEmail(env, user.email, subject, html, text);
       // The status enum has no 'skipped'; an email that never left must not read as sent.
       await upsertNotification(
         pool,

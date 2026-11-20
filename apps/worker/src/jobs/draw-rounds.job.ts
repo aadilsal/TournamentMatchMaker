@@ -496,7 +496,14 @@ async function flushOutbox(
       await send(
         playerId,
         'round_started',
-        { ...notice, matchId: m.matchId, tournamentId: d.tournamentId, opponent: me.opponent, link: tournamentLink(d.tournamentId) },
+        {
+          ...notice,
+          matchId: m.matchId,
+          tournamentId: d.tournamentId,
+          opponent: me.opponent,
+          link: tournamentLink(d.tournamentId),
+          emailData: { tournamentName: d.tournamentName, roundLabel: d.roundLabel, opponent: me.opponent, closesAt: d.closesAt, playingAt: me.place },
+        },
         `round-started:${m.matchId}:${playerId}`,
         true
       );
@@ -562,7 +569,13 @@ async function flushOutbox(
       await send(
         userId,
         'tournament_finished',
-        { title: isChampion ? `You won ${f.name}! 🏆` : `${f.name} has finished`, message, tournamentId: f.tournamentId, link: tournamentLink(f.tournamentId) },
+        {
+          title: isChampion ? `You won ${f.name}! 🏆` : `${f.name} has finished`,
+          message,
+          tournamentId: f.tournamentId,
+          link: tournamentLink(f.tournamentId),
+          emailData: { tournamentName: f.name, champion: isChampion },
+        },
         `tournament-finished:${f.tournamentId}:${userId}`,
         isChampion
       );
@@ -595,7 +608,12 @@ export async function sendDrawReminders(pool: Pool, notificationQueue: Notificat
     await send(
       row.user_id,
       'tournament_starting_soon',
-      { ...tournamentStartingSoonNotice({ tournamentName: row.name, startsAt: row.start_date }), tournamentId: row.id, link: tournamentLink(row.id) },
+      {
+        ...tournamentStartingSoonNotice({ tournamentName: row.name, startsAt: row.start_date }),
+        tournamentId: row.id,
+        link: tournamentLink(row.id),
+        emailData: { tournamentName: row.name, startsAt: row.start_date },
+      },
       `tournament-starting:${row.id}:${row.user_id}`,
       true
     );
@@ -628,6 +646,7 @@ export async function sendDrawReminders(pool: Pool, notificationQueue: Notificat
       'round_closing_soon',
       {
         ...roundClosingSoonNotice({ tournamentName: row.name, roundLabel: row.round_label ?? 'match', opponent: row.opponent, closesAt: row.ends_at }),
+        emailData: { tournamentName: row.name, roundLabel: row.round_label ?? 'match', opponent: row.opponent, closesAt: row.ends_at },
         matchId: row.match_id,
         tournamentId: row.tournament_id,
         link: tournamentLink(row.tournament_id),

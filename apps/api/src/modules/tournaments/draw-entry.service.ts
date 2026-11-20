@@ -105,6 +105,7 @@ export class DrawEntryService {
           startDate,
           message: `You're in ${tournamentName}! Your first match is drawn when it starts.`,
           link: tournamentLink(tournamentId),
+          emailData: { playingAt: registration.venue?.name ?? 'Home' },
         },
         idempotencyKey: `tournament-reg:${tournamentId}:${userId}`,
       }).catch((err: unknown) => console.error('Failed to enqueue registration notification:', err));

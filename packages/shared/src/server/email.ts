@@ -5,6 +5,10 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 export type EmailProvider = 'resend' | 'smtp' | 'ses';
 
 export interface EmailConfig {
+  /** Display name shown as the sender, e.g. "VR Cricket League by Pixel Paddle". */
+  fromName?: string;
+  /** Page where players manage notifications (List-Unsubscribe). */
+  unsubscribeUrl?: string;
   resend?: { apiKey?: string; from: string };
   smtp?: { host?: string; port: number; secure: boolean; user?: string; pass?: string; from: string };
   ses?: { region: string; accessKeyId: string; secretAccessKey: string; from: string };
@@ -14,6 +18,42 @@ export interface EmailMessage {
   to: string;
   subject: string;
   html: string;
+  /** Plain-text part; derived from the HTML when omitted (HTML-only mail scores as spam). */
+  text?: string;
+}
+
+/** What every provider sends besides the body: named sender and unsubscribe headers. */
+interface Envelope {
+  from: string;
+  text: string;
+  headers: Record<string, string>;
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, '$2 ($1)')
+    .replace(/<(br|\/p|\/tr|\/h1|\/div)[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function envelope(cfg: EmailConfig, address: string, msg: EmailMessage): Envelope {
+  const name = cfg.fromName?.replace(/["\r\n]/g, '').trim();
+  const unsub = [`<mailto:${address}?subject=unsubscribe>`, ...(cfg.unsubscribeUrl ? [`<${cfg.unsubscribeUrl}>`] : [])];
+  return {
+    from: name ? `"${name}" <${address}>` : address,
+    text: msg.text ?? htmlToText(msg.html),
+    headers: { 'List-Unsubscribe': unsub.join(', ') },
+  };
 }
 
 export type EmailResult =
@@ -32,11 +72,11 @@ export function configuredEmailProviders(cfg: EmailConfig): EmailProvider[] {
   return out;
 }
 
-async function viaResend(cfg: NonNullable<EmailConfig['resend']>, msg: EmailMessage): Promise<void> {
+async function viaResend(cfg: NonNullable<EmailConfig['resend']>, msg: EmailMessage, env: Envelope): Promise<void> {
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.apiKey!.trim()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: cfg.from, to: [msg.to], subject: msg.subject, html: msg.html }),
+    body: JSON.stringify({ from: env.from, to: [msg.to], subject: msg.subject, html: msg.html, text: env.text, headers: env.headers }),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(`Resend ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -44,7 +84,7 @@ async function viaResend(cfg: NonNullable<EmailConfig['resend']>, msg: EmailMess
 
 let smtpTransport: nodemailer.Transporter | null = null;
 let smtpKey = '';
-async function viaSmtp(cfg: NonNullable<EmailConfig['smtp']>, msg: EmailMessage): Promise<void> {
+async function viaSmtp(cfg: NonNullable<EmailConfig['smtp']>, msg: EmailMessage, env: Envelope): Promise<void> {
   const key = `${cfg.host}:${cfg.port}:${cfg.user}`;
   if (!smtpTransport || smtpKey !== key) {
     smtpTransport = nodemailer.createTransport({
@@ -58,22 +98,22 @@ async function viaSmtp(cfg: NonNullable<EmailConfig['smtp']>, msg: EmailMessage)
     });
     smtpKey = key;
   }
-  await smtpTransport.sendMail({ from: cfg.from, to: msg.to, subject: msg.subject, html: msg.html });
+  await smtpTransport.sendMail({ from: env.from, to: msg.to, subject: msg.subject, html: msg.html, text: env.text, headers: env.headers });
 }
 
 let sesClient: SESClient | null = null;
-async function viaSes(cfg: NonNullable<EmailConfig['ses']>, msg: EmailMessage): Promise<void> {
+async function viaSes(cfg: NonNullable<EmailConfig['ses']>, msg: EmailMessage, env: Envelope): Promise<void> {
   sesClient ??= new SESClient({
     region: cfg.region,
     credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
   });
   await sesClient.send(
     new SendEmailCommand({
-      Source: cfg.from,
+      Source: env.from,
       Destination: { ToAddresses: [msg.to] },
       Message: {
         Subject: { Data: msg.subject, Charset: 'UTF-8' },
-        Body: { Html: { Data: msg.html, Charset: 'UTF-8' } },
+        Body: { Html: { Data: msg.html, Charset: 'UTF-8' }, Text: { Data: env.text, Charset: 'UTF-8' } },
       },
     }),
     { abortSignal: AbortSignal.timeout(TIMEOUT_MS) }
@@ -94,10 +134,14 @@ export interface EmailEnv {
   AWS_ACCESS_KEY_ID: string;
   AWS_SECRET_ACCESS_KEY: string;
   AWS_SES_FROM_EMAIL: string;
+  EMAIL_FROM_NAME?: string;
+  APP_URL?: string;
 }
 
 export function emailConfigFromEnv(env: EmailEnv): EmailConfig {
   return {
+    fromName: env.EMAIL_FROM_NAME ?? 'VR Cricket League by Pixel Paddle',
+    unsubscribeUrl: env.APP_URL ? `${env.APP_URL.replace(/\/$/, '')}/profile` : undefined,
     resend: { apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL },
     smtp: {
       host: env.SMTP_HOST,
@@ -121,9 +165,9 @@ export async function sendEmailWithFallback(cfg: EmailConfig, msg: EmailMessage)
   const failures: string[] = [];
   for (const provider of configuredEmailProviders(cfg)) {
     try {
-      if (provider === 'resend') await viaResend(cfg.resend!, msg);
-      if (provider === 'smtp') await viaSmtp(cfg.smtp!, msg);
-      if (provider === 'ses') await viaSes(cfg.ses!, msg);
+      if (provider === 'resend') await viaResend(cfg.resend!, msg, envelope(cfg, cfg.resend!.from, msg));
+      if (provider === 'smtp') await viaSmtp(cfg.smtp!, msg, envelope(cfg, cfg.smtp!.from, msg));
+      if (provider === 'ses') await viaSes(cfg.ses!, msg, envelope(cfg, cfg.ses!.from, msg));
       return { sent: true, provider, failures };
     } catch (err) {
       failures.push(`${provider}: ${err instanceof Error ? err.message : String(err)}`);
@@ -132,3 +176,5 @@ export async function sendEmailWithFallback(cfg: EmailConfig, msg: EmailMessage)
   if (failures.length === 0) failures.push('no email provider is configured');
   return { sent: false, provider: null, failures };
 }
+
+export * from './email-templates.js';

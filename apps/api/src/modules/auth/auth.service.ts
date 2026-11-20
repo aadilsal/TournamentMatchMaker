@@ -10,6 +10,8 @@ import type { AuthPayload } from '../../middleware/auth.js';
 import { mapUser } from '../../lib/mappers.js';
 import { AppError } from '../../lib/response.js';
 import { sendEmail } from '../../lib/mailer.js';
+import { passwordResetEmail } from '@vr-tournament/shared/email';
+import { enqueueNotification } from '../../lib/bullmq.js';
 import { revokeUserTokens } from '../../lib/token-revocation.js';
 import { disconnectUser } from '../../socket/emitters.js';
 
@@ -58,6 +60,18 @@ export class AuthService {
 
       const user = mapUser(result.rows[0]);
       const tokens = await this.issueTokens(user.id, user.email, user.role as UserRole);
+      enqueueNotification(this.env, {
+        userId: user.id,
+        type: 'welcome',
+        channels: ['in_app', 'email'],
+        payload: {
+          title: 'Welcome to VR Cricket League!',
+          message: 'Choose a tournament, choose where you play, and play each round any time before it closes.',
+          link: '/start',
+          emailData: { username: user.username },
+        },
+        idempotencyKey: `welcome:${user.id}`,
+      }).catch((err: unknown) => console.error('Failed to enqueue welcome email:', err));
       return { user, ...tokens };
     } catch (err: unknown) {
       if (err && typeof err === 'object' && 'code' in err && err.code === '23505') {
@@ -196,14 +210,8 @@ export class AuthService {
     );
 
     const link = `${this.env.APP_URL}/reset-password?token=${token}`;
-    await sendEmail(
-      this.env,
-      user.email,
-      'Reset your password',
-      `<p>Someone asked to reset the password for this account.</p>
-       <p><a href="${link}">Choose a new password</a> — the link works once and expires in 1 hour.</p>
-       <p>If this wasn't you, ignore this email; your password stays the same.</p>`
-    );
+    const mail = passwordResetEmail({ link }, this.env.APP_URL);
+    await sendEmail(this.env, user.email, mail.subject, mail.html, mail.text);
   }
 
   async resetPassword(token: string, password: string) {

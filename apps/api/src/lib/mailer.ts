@@ -9,7 +9,8 @@ export async function sendEmail(
   env: Env,
   to: string,
   subject: string,
-  html: string
+  html: string,
+  text?: string
 ): Promise<boolean> {
   if (!env.NOTIFICATION_EMAIL_ENABLED) return false;
 
@@ -21,7 +22,7 @@ export async function sendEmail(
     return false;
   }
 
-  const result = await sendEmailWithFallback(cfg, { to, subject, html });
+  const result = await sendEmailWithFallback(cfg, { to, subject, html, text });
   if (!result.sent) console.error(`[email] not sent to ${to}: ${result.failures.join(' | ')}`);
   else if (result.failures.length) console.warn(`[email] sent via ${result.provider} after: ${result.failures.join(' | ')}`);
   return result.sent;

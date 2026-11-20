@@ -1191,7 +1191,12 @@ export class TournamentsService {
             tournamentId,
             amountCents: buyback.amount_cents,
             link: tournamentLink(tournamentId),
-            ...(isDraw ? buybackCompletedNotice({ tournamentName: (await this.getById(tournamentId)).name }) : {}),
+            ...(isDraw
+              ? await (async () => {
+                  const tournamentName = (await this.getById(tournamentId)).name;
+                  return { ...buybackCompletedNotice({ tournamentName }), emailData: { tournamentName } };
+                })()
+              : {}),
           },
           idempotencyKey: `buyback:${buybackId}`,
         }).catch(console.error);

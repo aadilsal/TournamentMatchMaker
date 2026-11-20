@@ -64,6 +64,15 @@ export async function notifyDrawResult(pool: Pool, env: Env, matchId: string, wi
     d.roundLabel !== 'Final' &&
     d.closesAt != null &&
     new Date(d.closesAt).getTime() > Date.now();
+  const lost = {
+    tournamentName: d.tournamentName,
+    roundLabel: d.roundLabel,
+    opponent: d.nameOf(winnerId),
+    myScore: d.scoreOf(loserId),
+    opponentScore: d.scoreOf(winnerId),
+    walkover: false,
+    buyback: buybackOpen ? { priceCents: Number(d.row.buyback_price_cents), until: d.closesAt } : null,
+  };
 
   if (!d.isBot(winnerId)) {
     send(
@@ -89,16 +98,8 @@ export async function notifyDrawResult(pool: Pool, env: Env, matchId: string, wi
       env,
       loserId,
       'match_lost',
-      drawLostNotice({
-        tournamentName: d.tournamentName,
-        roundLabel: d.roundLabel,
-        opponent: d.nameOf(winnerId),
-        myScore: d.scoreOf(loserId),
-        opponentScore: d.scoreOf(winnerId),
-        walkover: false,
-        buyback: buybackOpen ? { priceCents: Number(d.row.buyback_price_cents), until: d.closesAt } : null,
-      }),
-      base,
+      drawLostNotice(lost),
+      { ...base, emailData: lost },
       `match-lost:${matchId}:${loserId}`,
       buybackOpen
     );
@@ -128,12 +129,13 @@ export async function notifyOpponentPlayed(pool: Pool, env: Env, matchId: string
   if (!d) return;
   const otherId = batterId === d.row.player1_id ? d.row.player2_id : d.row.player1_id;
   if (d.isBot(otherId)) return;
+  const played = { tournamentName: d.tournamentName, roundLabel: d.roundLabel, opponent: d.nameOf(batterId), opponentScore: score };
   send(
     env,
     otherId,
     'opponent_played',
-    opponentPlayedNotice({ tournamentName: d.tournamentName, roundLabel: d.roundLabel, opponent: d.nameOf(batterId), opponentScore: score }),
-    { matchId, tournamentId: d.row.tournament_id, link: d.link },
+    opponentPlayedNotice(played),
+    { matchId, tournamentId: d.row.tournament_id, link: d.link, emailData: played },
     `opponent-played:${matchId}:${Number(d.result.tieCount ?? 0)}:${otherId}`,
     true
   );
