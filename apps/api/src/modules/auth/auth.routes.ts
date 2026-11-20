@@ -4,6 +4,7 @@ import {
   loginSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  loginLinkSchema,
 } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { RedisClient } from '../../lib/redis.js';
@@ -42,7 +43,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
       res.cookie(
         result.refreshCookieName,
         result.refreshToken,
-        authService.getRefreshCookieOptions()
+        authService.getRefreshCookieOptions(result.refreshMaxAgeMs)
       );
       sendSuccess(res, { accessToken: result.accessToken, user: result.user }, {}, 201);
     } catch (err) {
@@ -56,7 +57,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
       res.cookie(
         result.refreshCookieName,
         result.refreshToken,
-        authService.getRefreshCookieOptions()
+        authService.getRefreshCookieOptions(result.refreshMaxAgeMs)
       );
       sendSuccess(res, { accessToken: result.accessToken, user: result.user });
     } catch (err) {
@@ -74,8 +75,28 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
 
   router.post('/reset-password', credentialLimit, validate(resetPasswordSchema), async (req, res, next) => {
     try {
-      await authService.resetPassword(req.body.token, req.body.password);
-      sendSuccess(res, { success: true });
+      const result = await authService.resetPassword(req.body.token, req.body.password);
+      if (!result) return sendSuccess(res, { success: true });
+      res.cookie(result.refreshCookieName, result.refreshToken, authService.getRefreshCookieOptions(result.refreshMaxAgeMs));
+      sendSuccess(res, { success: true, accessToken: result.accessToken, user: result.user });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/login-link/peek', credentialLimit, validate(loginLinkSchema), async (req, res, next) => {
+    try {
+      sendSuccess(res, await authService.peekLoginLink(req.body.token));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/login-link', credentialLimit, validate(loginLinkSchema), async (req, res, next) => {
+    try {
+      const result = await authService.redeemLoginLink(req.body.token);
+      res.cookie(result.refreshCookieName, result.refreshToken, authService.getRefreshCookieOptions(result.refreshMaxAgeMs));
+      sendSuccess(res, { accessToken: result.accessToken, user: result.user });
     } catch (err) {
       next(err);
     }
@@ -97,7 +118,7 @@ export function createAuthRouter(pool: Pool, redis: RedisClient, env: Env): Rout
       res.cookie(
         result.refreshCookieName,
         result.refreshToken,
-        authService.getRefreshCookieOptions()
+        authService.getRefreshCookieOptions(result.refreshMaxAgeMs)
       );
       sendSuccess(res, { accessToken: result.accessToken, user: result.user });
     } catch (err) {

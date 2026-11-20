@@ -1,11 +1,15 @@
 // Branded HTML + plain-text emails in the app's dark style; one layout for every message.
 import { timeLeft } from '../draw-notifications.js';
+import { LOGIN_LINK_TTL_MINUTES, loginLinkUrl } from '../login-link.js';
 
 export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
+  layout?: EmailLayout;
 }
+
+export const SIGN_IN_NOTICE = `This button signs you in automatically and expires in ${LOGIN_LINK_TTL_MINUTES} minutes.`;
 
 const C = {
   bg: '#0a0a0a',
@@ -39,7 +43,14 @@ export interface EmailLayout {
 }
 
 /** The shared frame: header, card with a red top bar, one button, footer. */
-export function renderEmailLayout(l: EmailLayout, appUrl: string): { html: string; text: string } {
+export function renderEmailLayout(
+  l: EmailLayout,
+  appUrl: string,
+  signInToken?: string
+): { html: string; text: string } {
+  // Only buttons into the app get the one-tap sign-in.
+  const signIn = !!(l.cta && signInToken && l.cta.url.startsWith(appUrl));
+  const ctaUrl = l.cta && signIn ? loginLinkUrl(appUrl, signInToken!, l.cta.url.slice(appUrl.length) || '/') : l.cta?.url;
   const p = (t: string) =>
     `<p style="margin:0 0 14px;font:400 15px/1.6 ${FONT};color:${C.body}">${esc(t)}</p>`;
   const matchup = l.matchup
@@ -71,8 +82,10 @@ export function renderEmailLayout(l: EmailLayout, appUrl: string): { html: strin
   const cta = l.cta
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 6px"><tr>
         <td bgcolor="${C.brand}" style="border-radius:10px;background:${C.brand}">
-          <a href="${esc(l.cta.url)}" style="display:inline-block;padding:14px 28px;font:700 15px ${FONT};color:#ffffff;text-decoration:none;border-radius:10px">${esc(l.cta.label)}</a>
-        </td></tr></table>`
+          <a href="${esc(ctaUrl!)}" style="display:inline-block;padding:14px 28px;font:700 15px ${FONT};color:#ffffff;text-decoration:none;border-radius:10px">${esc(l.cta.label)}</a>
+        </td></tr></table>${
+          signIn ? `<p style="margin:8px 0 0;font:400 12px/1.5 ${FONT};color:${C.faint}">${esc(SIGN_IN_NOTICE)}</p>` : ''
+        }`
     : '';
 
   const html = `<!doctype html>
@@ -121,7 +134,8 @@ export function renderEmailLayout(l: EmailLayout, appUrl: string): { html: strin
     l.matchup ? `${l.matchup.left}  vs  ${l.matchup.right}` : '',
     l.highlight ? `${l.highlight.value} — ${l.highlight.caption}` : '',
     ...(l.details ?? []).map(([k, v]) => `${k}: ${v}`),
-    l.cta ? `\n${l.cta.label}: ${l.cta.url}` : '',
+    l.cta ? `\n${l.cta.label}: ${ctaUrl}` : '',
+    signIn ? SIGN_IN_NOTICE : '',
     l.note ?? '',
     '',
     '—',
@@ -137,6 +151,7 @@ export function renderEmailLayout(l: EmailLayout, appUrl: string): { html: strin
 const build = (subject: string, layout: EmailLayout, appUrl: string): RenderedEmail => ({
   subject,
   ...renderEmailLayout(layout, appUrl),
+  layout,
 });
 const mine = (appUrl: string) => `${appUrl}/my-tournaments`;
 const hi = (username?: string | null) => (username ? `Hi ${username},` : undefined);
@@ -310,7 +325,18 @@ export function noticeEmail(d: { title: string; message: string; link?: string |
 type Payload = Record<string, unknown> & { emailData?: Record<string, unknown> };
 
 /** Pick the branded email for a notification; null when there is nothing to say. */
-export function renderNotificationEmail(type: string, payload: Payload, appUrl: string): RenderedEmail | null {
+export function renderNotificationEmail(
+  type: string,
+  payload: Payload,
+  appUrl: string,
+  signInToken?: string
+): RenderedEmail | null {
+  const email = pickNotificationEmail(type, payload, appUrl);
+  if (!email || !signInToken || !email.layout) return email;
+  return { ...email, ...renderEmailLayout(email.layout, appUrl, signInToken) };
+}
+
+function pickNotificationEmail(type: string, payload: Payload, appUrl: string): RenderedEmail | null {
   const d = (payload.emailData ?? {}) as Record<string, any>;
   const has = (...keys: string[]) => keys.every((k) => d[k] != null);
   switch (type) {

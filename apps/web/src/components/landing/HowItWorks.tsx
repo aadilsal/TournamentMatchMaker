@@ -5,18 +5,18 @@ import { UserPlus, MapPin, Trophy } from 'lucide-react';
 const steps = [
   {
     icon: UserPlus,
-    title: 'Build your player profile',
-    body: 'Set your batting style, city, skill tier and VR headset status. One account covers venues, bookings and all tournament formats.',
+    title: 'Choose a tournament',
+    body: 'Create your free account and join any open tournament before it starts. You can play in more than one at a time.',
   },
   {
     icon: MapPin,
-    title: 'Book a VR cricket venue',
-    body: 'No headset? Find a certified VR arena near you. Pick an open slot and confirm — your crease is locked in under a second.',
+    title: 'Choose where you play',
+    body: 'At a VR cricket arena near you, or from home on your own Meta Quest. Change your mind any time before the start.',
   },
   {
     icon: Trophy,
-    title: 'Step up to the crease',
-    body: 'Enter the tournament queue and get paired by skill tier. First over starts the moment your match is confirmed — live updates all the way.',
+    title: 'Play each round',
+    body: 'Each round you are drawn against an opponent of your level. Play your innings any time before the round closes — win to go through.',
   },
 ];
 

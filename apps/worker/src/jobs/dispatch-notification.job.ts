@@ -1,4 +1,6 @@
+import { createHash, randomBytes } from 'crypto';
 import type { Job } from 'bullmq';
+import { LOGIN_LINK_TTL_MINUTES } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Redis } from 'ioredis';
 import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback, renderNotificationEmail } from '@vr-tournament/shared/email';
@@ -43,6 +45,18 @@ async function upsertNotification(
   return result.rows[0];
 }
 
+/** Single-use sign-in token for this email's button; only its hash is stored. */
+async function createLoginLink(pool: Pool, userId: string): Promise<string> {
+  const token = randomBytes(32).toString('hex');
+  await pool.query(`DELETE FROM login_links WHERE user_id = $1 AND expires_at < NOW() - INTERVAL '1 day'`, [userId]);
+  await pool.query(
+    `INSERT INTO login_links (user_id, token_hash, expires_at)
+     VALUES ($1, $2, NOW() + make_interval(mins => $3))`,
+    [userId, createHash('sha256').update(token).digest('hex'), LOGIN_LINK_TTL_MINUTES]
+  );
+  return token;
+}
+
 const escapeHtml = (text: string) =>
   text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -74,7 +88,10 @@ export async function processDispatchNotificationJob(
 ) {
   const { userId, type, channels, payload, idempotencyKey } = job.data;
 
-  const userResult = await pool.query(`SELECT email, username, is_bot FROM users WHERE id = $1`, [userId]);
+  const userResult = await pool.query(
+    `SELECT email, username, is_bot, role, suspended_at FROM users WHERE id = $1`,
+    [userId]
+  );
   const user = userResult.rows[0];
   // Bots have no inbox: skip every channel.
   if (!user || user.is_bot) return;
@@ -106,7 +123,11 @@ export async function processDispatchNotificationJob(
 
   if (channels.includes('email')) {
     // Branded layout for every notification; legacy templates only when it has nothing to render.
-    const branded = renderNotificationEmail(type, payload as Record<string, unknown>, env.APP_URL);
+    const signIn =
+      env.NOTIFICATION_EMAIL_ENABLED && user.role === 'player' && !user.suspended_at
+        ? await createLoginLink(pool, userId)
+        : undefined;
+    const branded = renderNotificationEmail(type, payload as Record<string, unknown>, env.APP_URL, signIn);
     let subject = branded?.subject ?? 'VR Cricket League update';
     let html = branded?.html ?? `<p>You have a new notification: ${escapeHtml(type)}</p>`;
     const text: string | undefined = branded?.text;

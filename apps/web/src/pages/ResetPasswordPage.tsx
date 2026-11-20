@@ -1,8 +1,13 @@
 import { useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, CheckCircle2, X } from 'lucide-react';
-import { ApiClientError, apiPost } from '@/lib/api';
+import type { AuthTokens } from '@vr-tournament/shared';
+import { ApiClientError, apiPost, setAccessToken } from '@/lib/api';
+import { connectSocket } from '@/hooks/useSocket';
+import { isAdminRole } from '@/hooks/useAuthUser';
+import { LIVE_QUERY_KEYS } from '@/lib/query-keys';
+import { postLoginPath } from '@/lib/return-to';
 import { getUserErrorMessage } from '@/lib/user-messages';
 import { getPasswordRequirements, passwordRuleError } from '@/lib/password-strength';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -21,13 +26,23 @@ function resetErrorMessage(err: unknown): string {
 
 export function ResetPasswordPage() {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const token = searchParams.get('token') ?? '';
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
 
   const reset = useMutation({
-    mutationFn: () => apiPost('/auth/reset-password', { token, password }),
+    mutationFn: () => apiPost<{ success: true } & Partial<AuthTokens>>('/auth/reset-password', { token, password }),
+    // Signed straight in after a reset; falls back to the "sign in" card if the API gave no session.
+    onSuccess: (data) => {
+      if (!data.accessToken || !data.user) return;
+      setAccessToken(data.accessToken);
+      queryClient.setQueryData(LIVE_QUERY_KEYS.me, data.user);
+      connectSocket();
+      navigate(postLoginPath(null, isAdminRole(data.user.role)), { replace: true });
+    },
     onError: (err) => setError(resetErrorMessage(err)),
   });
 

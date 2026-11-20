@@ -39,6 +39,10 @@ export const resetPasswordSchema = z.object({
   password: passwordSchema,
 });
 
+export const loginLinkSchema = z.object({
+  token: z.string().min(1).max(256),
+});
+
 export const registerFormSchema = registerSchema
   .extend({
     confirmPassword: z.string().min(1, 'Please re-enter your password'),

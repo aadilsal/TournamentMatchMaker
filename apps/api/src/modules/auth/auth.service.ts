@@ -4,7 +4,7 @@ import { createHash, randomBytes } from 'crypto';
 import type { Pool } from 'pg';
 import type { RedisClient } from '../../lib/redis.js';
 import type { RegisterInput, UserRole } from '@vr-tournament/shared';
-import { DEFAULT_RATING_POINTS, pointsToTier } from '@vr-tournament/shared';
+import { DEFAULT_RATING_POINTS, pointsToTier, sessionDaysForRole } from '@vr-tournament/shared';
 import type { Env } from '../../config/env.js';
 import type { AuthPayload } from '../../middleware/auth.js';
 import { mapUser } from '../../lib/mappers.js';
@@ -20,6 +20,7 @@ const REFRESH_COOKIE = 'refresh_token';
 // Compared against when there is no real hash, so unknown emails cost the same bcrypt time.
 const DUMMY_HASH = '$2b$12$jkptTrveB6DWy/7LIKG3dOdOdELxTVq1/9vjG76ifkdpBOngaIxXO';
 const INVALID_RESET = 'This reset link is invalid or has expired';
+const INVALID_LOGIN_LINK = 'This sign-in link has expired or was already used';
 
 const normaliseEmail = (email: string) => email.trim().toLowerCase();
 
@@ -237,6 +238,7 @@ export class AuthService {
       ]);
       // Any other outstanding link for this account dies with this one.
       await client.query(`DELETE FROM password_resets WHERE user_id = $1`, [userId]);
+      await client.query(`DELETE FROM login_links WHERE user_id = $1`, [userId]);
       await client.query(`DELETE FROM refresh_tokens WHERE user_id = $1`, [userId]);
       await client.query('COMMIT');
     } catch (err) {
@@ -248,39 +250,77 @@ export class AuthService {
 
     await revokeUserTokens(this.redis, userId);
     disconnectUser(userId, 'Your password was changed — sign in again');
+
+    // The reset proved inbox ownership, so sign this browser straight in (not if suspended meanwhile).
+    const row = (await this.pool.query('SELECT * FROM users WHERE id = $1', [userId])).rows[0];
+    if (!row || row.suspended_at || row.is_bot) return null;
+    const user = mapUser(row);
+    const tokens = await this.issueTokens(user.id, user.email, user.role as UserRole, { afterRevocation: true });
+    return { user, ...tokens };
   }
 
-  private async issueTokens(userId: string, email: string, role: UserRole) {
+  /** Username behind a live sign-in link, without using it up (the confirm page shows it). */
+  async peekLoginLink(token: string) {
+    const result = await this.pool.query(
+      `SELECT u.username FROM login_links l JOIN users u ON u.id = l.user_id
+       WHERE l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > NOW()
+         AND u.role = 'player' AND NOT u.is_bot AND u.suspended_at IS NULL`,
+      [this.hashToken(token)]
+    );
+    if (!result.rows[0]) throw new AppError('INVALID_LOGIN_LINK', INVALID_LOGIN_LINK, 400);
+    return { username: result.rows[0].username as string };
+  }
+
+  /** Spends a sign-in link and starts a session; players only. */
+  async redeemLoginLink(token: string) {
+    const result = await this.pool.query(
+      `UPDATE login_links l SET used_at = NOW()
+       FROM users u
+       WHERE u.id = l.user_id AND l.token_hash = $1 AND l.used_at IS NULL AND l.expires_at > NOW()
+         AND u.role = 'player' AND NOT u.is_bot AND u.suspended_at IS NULL
+       RETURNING u.*`,
+      [this.hashToken(token)]
+    );
+    const row = result.rows[0];
+    if (!row) throw new AppError('INVALID_LOGIN_LINK', INVALID_LOGIN_LINK, 400);
+    const user = mapUser(row);
+    const tokens = await this.issueTokens(user.id, user.email, user.role as UserRole);
+    return { user, ...tokens };
+  }
+
+  private async issueTokens(userId: string, email: string, role: UserRole, opts: { afterRevocation?: boolean } = {}) {
     const jti = randomBytes(16).toString('hex');
+    // A token minted in the same second as a revocation counts as revoked, so step past it.
+    const iat = Math.floor(Date.now() / 1000) + (opts.afterRevocation ? 1 : 0);
     const accessToken = jwt.sign(
-      { sub: userId, email, role, jti } satisfies AuthPayload,
+      { sub: userId, email, role, jti, iat } satisfies AuthPayload,
       this.env.JWT_ACCESS_SECRET,
       { expiresIn: this.env.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions['expiresIn'] }
     );
 
     const refreshToken = randomBytes(32).toString('hex');
     const refreshHash = this.hashToken(refreshToken);
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
+    const refreshMaxAgeMs = sessionDaysForRole(role) * 24 * 60 * 60 * 1000;
+    const expiresAt = new Date(Date.now() + refreshMaxAgeMs);
 
     await this.pool.query(
       'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
       [userId, refreshHash, expiresAt.toISOString()]
     );
 
-    return { accessToken, refreshToken, refreshCookieName: REFRESH_COOKIE };
+    return { accessToken, refreshToken, refreshCookieName: REFRESH_COOKIE, refreshMaxAgeMs };
   }
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
   }
 
-  getRefreshCookieOptions() {
+  getRefreshCookieOptions(maxAgeMs: number) {
     return {
       httpOnly: true,
       secure: this.env.NODE_ENV === 'production',
       sameSite: 'strict' as const,
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      maxAge: maxAgeMs,
       path: '/api/v1/auth',
     };
   }

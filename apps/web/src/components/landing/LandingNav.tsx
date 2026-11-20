@@ -8,6 +8,7 @@ const links = [
   { href: '#story', label: 'The Game' },
   { href: '#features', label: 'Features' },
   { href: '#how-it-works', label: 'How to play' },
+  { href: '#tournaments', label: 'Tournaments' },
 ];
 
 function scrollToSection(e: React.MouseEvent<HTMLAnchorElement>, href: string) {

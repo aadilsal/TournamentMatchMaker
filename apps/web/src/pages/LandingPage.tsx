@@ -5,6 +5,7 @@ import { HeroSection } from '@/components/landing/HeroSection';
 import { StorySection } from '@/components/landing/StorySection';
 import { FeaturesBento } from '@/components/landing/FeaturesBento';
 import { HowItWorks } from '@/components/landing/HowItWorks';
+import { OpenTournaments } from '@/components/landing/OpenTournaments';
 import { StatsSection } from '@/components/landing/StatsSection';
 import { CTASection } from '@/components/landing/CTASection';
 import { LandingFooter } from '@/components/landing/LandingFooter';
@@ -20,6 +21,7 @@ export function LandingPage() {
         <StatsSection />
         <FeaturesBento />
         <HowItWorks />
+        <OpenTournaments />
         <CTASection />
       </main>
       <LandingFooter />

@@ -51,6 +51,7 @@ const MIGRATION_MARKERS = {
   '1738000000019_draw-format-and-play-location': {
     column: { table: 'tournaments', name: 'play_format' },
   },
+  '1738000000020_login-links': { table: 'login_links' },
 };
 
 async function tableExists(client, table) {
