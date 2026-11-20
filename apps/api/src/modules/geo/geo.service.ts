@@ -184,11 +184,14 @@ export class GeoService {
         town?: string;
         village?: string;
         municipality?: string;
+        county?: string;
+        state_district?: string;
       };
     }>(
-      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+      // English names, so they match the country and city lists (local scripts broke the match).
+      `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=en`,
       {
-        headers: { 'User-Agent': NOMINATIM_UA },
+        headers: { 'User-Agent': NOMINATIM_UA, 'Accept-Language': 'en' },
       }
     );
 
@@ -197,12 +200,12 @@ export class GeoService {
       throw new AppError('GEO_OUT_OF_RANGE', 'Could not resolve location from coordinates', 404);
     }
 
-    const city =
-      json.address?.city ||
-      json.address?.town ||
-      json.address?.village ||
-      json.address?.municipality ||
-      '';
+    // Try the likeliest names first; "Lahore District" stands for Lahore when only a tehsil is given.
+    const a = json.address ?? {};
+    const candidates = [a.city, a.town, a.village, a.county, a.state_district, a.municipality]
+      .filter((v): v is string => !!v)
+      .map((v) => v.replace(/\s+(District|Tehsil|Division)$/i, '').trim());
+    const city = candidates[0] ?? '';
 
     const countries = await this.listCountries();
     const matchedCountry = matchCountryInList(country, countries);
@@ -216,7 +219,7 @@ export class GeoService {
 
     try {
       const cities = await this.listCitiesByCountry(matchedCountry.name);
-      const matchedCity = matchCityInList(city, cities);
+      const matchedCity = candidates.map((c) => matchCityInList(c, cities)).find(Boolean);
       return { country: matchedCountry.name, city: matchedCity ?? city };
     } catch {
       return { country: matchedCountry.name, city };

@@ -5,7 +5,7 @@ import { JOURNEY_STEPS } from '@/lib/journey';
 /** Progress through the guided flow: 1 Tournament · 2 Where you play · 3 Play. */
 export function JourneySteps({ current }: { current: 0 | 1 | 2 }) {
   return (
-    <ol className="flex flex-wrap items-center gap-2 text-sm" aria-label="Your progress">
+    <ol className="flex flex-wrap items-center justify-center gap-2 text-sm" aria-label="Your progress">
       {JOURNEY_STEPS.map((label, i) => {
         const done = i < current;
         const active = i === current;
