@@ -1,4 +1,4 @@
-import { Router, type Request } from 'express';
+import { Router, type Request, type RequestHandler } from 'express';
 import {
   adminAssignTournamentAdminSchema,
   adminAssignVenueAdminSchema,
@@ -34,6 +34,7 @@ import {
   createSlotsSchema,
   slotListQuerySchema,
   adminUserLookupQuerySchema,
+  createDrawTournamentSchema,
   createTournamentSchema,
   createVenueSchema,
   tournamentMatchesQuerySchema,
@@ -299,6 +300,14 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
     }
   });
 
+  router.get('/venues/:id/players', ownsVenue, async (req, res, next) => {
+    try {
+      sendSuccess(res, await venues.listVenuePlayers(req.params.id as string));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/venues/:id/admins', ownsVenue, async (req, res, next) => {
     try {
       sendSuccess(res, await venues.listVenueAdmins(req.params.id as string));
@@ -440,9 +449,16 @@ export function createAdminRouter(pool: Pool, redis: RedisClient, env: Env): Rou
     }
   });
 
-  router.post('/tournaments', requireSuperAdmin(), validate(createTournamentSchema), async (req, res, next) => {
+  // New tournaments use the draw format; `playFormat: 'classic'` keeps the old full form.
+  const validateCreate: RequestHandler = (req, res, next) =>
+    (req.body?.playFormat === 'draw' ? validate(createDrawTournamentSchema) : validate(createTournamentSchema))(req, res, next);
+
+  router.post('/tournaments', requireSuperAdmin(), validateCreate, async (req, res, next) => {
     try {
-      const t = await tournaments.create(actorId(req), req.body);
+      const t =
+        req.body.playFormat === 'draw'
+          ? await tournaments.createDraw(actorId(req), req.body)
+          : await tournaments.create(actorId(req), req.body);
       sendSuccess(res, t, undefined, 201);
     } catch (err) {
       next(err);

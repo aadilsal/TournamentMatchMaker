@@ -350,6 +350,29 @@ export class AdminVenuesService {
     return this.updateSlot(actorId, id, { bookedCount: count, status });
   }
 
+  /** Players who chose this venue for an open or live draw tournament. */
+  async listVenuePlayers(venueId: string) {
+    const result = await this.pool.query(
+      `SELECT t.id AS tournament_id, t.name AS tournament_name, t.status AS tournament_status,
+              u.id AS user_id, u.username, tp.status AS participant_status
+       FROM tournament_registrations r
+       JOIN tournaments t ON t.id = r.tournament_id AND t.status IN ('open', 'in_progress')
+       JOIN users u ON u.id = r.user_id AND u.is_bot = FALSE
+       LEFT JOIN tournament_participants tp ON tp.tournament_id = r.tournament_id AND tp.user_id = r.user_id
+       WHERE r.venue_id = $1 AND r.play_location = 'venue'
+       ORDER BY t.start_date ASC, u.username ASC`,
+      [venueId]
+    );
+    return result.rows.map((r) => ({
+      tournamentId: r.tournament_id as string,
+      tournamentName: r.tournament_name as string,
+      tournamentStatus: r.tournament_status as string,
+      userId: r.user_id as string,
+      username: r.username as string,
+      participantStatus: (r.participant_status as string | null) ?? null,
+    }));
+  }
+
   async listVenueAdmins(venueId: string) {
     const result = await this.pool.query(
       `SELECT u.id, u.email, u.username, u.role, va.created_at

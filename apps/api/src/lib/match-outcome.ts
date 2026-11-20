@@ -3,6 +3,7 @@ import type { RedisClient } from './redis.js';
 import type { Env } from '../config/env.js';
 import type { MatchResultExtended } from '@vr-tournament/shared';
 import {
+  DRAW_PHASE,
   resolveAbandonedMatch,
   resolveMatchOutcome,
   winnerIdFromOutcome,
@@ -14,6 +15,7 @@ import { enqueueNotification } from './bullmq.js';
 import { TournamentsService } from '../modules/tournaments/tournaments.service.js';
 import { emitMatchUpdated } from '../socket/sync-events.js';
 import { AppError } from './response.js';
+import { notifyDrawResult, notifyDrawTie } from './draw-notify.js';
 
 /** The only states a result may be applied from; the guard makes resolution idempotent. */
 const OPEN_MATCH_STATUSES = `('pending_confirmation', 'confirmed', 'in_progress')`;
@@ -67,6 +69,10 @@ export async function applyMatchOutcome(
   // Reaching this at all means the scoreline was complete: `submitScore` only
   // resolves once both players have an innings on record, so a tie can never be
   // declared while one of them is still batting.
+  if (outcome === 'rematch' && match.phase === DRAW_PHASE) {
+    return replayDrawMatch(pool, env, matchId, match, result, player1Score, player2Score);
+  }
+
   if (outcome === 'rematch') {
     const cancelled = await pool.query(
       `UPDATE matches SET status = 'cancelled', result = $1, updated_at = NOW()
@@ -117,6 +123,64 @@ export async function applyMatchOutcome(
     player1Score,
     player2Score,
   }, winnerId);
+}
+
+/** A tied draw match is replayed in place: innings wiped, the tie remembered for the deadline rule. */
+async function replayDrawMatch(
+  pool: Pool,
+  env: Env | undefined,
+  matchId: string,
+  match: { player1_id: string; player2_id: string; tournament_id: string | null },
+  result: MatchResultExtended,
+  player1Score: number,
+  player2Score: number
+): Promise<{ status: string; result: MatchResultExtended }> {
+  const client = await pool.connect();
+  let replay: MatchResultExtended | null = null;
+  try {
+    await client.query('BEGIN');
+    const innings = await client.query(
+      `SELECT user_id FROM match_innings WHERE match_id = $1 ORDER BY played_at ASC LIMIT 1`,
+      [matchId]
+    );
+    const prior = result as MatchResultExtended & { tieCount?: number; tiedFirstBatterId?: string };
+    replay = {
+      ...result,
+      player1Score: null,
+      player2Score: null,
+      winnerId: null,
+      chaseTarget: null,
+      chasePlayerId: null,
+      tieCount: (prior.tieCount ?? 0) + 1,
+      tiedFirstBatterId: prior.tiedFirstBatterId ?? (innings.rows[0]?.user_id as string | undefined) ?? null,
+      lastTie: { player1Score, player2Score, at: new Date().toISOString() },
+    } as MatchResultExtended;
+    const reset = await client.query(
+      `UPDATE matches SET status = 'confirmed', result = $1, active_player_id = NULL,
+              active_player_since = NULL, updated_at = NOW()
+       WHERE id = $2 AND status IN ${OPEN_MATCH_STATUSES} RETURNING id`,
+      [JSON.stringify(replay), matchId]
+    );
+    if (!reset.rowCount) {
+      await client.query('ROLLBACK');
+      return readMatchState(pool, matchId);
+    }
+    await client.query(`DELETE FROM match_innings WHERE match_id = $1`, [matchId]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  emitMatchUpdated([match.player1_id, match.player2_id], {
+    matchId,
+    status: 'confirmed',
+    tournamentId: match.tournament_id,
+  });
+  if (env) await notifyDrawTie(pool, env, matchId, player1Score, Number((replay as { tieCount?: number }).tieCount ?? 1));
+  return { status: 'confirmed', result: replay! };
 }
 
 /**
@@ -177,6 +241,26 @@ export async function applyMatchWinner(
     if (botIds.size === 0) {
       await updateUserRating(client, winnerId, true);
       await updateUserRating(client, loserId, false);
+    }
+
+    // Draw format: winner goes through to the next round's draw, loser is knocked out; no queue.
+    if (match.tournament_id && match.phase === DRAW_PHASE && match.round_number != null) {
+      if (!botIds.has(winnerId)) {
+        await client.query(
+          `UPDATE tournament_participants
+           SET wins = wins + 1, round_number = $3 + 1, status = 'active', updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2 AND round_number = $3`,
+          [match.tournament_id, winnerId, match.round_number]
+        );
+      }
+      if (!botIds.has(loserId)) {
+        await client.query(
+          `UPDATE tournament_participants
+           SET losses = losses + 1, status = 'eliminated', updated_at = NOW()
+           WHERE tournament_id = $1 AND user_id = $2 AND round_number = $3`,
+          [match.tournament_id, loserId, match.round_number]
+        );
+      }
     }
 
     if (match.tournament_id && match.phase === 'normal') {
@@ -253,7 +337,9 @@ export async function applyMatchWinner(
     await removeFromQueue(redis, loserId);
   }
 
-  if (env) {
+  if (env && match.phase === DRAW_PHASE) {
+    await notifyDrawResult(pool, env, matchId, winnerId, loserId);
+  } else if (env) {
     enqueueNotification(env, {
       userId: winnerId,
       type: 'match_won',

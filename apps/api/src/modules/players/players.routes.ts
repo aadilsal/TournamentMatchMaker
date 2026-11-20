@@ -1,15 +1,36 @@
 import { Router } from 'express';
-import { updatePlayerSchema, uploadAvatarSchema } from '@vr-tournament/shared';
+import { timeZoneQuerySchema, updatePlayerSchema, uploadAvatarSchema } from '@vr-tournament/shared';
 import type { Pool } from 'pg';
 import type { Env } from '../../config/env.js';
 import { authenticate } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { PlayersService } from './players.service.js';
+import { DrawEntryService } from '../tournaments/draw-entry.service.js';
 
 export function createPlayersRouter(pool: Pool, _env: Env): Router {
   const router = Router();
   const service = new PlayersService(pool);
+  const entry = new DrawEntryService(pool, _env);
+
+  // Which step of the guided flow the player is on; the web app routes from this.
+  router.get('/me/journey', authenticate(_env), async (req, res, next) => {
+    try {
+      sendSuccess(res, await entry.journey(req.user!.sub));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // The player's card (same as the headset's): one entry per tournament with what to do next.
+  router.get('/me/tournaments', authenticate(_env), validate(timeZoneQuerySchema, 'query'), async (req, res, next) => {
+    try {
+      const { timeZone } = req.query as { timeZone?: string };
+      sendSuccess(res, await entry.myTournaments(req.user!.sub, timeZone));
+    } catch (err) {
+      next(err);
+    }
+  });
 
   router.get('/me', authenticate(_env), async (req, res, next) => {
     try {

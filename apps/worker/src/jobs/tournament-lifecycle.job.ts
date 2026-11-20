@@ -156,7 +156,7 @@ export async function processTournamentLifecycleJob(
 ): Promise<void> {
   for (const transition of TRANSITIONS) {
     const due = await pool.query(
-      `SELECT id, name FROM tournaments WHERE status = $1 AND ${transition.due}`,
+      `SELECT id, name FROM tournaments WHERE status = $1 AND play_format = 'classic' AND (${transition.due})`,
       [transition.from]
     );
 

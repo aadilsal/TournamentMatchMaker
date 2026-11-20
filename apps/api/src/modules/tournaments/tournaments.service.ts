@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type {
   BuybackInput,
+  CreateDrawTournamentInput,
   MatchResultExtended,
   CreateTournamentInput,
   EnterTournamentInput,
@@ -41,6 +42,8 @@ import {
   isSlotEnded,
   isSlotStartPast,
   isSlotWithinWindow,
+  buybackCompletedNotice,
+  estimatedDrawFinish,
   ROUND_PLAY_STARTS_AT_SQL,
   matchNotificationDetails,
   tournamentLink,
@@ -250,6 +253,41 @@ export class TournamentsService {
     } finally {
       client.release();
     }
+  }
+
+  /** Draft a draw-format tournament; rounds are created by the draw engine when it starts. */
+  async createDraw(input: CreateDrawTournamentInput) {
+    const result = await this.pool.query(
+      `INSERT INTO tournaments (name, game, start_date, end_date, registration_opens_at, registration_closes_at,
+                                status, max_players, skill_tier, buyback_price_cents, round_duration_minutes,
+                                play_format, phase)
+       VALUES ($1, 'VR Cricket', $2, $3, NOW(), $2, 'draft', $4, 3, $5, $6, 'draw', 'draw')
+       RETURNING *`,
+      [
+        input.name,
+        input.startDate,
+        estimatedDrawFinish(input.startDate, input.roundDurationMinutes, input.maxPlayers ?? 64),
+        input.maxPlayers ?? null,
+        input.buybackPriceCents ?? 500,
+        input.roundDurationMinutes,
+      ]
+    );
+    return mapTournament(result.rows[0]);
+  }
+
+  /** Keep a draw tournament's derived dates in step with its start, round length and size. */
+  async syncDrawSchedule(tournamentId: string) {
+    const t = await this.pool.query(
+      `SELECT start_date, round_duration_minutes, max_players FROM tournaments
+       WHERE id = $1 AND play_format = 'draw' AND status IN ('draft', 'open')`,
+      [tournamentId]
+    );
+    const row = t.rows[0];
+    if (!row) return;
+    await this.pool.query(
+      `UPDATE tournaments SET registration_closes_at = start_date, end_date = $2 WHERE id = $1`,
+      [tournamentId, estimatedDrawFinish(row.start_date, row.round_duration_minutes, row.max_players ?? 64)]
+    );
   }
 
   /**
@@ -950,6 +988,7 @@ export class TournamentsService {
     if (!this.env) throw new AppError('INTERNAL', 'Env not configured', 500);
 
     const tournament = await this.getById(tournamentId);
+    if (tournament.playFormat === 'draw') return this.createDrawBuybackCheckout(tournament, userId, input);
     if (tournament.phase !== 'normal') {
       throw new AppError('CONFLICT', 'Buybacks are only available during normal rounds', 409);
     }
@@ -1006,6 +1045,44 @@ export class TournamentsService {
     });
   }
 
+  /** Draw format: a player knocked out in round 1 may buy back while round 1 is open; they join the round 2 draw. */
+  private async createDrawBuybackCheckout(tournament: Tournament, userId: string, input: BuybackInput) {
+    if (!this.env) throw new AppError('INTERNAL', 'Env not configured', 500);
+    await this.assertDrawBuybackOpen(tournament.id);
+    const participant = await this.getParticipant(tournament.id, userId);
+    if (!participant || !(await this.getRegistration(tournament.id, userId))) {
+      throw new AppError('FORBIDDEN', 'Not registered for this tournament', 403);
+    }
+    if (participant.status !== 'eliminated') {
+      throw new AppError('CONFLICT', 'Only players knocked out in round 1 can buy back', 409);
+    }
+    if (tournament.buybackPriceCents < 50) {
+      throw new AppError('CONFLICT', 'Buybacks are not available for this tournament', 409);
+    }
+    return createBuybackPaymentIntent(this.env, this.pool, {
+      userId,
+      tournamentId: tournament.id,
+      roundNumber: 1,
+      matchId: input.matchId ?? null,
+      amountCents: tournament.buybackPriceCents,
+    });
+  }
+
+  /** Buybacks in the draw format exist only while round 1 is still open. */
+  private async assertDrawBuybackOpen(tournamentId: string) {
+    const open = await this.pool.query(
+      `SELECT 1 FROM tournaments t
+       JOIN tournament_rounds tr ON tr.tournament_id = t.id AND tr.round_number = 1
+       WHERE t.id = $1 AND t.status = 'in_progress' AND t.current_round_number = 1
+         AND tr.status = 'active' AND tr.ends_at > NOW()
+         AND (SELECT COUNT(*) FROM matches r1 WHERE r1.tournament_id = t.id AND r1.round_number = 1 AND r1.phase = 'draw') > 1`,
+      [tournamentId]
+    );
+    if (!open.rows[0]) {
+      throw new AppError('CONFLICT', 'Buybacks are only open during round 1 (not in a final) — none are available now', 409);
+    }
+  }
+
   async fulfillBuyback(buybackId: string) {
     if (!this.redis) throw new AppError('INTERNAL', 'Redis not configured', 500);
 
@@ -1025,9 +1102,14 @@ export class TournamentsService {
     // land minutes later — by which time the round may have closed, knockout
     // may have started, or the tournament may be over. Re-check at the moment
     // the buyback is actually granted; if it can no longer be granted, the money goes back.
+    const isDraw = (await this.getById(tournamentId)).playFormat === 'draw';
     try {
-      await this.assertBuybackStillFulfillable(tournamentId, buyback.round_number);
-      await this.assertNoOtherLiveTournament(userId, tournamentId);
+      if (isDraw) {
+        await this.assertDrawBuybackOpen(tournamentId);
+      } else {
+        await this.assertBuybackStillFulfillable(tournamentId, buyback.round_number);
+        await this.assertNoOtherLiveTournament(userId, tournamentId);
+      }
     } catch (err) {
       if (err instanceof AppError && err.status === 409) {
         return this.refundUnfulfillableBuyback(buyback, err.message);
@@ -1064,7 +1146,8 @@ export class TournamentsService {
          WHERE tournament_id = $1 AND user_id = $2 FOR UPDATE`,
         [tournamentId, userId]
       );
-      if (!['eliminated', 'out'].includes(participantRow.rows[0]?.status)) {
+      const rejoinable = isDraw ? ['eliminated'] : ['eliminated', 'out'];
+      if (!rejoinable.includes(participantRow.rows[0]?.status)) {
         await client.query('ROLLBACK');
         return this.refundUnfulfillableBuyback(buyback, 'Player is already back in the tournament');
       }
@@ -1081,12 +1164,13 @@ export class TournamentsService {
          SET status = 'active', round_number = $3, buyback_count = buyback_count + 1,
              updated_at = NOW()
          WHERE tournament_id = $1 AND user_id = $2`,
-        [tournamentId, userId, buyback.round_number]
+        // Draw format: back in for the next round's draw; no queue.
+        [tournamentId, userId, isDraw ? buyback.round_number + 1 : buyback.round_number]
       );
 
       await client.query('COMMIT');
 
-      await requeuePlayer(this.pool, this.redis, userId, {
+      if (!isDraw) await requeuePlayer(this.pool, this.redis, userId, {
         tournamentId,
         roundNumber: buyback.round_number,
         preferredVenueId,
@@ -1103,7 +1187,12 @@ export class TournamentsService {
           userId,
           type: 'buyback_completed',
           channels: ['in_app', 'email'],
-          payload: { tournamentId, amountCents: buyback.amount_cents, link: tournamentLink(tournamentId) },
+          payload: {
+            tournamentId,
+            amountCents: buyback.amount_cents,
+            link: tournamentLink(tournamentId),
+            ...(isDraw ? buybackCompletedNotice({ tournamentName: (await this.getById(tournamentId)).name }) : {}),
+          },
           idempotencyKey: `buyback:${buybackId}`,
         }).catch(console.error);
       }

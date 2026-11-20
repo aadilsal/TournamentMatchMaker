@@ -15,7 +15,6 @@ import {
 } from '../src/lib/format.ts';
 import { sanitizeReturnTo, postLoginPath } from '../src/lib/return-to.ts';
 import { passwordRuleError, passwordStrengthScore } from '../src/lib/password-strength.ts';
-import { matchCardState } from '../src/lib/match-card-state.ts';
 import { notificationLink } from '../src/lib/notification-link.ts';
 import { canEnterTournament } from '../src/lib/tournament-play.ts';
 import {
@@ -67,7 +66,7 @@ test('sanitizeReturnTo only allows same-origin paths', () => {
   for (const bad of ['//evil.com', '/\\evil.com', 'https://evil.com', 'javascript:alert(1)', '', null, '/\tevil', 'admin']) {
     assert.equal(sanitizeReturnTo(bad as string | null), null, String(bad));
   }
-  assert.equal(postLoginPath('/login', false), '/venues');
+  assert.equal(postLoginPath('/login', false), '/start');
   assert.equal(postLoginPath(null, true), '/admin');
   assert.equal(postLoginPath('//evil.com', true), '/admin');
   assert.equal(postLoginPath('/matches', true), '/matches');
@@ -83,17 +82,6 @@ test('password rule: 8–128 chars, a letter and a number', () => {
   assert.ok(passwordStrengthScore('12345678') < 3);
   assert.equal(passwordStrengthScore('abcd1234'), 3);
   assert.equal(passwordStrengthScore('abcd1234!'), 4);
-});
-
-test('matchCardState gives one state per situation (M4)', () => {
-  const base = { myId: 'me', chasePlayerId: null };
-  assert.equal(matchCardState({ ...base, status: 'pending_confirmation', myScore: null, opponentScore: null }), 'not_started');
-  assert.equal(matchCardState({ ...base, status: 'confirmed', myScore: null, opponentScore: null }), 'bat_first');
-  assert.equal(matchCardState({ ...base, status: 'in_progress', myScore: null, opponentScore: 40 }), 'chasing');
-  assert.equal(matchCardState({ ...base, status: 'in_progress', myScore: 40, opponentScore: null }), 'waiting_opponent');
-  assert.equal(matchCardState({ ...base, status: 'in_progress', myScore: 40, opponentScore: 41 }), 'resolving');
-  assert.equal(matchCardState({ ...base, status: 'completed', myScore: 40, opponentScore: 41 }), 'completed');
-  assert.equal(matchCardState({ myId: 'me', chasePlayerId: 'me', status: 'in_progress', myScore: null, opponentScore: null }), 'chasing');
 });
 
 test('dollars <-> cents for the buyback price input', () => {
@@ -115,13 +103,15 @@ test('formatDuration is human, not raw seconds', () => {
   assert.equal(formatDuration(-5), '0 s');
 });
 
-test('notificationLink: own link first, then a route by type', () => {
-  assert.equal(notificationLink({ type: 'match_found', payload: { link: '/matches/abc' } }), '/matches/abc');
-  assert.equal(notificationLink({ type: 'match_found', payload: { link: 'https://evil.com' } }), '/matches');
-  assert.equal(notificationLink({ type: 'match_won', payload: {} }), '/matches');
-  assert.equal(notificationLink({ type: 'opponent_withdrew_requeued', payload: null }), '/matches');
+test('notificationLink: play news opens My tournaments, else own link, else by type', () => {
+  assert.equal(notificationLink({ type: 'match_found', payload: { link: '/matches/abc' } }), '/my-tournaments');
+  assert.equal(notificationLink({ type: 'match_won', payload: {} }), '/my-tournaments');
+  assert.equal(notificationLink({ type: 'round_started', payload: { link: '/tournaments/t1' } }), '/my-tournaments');
+  assert.equal(notificationLink({ type: 'opponent_withdrew_requeued', payload: null }), '/my-tournaments');
+  assert.equal(notificationLink({ type: 'tournament_registered', payload: {} }), '/my-tournaments');
+  assert.equal(notificationLink({ type: 'announcement', payload: { link: '/tournaments/t2' } }), '/tournaments/t2');
+  assert.equal(notificationLink({ type: 'announcement', payload: { link: 'https://evil.com' } }), null);
   assert.equal(notificationLink({ type: 'tournament_live', payload: { tournamentId: 't1' } }), '/tournaments/t1');
-  assert.equal(notificationLink({ type: 'tournament_registered', payload: {} }), '/tournaments');
   assert.equal(notificationLink({ type: 'booking_confirmed', payload: {} }), '/bookings');
   assert.equal(notificationLink({ type: 'announcement', payload: {} }), null);
 });

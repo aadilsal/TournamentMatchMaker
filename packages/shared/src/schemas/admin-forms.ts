@@ -456,6 +456,12 @@ export const NOTIFICATION_FILTER_TYPE_OPTIONS = [
   { value: 'match_lost', label: 'Match lost' },
   { value: 'opponent_withdrew_requeued', label: 'Opponent withdrew' },
   { value: 'tournament_registered', label: 'Tournament registered' },
+  { value: 'tournament_starting_soon', label: 'Tournament starting soon' },
+  { value: 'round_started', label: 'Round started' },
+  { value: 'round_closing_soon', label: 'Round closing soon' },
+  { value: 'opponent_played', label: 'Opponent played' },
+  { value: 'match_tied', label: 'Match tied' },
+  { value: 'tournament_finished', label: 'Tournament finished' },
   { value: 'buyback_completed', label: 'Buyback completed' },
   { value: 'admin_test', label: 'Admin test' },
 ] as const;

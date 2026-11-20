@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   metaCurrentMatchQuerySchema,
   metaMatchIdParamSchema,
+  metaPlayerCardQuerySchema,
   metaSoloTargetSchema,
   metaSubmitScoreSchema,
   metaVerifyLinkCodeSchema,
@@ -46,7 +47,12 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
       try {
         const { code } = req.body as { code: string };
         const data = await linkService.verifyLinkCode(code);
-        sendSuccess(res, data);
+        // The card is a bonus; a failure here must not fail the link itself.
+        const player = await service.getPlayerCard(data.userId).catch((err) => {
+          console.error('Player card failed after link:', err);
+          return null;
+        });
+        sendSuccess(res, { ...data, player });
       } catch (err) {
         next(err);
       }
@@ -59,9 +65,23 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     validate(metaCurrentMatchQuerySchema, 'query'),
     async (req, res, next) => {
       try {
-        const { userId } = req.query as { userId: string };
-        const data = await service.getCurrentMatch(userId);
+        const { userId, tournamentId } = req.query as { userId: string; tournamentId?: string };
+        const data = await service.getCurrentMatch(userId, tournamentId ?? null);
         sendSuccess(res, data);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  metaApiRouter.get(
+    '/players/profile',
+    metaPollRateLimit(env),
+    validate(metaPlayerCardQuerySchema, 'query'),
+    async (req, res, next) => {
+      try {
+        const { userId, timeZone } = req.query as { userId: string; timeZone?: string };
+        sendSuccess(res, await service.getPlayerCard(userId, timeZone));
       } catch (err) {
         next(err);
       }

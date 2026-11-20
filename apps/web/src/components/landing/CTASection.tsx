@@ -29,8 +29,8 @@ export function CTASection() {
                 Register for Season 1
                 <ArrowRight className="h-4 w-4" />
               </Link>
-              <Link to="/venues" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-10 text-base bg-transparent' })}>
-                Browse venues first
+              <Link to="/tournaments" className={buttonVariants({ variant: 'outline', size: 'lg', className: 'h-12 px-10 text-base bg-transparent' })}>
+                Browse tournaments first
               </Link>
             </div>
           </div>

@@ -152,6 +152,8 @@ interface TournamentRow {
   buyback_price_cents?: number;
   round_duration_minutes?: number;
   initial_player_count?: number | null;
+  play_format?: string | null;
+  champion_id?: string | null;
   created_at: Date;
   registration_count?: number;
 }
@@ -223,6 +225,8 @@ export function mapTournament(row: TournamentRow): Tournament {
     roundDurationMinutes: row.round_duration_minutes ?? 180,
     initialPlayerCount: row.initial_player_count ?? null,
     registrationCount: row.registration_count,
+    playFormat: row.play_format === 'draw' ? 'draw' : 'classic',
+    championId: row.champion_id ?? null,
     createdAt: row.created_at.toISOString(),
   };
 }

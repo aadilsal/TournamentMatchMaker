@@ -1,9 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   BALLS_PER_INNINGS,
+  BOT_CHASE_WIN_RATE,
   BOT_MIN_SCORE,
   MATCH_TURN_HOLD_MS,
+  botChaseScore,
+  botTargetScore,
   chaseTargetFor,
+  generateBotInnings,
   generateBotScore,
   isTurnHoldActive,
   pickBotUsername,
@@ -80,6 +84,56 @@ describe('the bot innings', () => {
     // automatic loss rather than an opponent.
     expect(scores.some((s) => s <= 12)).toBe(true);
     expect(scores.some((s) => s >= 20)).toBe(true);
+  });
+});
+
+describe('the bot reacting to the player', () => {
+  it('never ties a chase, so every bot match has a winner', () => {
+    for (const human of [0, 1, 5, 13, 22, 36, 47, 120]) {
+      for (let i = 0; i < 300; i++) expect(botChaseScore(human)).not.toBe(human);
+    }
+  });
+
+  it('finishes close to the human score', () => {
+    for (let i = 0; i < 2000; i++) {
+      const bot = botChaseScore(20);
+      expect(Math.abs(bot - 20)).toBeLessThanOrEqual(6);
+      expect(bot).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('wins roughly the configured share of chases', () => {
+    const runs = 5000;
+    const wins = Array.from({ length: runs }, () => botChaseScore(18)).filter((s) => s > 18).length;
+    expect(wins / runs).toBeGreaterThan(BOT_CHASE_WIN_RATE - 0.05);
+    expect(wins / runs).toBeLessThan(BOT_CHASE_WIN_RATE + 0.05);
+  });
+
+  it('cannot lose to a duck', () => {
+    for (let i = 0; i < 200; i++) expect(botChaseScore(0)).toBeGreaterThan(0);
+  });
+
+  it('sets a target near the player recent form', () => {
+    for (let i = 0; i < 1000; i++) {
+      const target = botTargetScore([30, 28, 32, 30, 30]);
+      expect(target).toBeGreaterThanOrEqual(24);
+      expect(target).toBeLessThanOrEqual(36);
+    }
+  });
+
+  it('only uses the latest innings for form', () => {
+    const target = botTargetScore([10, 10, 10, 10, 10, 500, 500], () => 0.5);
+    expect(target).toBe(10);
+  });
+
+  it('falls back to six balls for a player with no history', () => {
+    const target = botTargetScore([], () => 0.999999);
+    expect(target).toBe(6 * BALLS_PER_INNINGS);
+  });
+
+  it('chases when the human has batted, otherwise sets a target', () => {
+    expect(generateBotInnings({ opponentScore: 15 }, () => 0)).toBeGreaterThan(15);
+    expect(generateBotInnings({ recentScores: [20] }, () => 0.5)).toBe(20);
   });
 });
 

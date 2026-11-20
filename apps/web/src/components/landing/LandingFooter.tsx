@@ -10,7 +10,7 @@ export function LandingFooter() {
           VR Cricket League
         </Link>
         <nav className="flex flex-wrap justify-center gap-6 text-sm text-[var(--color-muted-foreground)]">
-          <Link to="/venues" className="hover:text-[var(--color-foreground)] transition-colors">Venues</Link>
+          <Link to="/tournaments" className="hover:text-[var(--color-foreground)] transition-colors">Tournaments</Link>
           <Link to="/register" className="hover:text-[var(--color-foreground)] transition-colors">Register</Link>
           <Link to="/login" className="hover:text-[var(--color-foreground)] transition-colors">Login</Link>
           <Link to="/terms" className="hover:text-[var(--color-foreground)] transition-colors">Terms</Link>

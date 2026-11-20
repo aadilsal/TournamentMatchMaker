@@ -9,7 +9,7 @@ import type { UserRole } from '@vr-tournament/shared';
  */
 const ROLE_SECTIONS: Record<Exclude<UserRole, 'player'>, string[] | 'all'> = {
   superadmin: 'all',
-  venue_admin: ['/admin', '/admin/venues', '/admin/bookings'],
+  venue_admin: ['/admin', '/admin/venues'],
   tournament_admin: [
     '/admin',
     '/admin/matches',

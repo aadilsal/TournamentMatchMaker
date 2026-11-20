@@ -17,6 +17,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { NormalMatchList } from '@/components/tournament/NormalMatchList';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
+import { DrawRoundsView } from '@/components/tournament/DrawRoundsView';
 import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 import { QueryError } from '@/components/ui/query-error';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -95,12 +96,15 @@ export function TournamentDetailPage() {
   };
 
   const handleJoin = () => {
+    // New-format tournaments are joined through the guided flow (choose where you play).
+    const target = tournament?.playFormat === 'draw' ? `/join/${id}` : `/play?tournament=${id}`;
     if (!isLoggedIn) {
-      navigate(`/register?returnTo=${encodeURIComponent(`/play?tournament=${id}`)}`);
+      navigate(`/register?returnTo=${encodeURIComponent(target)}`);
       return;
     }
-    navigate(`/play?tournament=${id}`);
+    navigate(target);
   };
+  const isDraw = tournament?.playFormat === 'draw';
 
   if (isLoading) return <DetailPageSkeleton />;
   if (!tournament) {
@@ -137,7 +141,7 @@ export function TournamentDetailPage() {
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          {tournament.game} · {phaseLabel(tournament.phase)}
+          {tournament.game} · {isDraw ? 'Knockout — one match per round' : phaseLabel(tournament.phase)}
         </p>
         <p className="text-sm mt-2">
           {formatDateTime(tournament.startDate)} – {formatDateTime(tournament.endDate)}
@@ -145,7 +149,15 @@ export function TournamentDetailPage() {
         <p className="text-sm">
           {tournament.registrationCount ?? 0}
           {tournament.maxPlayers ? ` / ${tournament.maxPlayers}` : ''} players ·{' '}
-          {tournament.phase === 'knockout' ? 'Knockout stage' : knockoutRoundLabel(tournament.currentRoundNumber)}
+          {isDraw
+            ? tournament.status === 'in_progress'
+              ? `Round ${tournament.currentRoundNumber}`
+              : tournament.status === 'completed'
+                ? 'Finished'
+                : 'Starts soon'
+            : tournament.phase === 'knockout'
+              ? 'Knockout stage'
+              : knockoutRoundLabel(tournament.currentRoundNumber)}
         </p>
       </div>
 
@@ -165,17 +177,22 @@ export function TournamentDetailPage() {
             {isLoggedIn ? 'Join tournament' : 'Register to join'}
           </Button>
         )}
-        {myRegistration && canEnterTournament(tournament.status, myParticipant?.status) && (
+        {myRegistration && isDraw && (
+          <Button variant="secondary" onClick={() => navigate('/my-tournaments')}>
+            Go to my tournaments
+          </Button>
+        )}
+        {myRegistration && !isDraw && canEnterTournament(tournament.status, myParticipant?.status) && (
           <Button variant="secondary" onClick={handleJoin}>
             Pick slot & find next match
           </Button>
         )}
-        {myRegistration && tournamentIsRunning(tournament.status) && (
+        {myRegistration && !isDraw && tournamentIsRunning(tournament.status) && (
           <Button variant="outline" onClick={handleWithdraw} disabled={withdrawMutation.isPending}>
             {withdrawMutation.isPending ? 'Withdrawing…' : 'Withdraw'}
           </Button>
         )}
-        {myParticipant?.status === 'eliminated' && tournament.phase === 'normal' && (
+        {!isDraw && myParticipant?.status === 'eliminated' && tournament.phase === 'normal' && (
           <BuybackButton tournamentId={tournament.id} tournament={tournament} />
         )}
       </div>
@@ -199,7 +216,9 @@ export function TournamentDetailPage() {
         </p>
       )}
 
-      {bracket && tabs.length > 0 && (
+      {isDraw && <DrawRoundsView tournamentId={tournament.id} />}
+
+      {!isDraw && bracket && tabs.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle>Matches</CardTitle>
@@ -217,7 +236,7 @@ export function TournamentDetailPage() {
         </Card>
       )}
 
-      {tournament.phase === 'knockout' && (
+      {!isDraw && tournament.phase === 'knockout' && (
         <p className="text-xs text-[var(--color-muted-foreground)]">
           Knockout phase — losses are final, no buybacks.
         </p>

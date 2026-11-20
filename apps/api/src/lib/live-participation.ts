@@ -33,6 +33,7 @@ export async function findLiveTournament(
      FROM tournament_participants tp
      JOIN tournaments t ON t.id = tp.tournament_id
      WHERE tp.user_id = $1${exclude}
+       AND t.play_format = 'classic'
        AND ${LIVE_PARTICIPATION_SQL}
      LIMIT 1`,
     params

@@ -6,7 +6,7 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
 export type TournamentStatus = 'draft' | 'open' | 'closed' | 'in_progress' | 'completed';
 
-export type TournamentPhase = 'normal' | 'knockout' | 'completed';
+export type TournamentPhase = 'normal' | 'knockout' | 'completed' | 'draw';
 
 export type MatchPhase = 'normal' | 'knockout';
 
@@ -164,6 +164,9 @@ export interface Tournament {
   roundDurationMinutes: number;
   initialPlayerCount: number | null;
   registrationCount?: number;
+  /** 'draw': new format (draw per round, no slots); 'classic': queue + slots. */
+  playFormat: 'classic' | 'draw';
+  championId: string | null;
   createdAt: string;
 }
 
@@ -232,6 +235,9 @@ export interface MetaCurrentMatchResponse {
     id: string;
     /** The match's own state: 'pending_confirmation' | 'confirmed' | 'in_progress'. */
     status: string;
+    /** Which tournament and round this match belongs to, for the in-game HUD. Additive. */
+    tournamentName?: string | null;
+    roundLabel?: string | null;
     opponent: string;
     /**
      * A player without a headset books a venue and a slot, so both ids are real.
@@ -276,6 +282,22 @@ export interface MetaCurrentMatchResponse {
    * being played. Additive — a client that ignores it behaves exactly as before.
    */
   lastResult: MetaMatchDecision | null;
+  /** Every open match the player has, soonest deadline first; `match` is the first. Additive. */
+  matches?: MetaOpenMatchSummary[];
+}
+
+/** One open match in `MetaCurrentMatchResponse.matches`; the headset lists these when there are several. */
+export interface MetaOpenMatchSummary {
+  id: string;
+  tournamentId: string | null;
+  tournamentName: string | null;
+  /** e.g. "Semi-final", "Round 1"; null outside a tournament. */
+  roundLabel: string | null;
+  opponent: string;
+  /** `your_turn`: this player still has to bat; `waiting_for_opponent`: they have. */
+  state: 'your_turn' | 'waiting_for_opponent';
+  /** ISO time the match must be played by; null outside a tournament round. */
+  deadline: string | null;
 }
 
 /**
@@ -410,6 +432,8 @@ export interface TournamentRegistration {
   userId: string;
   bookingId: string | null;
   registeredAt: string;
+  /** Draw format: where they play — a venue name, "Home", or null for older tournaments. */
+  playsAt?: string | null;
 }
 
 /**
@@ -554,6 +578,18 @@ export interface AdminDashboardStats {
   buybacks: { completed: number; pending: number; failed: number };
   queueSize: number;
   notificationsFailed: number;
+  /** Players in open or live draw tournaments, per place they play (venueId null = Home). */
+  playersByVenue: Array<{ venueId: string | null; name: string; city: string; players: number }>;
+}
+
+/** A player who plays an open or live tournament at a venue. */
+export interface VenuePlayer {
+  tournamentId: string;
+  tournamentName: string;
+  tournamentStatus: TournamentStatus;
+  userId: string;
+  username: string;
+  participantStatus: string | null;
 }
 
 export interface AuditLogEntry {

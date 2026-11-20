@@ -252,6 +252,8 @@ export function AdminTournamentDetailPage() {
     (r) => r.status === 'active' && r.roundNumber === tournament.currentRoundNumber
   );
 
+  const isDraw = tournament.playFormat === 'draw';
+
   const handleLifecycle = async (
     action: 'publish' | 'closeReg' | 'start' | 'closeRound' | 'complete'
   ) => {
@@ -273,17 +275,20 @@ export function AdminTournamentDetailPage() {
       },
       start: {
         mutation: start,
-        title: 'Start the tournament?',
-        description:
-          'Round 1 goes live, players can queue for matches, and the round deadline starts counting down. This cannot be undone.',
-        confirmLabel: 'Start tournament',
+        title: isDraw ? 'Start the tournament now?' : 'Start the tournament?',
+        description: isDraw
+          ? `Registration closes and round 1 is drawn within seconds for the ${tournament.registrationCount ?? 0} registered player(s). Everyone is told who they play. This cannot be undone.`
+          : 'Round 1 goes live, players can queue for matches, and the round deadline starts counting down. This cannot be undone.',
+        confirmLabel: isDraw ? 'Start now' : 'Start tournament',
         tone: 'default' as const,
       },
       closeRound: {
         mutation: closeRound,
-        title: `Close round ${tournament.currentRoundNumber}?`,
-        description: `Players with the best records advance and the rest are eliminated. ${activeCount} player(s) are still active. Any match still unplayed in this round is forfeited. This cannot be undone.`,
-        confirmLabel: 'Close round',
+        title: `Close round ${tournament.currentRoundNumber} now?`,
+        description: isDraw
+          ? 'Every unplayed match is settled now: whoever has batted goes through; if nobody batted, both are out. The next round is drawn straight away. This cannot be undone.'
+          : `Players with the best records advance and the rest are eliminated. ${activeCount} player(s) are still active. Any match still unplayed in this round is forfeited. This cannot be undone.`,
+        confirmLabel: isDraw ? 'Close round now' : 'Close round',
         tone: 'danger' as const,
       },
       complete: {
@@ -397,7 +402,15 @@ export function AdminTournamentDetailPage() {
     <div>
       <AdminPageHeader
         title={tournament.name}
-        description={`${tournament.game} · Round ${tournament.currentRoundNumber}`}
+        description={
+          !isDraw
+            ? `${tournament.game} · Round ${tournament.currentRoundNumber}`
+            : tournament.status === 'in_progress'
+              ? `Round ${tournament.currentRoundNumber} in play`
+              : tournament.status === 'completed'
+                ? 'Finished'
+                : `Starts ${formatDateTime(tournament.startDate)}`
+        }
         actions={
           <>
             <Link to={`/admin/tournaments/${id}/edit`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
@@ -413,7 +426,7 @@ export function AdminTournamentDetailPage() {
       <AdminCard className="p-4 mb-6">
         <div className="flex flex-wrap gap-2 items-center">
           <StatusBadge status={tournament.status} />
-          <StatusBadge status={tournament.phase} />
+          {!isDraw && <StatusBadge status={tournament.phase} />}
           <span className="text-sm text-[var(--color-muted-foreground)]">
             {tournament.registrationCount ?? 0} registered
           </span>
@@ -428,7 +441,7 @@ export function AdminTournamentDetailPage() {
                 {publish.isPending ? 'Publishing…' : 'Publish'}
               </Button>
             )}
-            {tournament.status === 'open' && (
+            {tournament.status === 'open' && !isDraw && (
               <Button
                 size="sm"
                 variant="outline"
@@ -436,6 +449,11 @@ export function AdminTournamentDetailPage() {
                 disabled={closeReg.isPending}
               >
                 {closeReg.isPending ? 'Closing…' : 'Close registration'}
+              </Button>
+            )}
+            {tournament.status === 'open' && isDraw && (
+              <Button size="sm" variant="outline" onClick={() => handleLifecycle('start')} disabled={start.isPending}>
+                {start.isPending ? 'Starting…' : 'Start now'}
               </Button>
             )}
             {tournament.status === 'closed' && (
@@ -456,7 +474,7 @@ export function AdminTournamentDetailPage() {
                   onClick={() => handleLifecycle('closeRound')}
                   disabled={closeRound.isPending}
                 >
-                  {closeRound.isPending ? 'Closing round…' : 'Close round'}
+                  {closeRound.isPending ? 'Closing round…' : isDraw ? 'Close round now' : 'Close round'}
                 </Button>
                 <Button
                   size="sm"
@@ -487,6 +505,20 @@ export function AdminTournamentDetailPage() {
           </div>
         </div>
 
+        {isDraw && tournament.status === 'open' && (
+          <p className="mt-3 border-t border-[var(--color-border)] pt-3 text-xs leading-relaxed text-[var(--color-muted-foreground)]">
+            Registration is open until <strong className="text-[var(--color-foreground)]">{formatDateTime(tournament.startDate)}</strong>.
+            Round 1 is drawn automatically then — use <strong>Start now</strong> only to begin early.
+          </p>
+        )}
+        {isDraw && tournament.status === 'in_progress' && activeRound && (
+          <p className="mt-3 border-t border-[var(--color-border)] pt-3 text-xs leading-relaxed text-[var(--color-muted-foreground)]">
+            Round {activeRound.roundNumber} closes automatically at{' '}
+            <strong className="text-[var(--color-foreground)]">{formatDateTime(activeRound.endsAt)}</strong> (
+            {formatRoundCountdown(activeRound.endsAt)}), or as soon as every match in it is decided. The next round is
+            drawn by itself — use <strong>Close round now</strong> only to end it early.
+          </p>
+        )}
         {tournament.status === 'in_progress' && tournament.phase === 'normal' && (
           <p className="mt-3 border-t border-[var(--color-border)] pt-3 text-xs leading-relaxed text-[var(--color-muted-foreground)]">
             {activeRound ? (
@@ -562,7 +594,7 @@ export function AdminTournamentDetailPage() {
           { id: 'participants', label: `Participants (${participants.length})` },
           { id: 'registrations', label: `Registrations (${registrations.length})` },
           { id: 'matches', label: 'Matches' },
-          { id: 'bracket', label: 'Bracket' },
+          ...(isDraw ? [] : [{ id: 'bracket', label: 'Bracket' }]),
           { id: 'rounds', label: `Rounds (${rounds.length})` },
           { id: 'buybacks', label: 'Buybacks' },
         ]}
@@ -630,12 +662,14 @@ export function AdminTournamentDetailPage() {
             columns={[
               { key: 'user', label: 'Player' },
               { key: 'email', label: 'Email' },
+              ...(isDraw ? [{ key: 'playsAt', label: 'Plays at' }] : []),
               { key: 'date', label: 'Registered' },
               { key: 'actions', label: '' },
             ]}
             rows={registrations.map((r) => ({
               user: r.username ?? r.userId.slice(0, 8),
               email: r.email ?? '—',
+              playsAt: r.playsAt ?? '—',
               date: formatDateTime(r.registeredAt),
               actions: (
                 <Button

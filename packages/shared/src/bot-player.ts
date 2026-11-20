@@ -70,20 +70,71 @@ function rollDelivery(random: RandomSource): number {
   return DELIVERY_OUTCOMES[DELIVERY_OUTCOMES.length - 1].runs;
 }
 
-/**
- * Bat six balls.
- *
- * Deliberately ignorant of the target it is chasing or setting: the bot plays
- * its own innings, so a player can beat it comfortably or fall short, exactly
- * as against a human. Rigging it to the opponent's score is what would make it
- * read as a bot.
- */
+/** Bat six balls with no context; the fallback when nothing is known about the player. */
 export function generateBotScore(random: RandomSource = Math.random): number {
   let total = 0;
   for (let ball = 0; ball < BALLS_PER_INNINGS; ball++) {
     total += rollDelivery(random);
   }
   return Math.max(BOT_MIN_SCORE, total);
+}
+
+/** Share of chases the bot wins against a human's completed innings. */
+export const BOT_CHASE_WIN_RATE = 0.4;
+
+/** How many of the player's latest innings shape a target the bot sets. */
+export const BOT_RECENT_INNINGS = 5;
+
+/** Runs past the target on a winning chase (a last-ball boundary overshoots). */
+const CHASE_OVERSHOOT: ReadonlyArray<{ runs: number; weight: number }> = [
+  { runs: 0, weight: 45 },
+  { runs: 1, weight: 25 },
+  { runs: 2, weight: 15 },
+  { runs: 3, weight: 10 },
+  { runs: 5, weight: 5 },
+];
+
+export interface BotInningsContext {
+  /** The human's innings in this match, when they batted first. */
+  opponentScore?: number | null;
+  /** The human's recent innings, newest first. */
+  recentScores?: readonly number[];
+}
+
+function pickWeighted(options: ReadonlyArray<{ runs: number; weight: number }>, random: RandomSource): number {
+  const total = options.reduce((sum, o) => sum + o.weight, 0);
+  let roll = random() * total;
+  for (const option of options) {
+    roll -= option.weight;
+    if (roll < 0) return option.runs;
+  }
+  return options[options.length - 1].runs;
+}
+
+/** Chase a known score: finish just past it or just short of it, never level. */
+export function botChaseScore(opponentScore: number, random: RandomSource = Math.random): number {
+  const target = Math.max(0, Math.round(opponentScore));
+  const wins = target === 0 || random() < BOT_CHASE_WIN_RATE;
+  if (wins) return target + 1 + pickWeighted(CHASE_OVERSHOOT, random);
+
+  // Close defeats are likelier than heavy ones; the spread grows with the target.
+  const spread = Math.max(2, Math.round(target * 0.25));
+  const margin = 1 + Math.floor(Math.pow(random(), 1.6) * spread);
+  return Math.max(0, target - margin);
+}
+
+/** Set a target near the player's recent form (±20%), or roll six balls when there is none. */
+export function botTargetScore(recentScores: readonly number[], random: RandomSource = Math.random): number {
+  const recent = recentScores.slice(0, BOT_RECENT_INNINGS).filter((s) => Number.isFinite(s) && s >= 0);
+  if (recent.length === 0) return generateBotScore(random);
+  const average = recent.reduce((a, b) => a + b, 0) / recent.length;
+  return Math.max(BOT_MIN_SCORE, Math.round(average * (0.8 + random() * 0.4)));
+}
+
+/** The bot's innings, shaped by what the human has already done. */
+export function generateBotInnings(context: BotInningsContext = {}, random: RandomSource = Math.random): number {
+  if (context.opponentScore != null) return botChaseScore(context.opponentScore, random);
+  return botTargetScore(context.recentScores ?? [], random);
 }
 
 /**

@@ -24,7 +24,7 @@ export function MatchFoundModal({ match, onClose }: MatchFoundModalProps) {
 
   const viewMatch = () => {
     handleClose();
-    navigate('/matches');
+    navigate('/my-tournaments');
   };
 
   return (

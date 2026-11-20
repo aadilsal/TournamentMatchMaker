@@ -43,6 +43,17 @@ async function upsertNotification(
   return result.rows[0];
 }
 
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/** Plain notice email: the message and one button back into the app. */
+function noticeEmailHtml(message: string, url: string): string {
+  return `<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#111">
+  <p>${escapeHtml(message)}</p>
+  <p><a href="${escapeHtml(url)}" style="display:inline-block;background:#10b981;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Pixel Paddle</a></p>
+</div>`;
+}
+
 /** error is null once a provider accepted the email; retryable when every configured provider failed. */
 async function sendEmail(
   env: WorkerEnv,
@@ -70,6 +81,11 @@ export async function processDispatchNotificationJob(
 ) {
   const { userId, type, channels, payload, idempotencyKey } = job.data;
 
+  const userResult = await pool.query(`SELECT email, username, is_bot FROM users WHERE id = $1`, [userId]);
+  const user = userResult.rows[0];
+  // Bots have no inbox: skip every channel.
+  if (!user || user.is_bot) return;
+
   if (channels.includes('in_app')) {
     const row = await upsertNotification(
       pool,
@@ -96,12 +112,12 @@ export async function processDispatchNotificationJob(
   }
 
   if (channels.includes('email')) {
-    const userResult = await pool.query(`SELECT email, username FROM users WHERE id = $1`, [userId]);
-    const user = userResult.rows[0];
-    if (!user) return;
-
-    let subject = 'VR Tournament Notification';
-    let html = `<p>You have a new notification: ${type}</p>`;
+    // Types without their own template: send the notice's own title and message.
+    let subject = typeof payload.title === 'string' ? payload.title : 'Pixel Paddle update';
+    let html =
+      typeof payload.message === 'string'
+        ? noticeEmailHtml(payload.message, typeof payload.link === 'string' ? `${env.APP_URL}${payload.link}` : env.APP_URL)
+        : `<p>You have a new notification: ${escapeHtml(type)}</p>`;
 
     if (type === 'match_found') {
       const opponent = payload.opponent as { username?: string } | undefined;
