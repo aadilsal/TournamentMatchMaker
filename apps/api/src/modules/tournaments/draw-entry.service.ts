@@ -37,11 +37,13 @@ export class DrawEntryService {
     let registration: DrawRegistration;
     let tournamentName = '';
     let startDate = '';
+    let overs = 1;
     try {
       await client.query('BEGIN');
       const t = await this.lockJoinable(client, tournamentId);
       tournamentName = t.name;
       startDate = (t.start_date as Date).toISOString();
+      overs = Number(t.overs ?? 1);
 
       const user = await client.query(`SELECT has_vr_headset, is_bot FROM users WHERE id = $1`, [userId]);
       if (!user.rows[0] || user.rows[0].is_bot) throw new AppError('NOT_FOUND', 'User not found', 404);
@@ -105,7 +107,7 @@ export class DrawEntryService {
           startDate,
           message: `You're in ${tournamentName}! Your first match is drawn when it starts.`,
           link: tournamentLink(tournamentId),
-          emailData: { playingAt: registration.venue?.name ?? 'Home' },
+          emailData: { playingAt: registration.venue?.name ?? 'Home', overs },
         },
         idempotencyKey: `tournament-reg:${tournamentId}:${userId}`,
       }).catch((err: unknown) => console.error('Failed to enqueue registration notification:', err));
@@ -164,7 +166,7 @@ export class DrawEntryService {
   /** Lock a draw tournament that is still taking players; refuse with a clear reason otherwise. */
   private async lockJoinable(client: PoolClient, tournamentId: string, startedMessage?: string) {
     const result = await client.query(
-      `SELECT id, name, status, play_format, start_date, max_players
+      `SELECT id, name, status, play_format, start_date, max_players, overs
        FROM tournaments WHERE id = $1 FOR UPDATE`,
       [tournamentId]
     );

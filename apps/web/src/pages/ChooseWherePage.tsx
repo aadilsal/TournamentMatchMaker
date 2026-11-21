@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Tournament, Venue } from '@vr-tournament/shared';
+import { oversLabel } from '@vr-tournament/shared';
 import { Headset, MapPin, Check } from 'lucide-react';
 import { apiGet, apiPost, getAccessToken, getUserErrorMessage } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
@@ -89,6 +90,7 @@ export function ChooseWherePage() {
       <JourneySteps current={1} />
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Where will you play {t.name}?</h1>
+        <p className="text-sm font-medium text-[var(--color-primary)] mt-1">{oversLabel(t.overs)}</p>
         <p className="text-[var(--color-muted-foreground)] mt-1">
           {user?.hasVrHeadset
             ? 'Play at an arena near you, or from home on your own VR headset.'

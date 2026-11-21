@@ -166,6 +166,8 @@ export interface Tournament {
   registrationCount?: number;
   /** 'draw': new format (draw per round, no slots); 'classic': queue + slots. */
   playFormat: 'classic' | 'draw';
+  /** Overs per innings, 1–20; the same for every match in every round. */
+  overs: number;
   championId: string | null;
   createdAt: string;
 }
@@ -238,6 +240,9 @@ export interface MetaCurrentMatchResponse {
     /** Which tournament and round this match belongs to, for the in-game HUD. Additive. */
     tournamentName?: string | null;
     roundLabel?: string | null;
+    /** Overs per innings for this match (1–20) and the balls that makes. Additive. */
+    overs: number;
+    ballsPerInnings: number;
     opponent: string;
     /**
      * A player without a headset books a venue and a slot, so both ids are real.
@@ -293,6 +298,8 @@ export interface MetaOpenMatchSummary {
   tournamentName: string | null;
   /** e.g. "Semi-final", "Round 1"; null outside a tournament. */
   roundLabel: string | null;
+  overs: number;
+  ballsPerInnings: number;
   opponent: string;
   /** `your_turn`: this player still has to bat; `waiting_for_opponent`: they have. */
   state: 'your_turn' | 'waiting_for_opponent';

@@ -1,3 +1,4 @@
+import { normalizeOvers } from '@vr-tournament/shared';
 import type {
   Booking,
   Buyback,
@@ -153,6 +154,7 @@ interface TournamentRow {
   round_duration_minutes?: number;
   initial_player_count?: number | null;
   play_format?: string | null;
+  overs?: number | null;
   champion_id?: string | null;
   created_at: Date;
   registration_count?: number;
@@ -226,6 +228,7 @@ export function mapTournament(row: TournamentRow): Tournament {
     initialPlayerCount: row.initial_player_count ?? null,
     registrationCount: row.registration_count,
     playFormat: row.play_format === 'draw' ? 'draw' : 'classic',
+    overs: normalizeOvers(row.overs),
     championId: row.champion_id ?? null,
     createdAt: row.created_at.toISOString(),
   };

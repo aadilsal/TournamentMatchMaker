@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { ArrowRight, Calendar, Trophy, Users } from 'lucide-react';
 import type { Tournament } from '@vr-tournament/shared';
+import { oversLabel } from '@vr-tournament/shared';
 import { apiGet } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import { buttonVariants } from '@/components/ui/button';
@@ -63,6 +64,7 @@ export function OpenTournaments() {
               >
                 <div className="absolute inset-x-0 top-0 h-1 bg-[var(--color-primary)]" aria-hidden />
                 <h3 className="text-xl font-semibold">{t.name}</h3>
+                <p className="mt-1 text-sm font-medium text-[var(--color-primary)]">{oversLabel(t.overs)}</p>
                 <div className="mt-4 space-y-2 text-sm text-[var(--color-muted-foreground)]">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4" aria-hidden />

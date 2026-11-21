@@ -1,3 +1,5 @@
+import { normalizeOvers } from './overs.js';
+
 /**
  * The bot opponent.
  *
@@ -50,6 +52,7 @@ const DELIVERY_OUTCOMES: ReadonlyArray<{ runs: number; weight: number }> = [
 
 const TOTAL_WEIGHT = DELIVERY_OUTCOMES.reduce((sum, o) => sum + o.weight, 0);
 
+/** Balls in one over; a bot bats this many per over of the tournament. */
 export const BALLS_PER_INNINGS = 6;
 
 /**
@@ -70,13 +73,14 @@ function rollDelivery(random: RandomSource): number {
   return DELIVERY_OUTCOMES[DELIVERY_OUTCOMES.length - 1].runs;
 }
 
-/** Bat six balls with no context; the fallback when nothing is known about the player. */
-export function generateBotScore(random: RandomSource = Math.random): number {
+/** Bat a full innings (six balls per over) with no context; the fallback when nothing is known about the player. */
+export function generateBotScore(random: RandomSource = Math.random, overs = 1): number {
+  const n = normalizeOvers(overs);
   let total = 0;
-  for (let ball = 0; ball < BALLS_PER_INNINGS; ball++) {
+  for (let ball = 0; ball < n * BALLS_PER_INNINGS; ball++) {
     total += rollDelivery(random);
   }
-  return Math.max(BOT_MIN_SCORE, total);
+  return Math.max(BOT_MIN_SCORE * n, total);
 }
 
 /** Share of chases the bot wins against a human's completed innings. */
@@ -97,8 +101,10 @@ const CHASE_OVERSHOOT: ReadonlyArray<{ runs: number; weight: number }> = [
 export interface BotInningsContext {
   /** The human's innings in this match, when they batted first. */
   opponentScore?: number | null;
-  /** The human's recent innings, newest first. */
+  /** The human's recent innings, newest first, already scaled to this match's overs. */
   recentScores?: readonly number[];
+  /** Overs per innings in this match; 1 when omitted. */
+  overs?: number;
 }
 
 function pickWeighted(options: ReadonlyArray<{ runs: number; weight: number }>, random: RandomSource): number {
@@ -123,18 +129,18 @@ export function botChaseScore(opponentScore: number, random: RandomSource = Math
   return Math.max(0, target - margin);
 }
 
-/** Set a target near the player's recent form (±20%), or roll six balls when there is none. */
-export function botTargetScore(recentScores: readonly number[], random: RandomSource = Math.random): number {
+/** Set a target near the player's recent form (±20%), or bat a full innings when there is none. */
+export function botTargetScore(recentScores: readonly number[], random: RandomSource = Math.random, overs = 1): number {
   const recent = recentScores.slice(0, BOT_RECENT_INNINGS).filter((s) => Number.isFinite(s) && s >= 0);
-  if (recent.length === 0) return generateBotScore(random);
+  if (recent.length === 0) return generateBotScore(random, overs);
   const average = recent.reduce((a, b) => a + b, 0) / recent.length;
-  return Math.max(BOT_MIN_SCORE, Math.round(average * (0.8 + random() * 0.4)));
+  return Math.max(BOT_MIN_SCORE * normalizeOvers(overs), Math.round(average * (0.8 + random() * 0.4)));
 }
 
 /** The bot's innings, shaped by what the human has already done. */
 export function generateBotInnings(context: BotInningsContext = {}, random: RandomSource = Math.random): number {
   if (context.opponentScore != null) return botChaseScore(context.opponentScore, random);
-  return botTargetScore(context.recentScores ?? [], random);
+  return botTargetScore(context.recentScores ?? [], random, context.overs ?? 1);
 }
 
 /**

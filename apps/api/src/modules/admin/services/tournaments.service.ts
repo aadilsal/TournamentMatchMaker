@@ -194,7 +194,13 @@ export class AdminTournamentsService {
       ['buybackPriceCents', 'buyback_price_cents'],
       ['roundDurationMinutes', 'round_duration_minutes'],
       ['initialPlayerCount', 'initial_player_count'],
+      ['overs', 'overs'],
     ];
+
+    // Every match must use the same overs, so they are fixed once play can begin.
+    if (input.overs !== undefined && input.overs !== before.overs && !['draft', 'open'].includes(before.status)) {
+      throw new AppError('CONFLICT', 'Overs cannot change once the tournament has started', 409);
+    }
 
     for (const [key, col] of map) {
       if (input[key] !== undefined) {

@@ -260,8 +260,8 @@ export class TournamentsService {
     const result = await this.pool.query(
       `INSERT INTO tournaments (name, game, start_date, end_date, registration_opens_at, registration_closes_at,
                                 status, max_players, skill_tier, buyback_price_cents, round_duration_minutes,
-                                play_format, phase)
-       VALUES ($1, 'VR Cricket', $2, $3, NOW(), $2, 'draft', $4, 3, $5, $6, 'draw', 'draw')
+                                play_format, phase, overs)
+       VALUES ($1, 'VR Cricket', $2, $3, NOW(), $2, 'draft', $4, 3, $5, $6, 'draw', 'draw', $7)
        RETURNING *`,
       [
         input.name,
@@ -270,6 +270,7 @@ export class TournamentsService {
         input.maxPlayers ?? null,
         input.buybackPriceCents ?? 500,
         input.roundDurationMinutes,
+        input.overs ?? 1,
       ]
     );
     return mapTournament(result.rows[0]);

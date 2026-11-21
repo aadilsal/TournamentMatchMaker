@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import { MAX_OVERS, MIN_OVERS } from '../overs.js';
+
+/** Overs per innings, set per tournament. */
+export const oversSchema = z.number().int().min(MIN_OVERS).max(MAX_OVERS);
 
 export const tournamentStatusSchema = z.enum([
   'draft',
@@ -138,6 +142,7 @@ export const tournamentFieldsSchema = z.object({
   // Stripe's minimum charge is 50 cents; 0 means buybacks are off.
   buybackPriceCents: z.number().int().min(0).refine((v) => v === 0 || v >= 50, 'Buyback price must be 0 (off) or at least 50 cents').optional(),
   roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60).optional(),
+  overs: oversSchema.optional(),
 });
 
 export const createTournamentSchema = applyTournamentWindowRules(tournamentFieldsSchema);
@@ -151,6 +156,7 @@ export const createDrawTournamentSchema = z.object({
     .datetime()
     .refine((d) => new Date(d).getTime() > Date.now() - 60_000, 'Start time must be in the future'),
   roundDurationMinutes: z.number().int().min(15).max(30 * 24 * 60),
+  overs: oversSchema.optional(),
   maxPlayers: z.number().int().min(2).max(512).optional(),
   buybackPriceCents: z
     .number()

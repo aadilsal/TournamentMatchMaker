@@ -1,7 +1,8 @@
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Tournament } from '@vr-tournament/shared';
-import { Calendar, Timer, Trophy, Users, RotateCcw } from 'lucide-react';
+import { oversLabel } from '@vr-tournament/shared';
+import { Calendar, CircleDot, Timer, Trophy, Users, RotateCcw } from 'lucide-react';
 import { apiGet, getAccessToken } from '@/lib/api';
 import { formatDateTime, formatMoneyCents } from '@/lib/format';
 import { formatRoundLength, useMyTournaments } from '@/lib/journey';
@@ -70,6 +71,7 @@ export function ChooseTournamentPage() {
                 </div>
                 <ul className="text-sm text-[var(--color-muted-foreground)] space-y-1.5">
                   <li className="flex items-center gap-2"><Calendar className="h-4 w-4 shrink-0" aria-hidden />Starts {formatDateTime(t.startDate)}</li>
+                  <li className="flex items-center gap-2"><CircleDot className="h-4 w-4 shrink-0" aria-hidden />{oversLabel(t.overs)}</li>
                   <li className="flex items-center gap-2"><Timer className="h-4 w-4 shrink-0" aria-hidden />Each round lasts {formatRoundLength(t.roundDurationMinutes)}</li>
                   <li className="flex items-center gap-2"><Users className="h-4 w-4 shrink-0" aria-hidden />{t.registrationCount ?? 0}{t.maxPlayers ? ` of ${t.maxPlayers}` : ''} players</li>
                   {t.buybackPriceCents >= 50 && (

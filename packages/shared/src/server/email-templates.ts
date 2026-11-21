@@ -1,6 +1,7 @@
 // Branded HTML + plain-text emails in the app's dark style; one layout for every message.
 import { timeLeft } from '../draw-notifications.js';
 import { LOGIN_LINK_TTL_MINUTES, loginLinkUrl } from '../login-link.js';
+import { oversLabel } from '../overs.js';
 
 export interface RenderedEmail {
   subject: string;
@@ -184,7 +185,7 @@ export function passwordResetEmail(d: { link: string }, appUrl: string): Rendere
 }
 
 export function registeredEmail(
-  d: { username?: string | null; tournamentName: string; startDate: string; playingAt?: string | null },
+  d: { username?: string | null; tournamentName: string; startDate: string; playingAt?: string | null; overs?: number | null },
   appUrl: string
 ): RenderedEmail {
   return build(`You're in: ${d.tournamentName}`, {
@@ -195,6 +196,7 @@ export function registeredEmail(
     paragraphs: ['Your place is saved. Round 1 is drawn automatically when the tournament starts and we will tell you who you play.'],
     details: [
       ['Starts in', timeLeft(d.startDate)],
+      ...(d.overs ? ([['Format', oversLabel(d.overs)]] as Array<[string, string]>) : []),
       ...(d.playingAt ? ([['Playing at', d.playingAt]] as Array<[string, string]>) : []),
     ],
     cta: { label: 'See my tournaments', url: mine(appUrl) },
@@ -214,7 +216,7 @@ export function startingSoonEmail(d: { tournamentName: string; startsAt: string 
 }
 
 export function roundStartedEmail(
-  d: { tournamentName: string; roundLabel: string; opponent: string; closesAt: string | Date; playingAt?: string | null },
+  d: { tournamentName: string; roundLabel: string; opponent: string; closesAt: string | Date; playingAt?: string | null; overs?: number | null },
   appUrl: string
 ): RenderedEmail {
   return build(`${d.roundLabel}: you vs ${d.opponent}`, {
@@ -225,6 +227,7 @@ export function roundStartedEmail(
     matchup: { left: 'You', right: d.opponent },
     details: [
       ['Play before', `in ${timeLeft(d.closesAt)}`],
+      ...(d.overs ? ([['Format', oversLabel(d.overs)]] as Array<[string, string]>) : []),
       ['Where', d.playingAt ?? 'Home or your venue'],
     ],
     cta: { label: 'Play now', url: mine(appUrl) },
@@ -348,6 +351,7 @@ function pickNotificationEmail(type: string, payload: Payload, appUrl: string): 
           tournamentName: String(payload.tournamentName),
           startDate: String(payload.startDate),
           playingAt: (d.playingAt as string | undefined) ?? null,
+          overs: (d.overs as number | undefined) ?? null,
         }, appUrl);
       }
       break;

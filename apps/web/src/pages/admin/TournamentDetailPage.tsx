@@ -9,7 +9,7 @@ import type {
   TournamentRegistration,
   TournamentRound,
 } from '@vr-tournament/shared';
-import { roundWindowViolation } from '@vr-tournament/shared';
+import { oversLabel, roundWindowViolation } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
 import {
   AdminQueryError,
@@ -428,7 +428,7 @@ export function AdminTournamentDetailPage() {
           <StatusBadge status={tournament.status} />
           {!isDraw && <StatusBadge status={tournament.phase} />}
           <span className="text-sm text-[var(--color-muted-foreground)]">
-            {tournament.registrationCount ?? 0} registered
+            {tournament.registrationCount ?? 0} registered · {oversLabel(tournament.overs)}
           </span>
           <div className="flex flex-wrap gap-2 ml-auto">
             {tournament.status === 'draft' && (

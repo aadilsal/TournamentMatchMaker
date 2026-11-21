@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Tournament } from '@vr-tournament/shared';
-import { estimatedDrawFinish, roundsRemaining } from '@vr-tournament/shared';
+import { DEFAULT_OVERS, MAX_OVERS, MIN_OVERS, OVERS_PRESETS, estimatedDrawFinish, roundsRemaining } from '@vr-tournament/shared';
+import { cn } from '@/lib/utils';
 import { apiPatch, apiPost } from '@/lib/api';
 import { AdminCard, AdminFieldError, AdminPageHeader } from '@/components/admin/AdminUi';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ export function DrawTournamentForm({ tournament }: { tournament?: Tournament }) 
   const [roundMinutes, setRoundMinutes] = useState(String(tournament?.roundDurationMinutes ?? 180));
   const [maxPlayers, setMaxPlayers] = useState(tournament?.maxPlayers ? String(tournament.maxPlayers) : '');
   const [buyback, setBuyback] = useState(centsToDollars(tournament?.buybackPriceCents ?? 500));
+  const [overs, setOvers] = useState(String(tournament?.overs ?? DEFAULT_OVERS));
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const minutes = Number(roundMinutes);
@@ -50,6 +52,8 @@ export function DrawTournamentForm({ tournament }: { tournament?: Tournament }) 
     if (maxPlayers && (!Number.isInteger(max) || max < 2 || max > 512)) errs.maxPlayers = 'Between 2 and 512, or leave empty for no limit';
     const cents = dollarsToCents(buyback || '0');
     if (cents === null || (cents !== 0 && cents < 50)) errs.buyback = 'Enter 0 to turn buybacks off, or at least 0.50';
+    const oversNum = Number(overs);
+    if (!Number.isInteger(oversNum) || oversNum < MIN_OVERS || oversNum > MAX_OVERS) errs.overs = `Between ${MIN_OVERS} and ${MAX_OVERS} overs`;
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -58,6 +62,7 @@ export function DrawTournamentForm({ tournament }: { tournament?: Tournament }) 
       name: name.trim(),
       startDate: iso,
       roundDurationMinutes: minutes,
+      overs: oversNum,
       buybackPriceCents: cents,
       ...(maxPlayers ? { maxPlayers: max } : {}),
     };
@@ -98,6 +103,40 @@ export function DrawTournamentForm({ tournament }: { tournament?: Tournament }) 
                 ))}
               </Select>
               <p className="text-xs text-[var(--color-muted-foreground)] mt-1">How long players have to play each match.</p>
+            </div>
+            <div>
+              <Label htmlFor="t-overs">Overs per innings</Label>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                {OVERS_PRESETS.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setOvers(String(n))}
+                    aria-pressed={overs === String(n)}
+                    className={cn(
+                      'h-9 min-w-12 rounded-full border px-4 text-sm font-medium transition-colors',
+                      overs === String(n)
+                        ? 'border-[var(--color-primary)] bg-[var(--color-primary)] text-white'
+                        : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/60'
+                    )}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <Input
+                  id="t-overs"
+                  inputMode="numeric"
+                  className="w-24"
+                  value={overs}
+                  onChange={(e) => setOvers(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                  aria-label="Custom overs"
+                  aria-invalid={!!errors.overs}
+                />
+              </div>
+              <p className="text-xs text-[var(--color-muted-foreground)] mt-1">
+                Pick one or type any number from {MIN_OVERS} to {MAX_OVERS}. Every match in every round uses the same overs; this locks when the tournament starts.
+              </p>
+              <AdminFieldError message={errors.overs} />
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
               <div>

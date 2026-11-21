@@ -2,6 +2,8 @@ import type { Pool } from 'pg';
 import type { MatchResultExtended, PlayerCard, PlayerCardTournament } from '@vr-tournament/shared';
 import {
   NO_SCORE,
+  ballsPerInnings,
+  normalizeOvers,
   drawRoundLabel,
   knockoutRoundLabel,
   playerGreeting,
@@ -32,7 +34,7 @@ export async function buildPlayerCard(pool: Pool, userId: string, timeZone?: str
   if (!user) throw new AppError('NOT_FOUND', 'Player not found', 404);
 
   const tournamentRows = await pool.query(
-    `SELECT t.id, t.name, t.status, t.start_date, t.current_round_number, t.champion_id, t.play_format,
+    `SELECT t.id, t.name, t.status, t.start_date, t.current_round_number, t.champion_id, t.play_format, t.overs,
             reg.play_location, v.id AS venue_id, v.name AS venue_name, v.city AS venue_city,
             tp.status AS participant_status, tp.round_number AS participant_round,
             tr.round_number, tr.starts_at, tr.ends_at, tr.status AS round_status,
@@ -112,6 +114,8 @@ export async function buildPlayerCard(pool: Pool, userId: string, timeZone?: str
       name: t.name as string,
       status: t.status === 'in_progress' ? 'live' : t.status === 'completed' ? 'finished' : 'upcoming',
       startDate,
+      overs: normalizeOvers(t.overs),
+      ballsPerInnings: ballsPerInnings(t.overs),
       playingAt:
         t.play_location === 'home'
           ? { type: 'home', name: 'Home' }

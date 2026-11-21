@@ -1,8 +1,11 @@
 import { z } from 'zod';
+import { BALLS_PER_OVER, MAX_OVERS } from '../overs.js';
 
 export const metaSubmitScoreSchema = z.object({
   userId: z.string().uuid(),
   score: z.number().int().min(0).max(999),
+  // Optional, recorded for checking only; never used to reject a score.
+  ballsFaced: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER).optional(),
 });
 
 export const metaSoloTargetSchema = z.object({

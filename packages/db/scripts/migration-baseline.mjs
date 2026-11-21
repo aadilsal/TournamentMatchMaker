@@ -52,6 +52,7 @@ const MIGRATION_MARKERS = {
     column: { table: 'tournaments', name: 'play_format' },
   },
   '1738000000020_login-links': { table: 'login_links' },
+  '1738000000021_tournament-overs': { column: { table: 'tournaments', name: 'overs' } },
 };
 
 async function tableExists(client, table) {

@@ -7,7 +7,7 @@ import type {
   TournamentParticipant,
   TournamentRegistration,
 } from '@vr-tournament/shared';
-import { knockoutRoundLabel } from '@vr-tournament/shared';
+import { knockoutRoundLabel, oversLabel } from '@vr-tournament/shared';
 import { apiDelete, apiGet, getAccessToken } from '@/lib/api';
 import { invalidateTournamentQueries } from '@/lib/query-keys';
 import { getUserErrorMessage } from '@/lib/user-messages';
@@ -141,7 +141,7 @@ export function TournamentDetailPage() {
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">
-          {tournament.game} · {isDraw ? 'Knockout — one match per round' : phaseLabel(tournament.phase)}
+          {tournament.game} · {oversLabel(tournament.overs)} · {isDraw ? 'Knockout — one match per round' : phaseLabel(tournament.phase)}
         </p>
         <p className="text-sm mt-2">
           {formatDateTime(tournament.startDate)} – {formatDateTime(tournament.endDate)}

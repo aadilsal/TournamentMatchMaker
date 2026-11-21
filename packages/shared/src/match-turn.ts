@@ -1,3 +1,5 @@
+import { normalizeOvers } from './overs.js';
+
 /**
  * The turn lock.
  *
@@ -25,6 +27,11 @@
  */
 export const MATCH_TURN_HOLD_MS = 10 * 60 * 1000;
 
+/** The hold grows with the innings: 10 minutes for one over, 4 more per extra over. */
+export function turnHoldMsForOvers(overs: number): number {
+  return MATCH_TURN_HOLD_MS + (normalizeOvers(overs) - 1) * 4 * 60 * 1000;
+}
+
 /**
  * How long a decided match stays visible on the poll after it resolves.
  *
@@ -45,12 +52,13 @@ export const MATCH_RESULT_VISIBILITY_MS = 5 * 60 * 1000;
 export function isTurnHoldActive(
   activePlayerId: string | null | undefined,
   activePlayerSince: Date | string | null | undefined,
-  now: number = Date.now()
+  now: number = Date.now(),
+  holdMs: number = MATCH_TURN_HOLD_MS
 ): boolean {
   if (!activePlayerId || !activePlayerSince) return false;
   const since = activePlayerSince instanceof Date
     ? activePlayerSince.getTime()
     : new Date(activePlayerSince).getTime();
   if (!Number.isFinite(since)) return false;
-  return now - since < MATCH_TURN_HOLD_MS;
+  return now - since < holdMs;
 }

@@ -1,6 +1,7 @@
 import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BuybackOption, PlayerCardTournament, Tournament } from '@vr-tournament/shared';
+import { oversLabel } from '@vr-tournament/shared';
 import { Headset, MapPin, Plus, Trophy, Swords } from 'lucide-react';
 import { apiDelete, apiGet, getAccessToken, getUserErrorMessage } from '@/lib/api';
 import { JOURNEY_KEYS, useJourney, useMyTournaments } from '@/lib/journey';
@@ -113,6 +114,7 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="font-semibold text-lg leading-snug">{t.name}</h2>
+          <p className="text-xs font-medium text-[var(--color-primary)] mt-0.5">{oversLabel(t.overs)}</p>
           {t.playingAt && (
             <p className="text-sm text-[var(--color-muted-foreground)] flex items-center gap-1.5 mt-0.5">
               {t.playingAt.type === 'home' ? <Headset className="h-3.5 w-3.5" aria-hidden /> : <MapPin className="h-3.5 w-3.5" aria-hidden />}

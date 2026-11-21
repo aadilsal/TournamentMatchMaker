@@ -524,3 +524,63 @@ describe('admin controls for draw tournaments', () => {
     expect(round.rows[0].due).toBe(true);
   });
 });
+
+describe('overs per tournament', () => {
+  it('admin picks the overs (1-20, default 1) and cannot change them once started', async () => {
+    const as = auth(await user({ role: 'superadmin' }), 'superadmin');
+    const startDate = new Date(Date.now() + 2 * 86_400_000).toISOString();
+    const create = (extra: Record<string, unknown>) =>
+      request(app).post('/api/v1/admin/tournaments').set(as).send({ playFormat: 'draw', name: 'Overs Cup', startDate, roundDurationMinutes: 120, ...extra });
+
+    expect((await create({})).body.data.overs).toBe(1);
+    expect((await create({ overs: 21 })).status).toBe(400);
+    expect((await create({ overs: 0 })).status).toBe(400);
+    const made = await create({ overs: 5 });
+    expect(made.status).toBe(201);
+    expect(made.body.data.overs).toBe(5);
+
+    const id = made.body.data.id as string;
+    const edit = await request(app).patch(`/api/v1/admin/tournaments/${id}`).set(as).send({ overs: 7 });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data.overs).toBe(7);
+
+    await pool.query(`UPDATE tournaments SET status = 'in_progress' WHERE id = $1`, [id]);
+    const locked = await request(app).patch(`/api/v1/admin/tournaments/${id}`).set(as).send({ overs: 10 });
+    expect(locked.status).toBe(409);
+    expect((await pool.query(`SELECT overs FROM tournaments WHERE id = $1`, [id])).rows[0].overs).toBe(7);
+  });
+
+  it('the headset gets the overs on the match, the match list, live tournaments and the player card', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid } = await liveDrawMatch(a, b);
+    await pool.query(`UPDATE tournaments SET overs = 5 WHERE id = $1`, [tid]);
+
+    const cur = await current(a);
+    expect(cur.body.data.match).toMatchObject({ overs: 5, ballsPerInnings: 30 });
+    expect(cur.body.data.matches[0]).toMatchObject({ overs: 5, ballsPerInnings: 30 });
+
+    const live = await request(app).get('/api/v1/integrations/meta/tournaments/live').set(meta);
+    expect(live.body.data.tournaments.find((t: { id: string }) => t.id === tid)).toMatchObject({
+      overs: 5,
+      ballsPerInnings: 30,
+      currentRoundNumber: 1,
+      playerCount: 2,
+    });
+
+    const card = await request(app).get('/api/v1/integrations/meta/players/profile').set(meta).query({ userId: a });
+    expect(card.body.data.tournaments.find((t: { id: string }) => t.id === tid)).toMatchObject({ overs: 5, ballsPerInnings: 30 });
+  });
+
+  it('records balls faced when the headset sends them, and never rejects a score over it', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    const res = await request(app)
+      .post(`/api/v1/integrations/meta/matches/${matchId}/scores`)
+      .set(meta)
+      .send({ userId: a, score: 14, ballsFaced: 6 });
+    expect(res.status).toBe(200);
+    const row = await pool.query(`SELECT balls_faced FROM match_innings WHERE match_id = $1 AND user_id = $2`, [matchId, a]);
+    expect(row.rows[0].balls_faced).toBe(6);
+  });
+});

@@ -424,7 +424,7 @@ const sender = (notificationQueue: NotificationQueue, isBot: Set<string>): Send 
 /** Names, places, scores and the round deadline for one draw match, for notification copy. */
 async function matchDetails(pool: Pool, matchId: string) {
   const r = await pool.query(
-    `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.result, t.name AS tournament_name, tr.ends_at,
+    `SELECT m.id, m.tournament_id, m.player1_id, m.player2_id, m.result, t.name AS tournament_name, t.overs, tr.ends_at,
             u1.username AS p1_name, u2.username AS p2_name,
             CASE WHEN r1.play_location = 'venue' THEN v1.name END AS p1_place,
             CASE WHEN r2.play_location = 'venue' THEN v2.name END AS p2_place
@@ -456,6 +456,7 @@ async function matchDetails(pool: Pool, matchId: string) {
     tournamentId: row.tournament_id as string,
     tournamentName: row.tournament_name as string,
     roundLabel: (result.roundLabel as string | undefined) ?? 'match',
+    overs: Number(row.overs ?? 1),
     closesAt: row.ends_at as Date,
     walkover: result.walkover === true,
     side,
@@ -502,7 +503,7 @@ async function flushOutbox(
           tournamentId: d.tournamentId,
           opponent: me.opponent,
           link: tournamentLink(d.tournamentId),
-          emailData: { tournamentName: d.tournamentName, roundLabel: d.roundLabel, opponent: me.opponent, closesAt: d.closesAt, playingAt: me.place },
+          emailData: { tournamentName: d.tournamentName, roundLabel: d.roundLabel, opponent: me.opponent, closesAt: d.closesAt, playingAt: me.place, overs: d.overs },
         },
         `round-started:${m.matchId}:${playerId}`,
         true

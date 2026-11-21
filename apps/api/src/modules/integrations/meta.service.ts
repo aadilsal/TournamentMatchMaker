@@ -13,17 +13,20 @@ import type {
 import {
   DRAW_PHASE,
   MATCH_RESULT_VISIBILITY_MS,
-  MATCH_TURN_HOLD_MS,
   NO_SCORE,
   QUEUE_MEMBER,
+  ballsPerInnings,
   chaseTargetFor,
   generateBotInnings,
   isSlotEnded,
   knockoutRoundLabel,
   isSlotStartPast,
   isTurnHoldActive,
+  normalizeOvers,
   parseQueuePlayerMeta,
   queuePlayerKey,
+  scaleScoreToOvers,
+  turnHoldMsForOvers,
 } from '@vr-tournament/shared';
 import type { RedisClient } from '../../lib/redis.js';
 import type { Env } from '../../config/env.js';
@@ -75,6 +78,7 @@ interface BotMatchRow {
   time_slot_id: string | null;
   result: MatchResultExtended | null;
   bot_id: string;
+  overs: number;
 }
 
 const MATCH_SELECT = `
@@ -195,9 +199,10 @@ export class MetaIntegrationService {
     const pending = await this.pool.query(
       `SELECT m.id, m.player1_id, m.player2_id, m.tournament_id, m.phase,
               m.round_number, m.time_slot_id, m.result,
-              bot.id AS bot_id
+              bot.id AS bot_id, COALESCE(t.overs, 1) AS overs
        FROM matches m
        JOIN users bot ON bot.id = CASE WHEN m.player1_id = $1 THEN m.player2_id ELSE m.player1_id END
+       LEFT JOIN tournaments t ON t.id = m.tournament_id
        WHERE (m.player1_id = $1 OR m.player2_id = $1)
          AND m.status IN ('confirmed', 'in_progress')
          AND bot.is_bot = TRUE
@@ -235,17 +240,23 @@ export class MetaIntegrationService {
 
     // This match's human innings first (the bot chases it), then recent form (for setting a target).
     const humanInnings = await this.pool.query(
-      `SELECT score, match_id = $1 AS this_match
-       FROM match_innings
-       WHERE user_id = $2 AND source <> 'bot'
-       ORDER BY (match_id = $1) DESC, played_at DESC
+      `SELECT mi.score, mi.match_id = $1 AS this_match, COALESCE(t.overs, 1) AS overs
+       FROM match_innings mi
+       JOIN matches m ON m.id = mi.match_id
+       LEFT JOIN tournaments t ON t.id = m.tournament_id
+       WHERE mi.user_id = $2 AND mi.source <> 'bot'
+       ORDER BY (mi.match_id = $1) DESC, mi.played_at DESC
        LIMIT 6`,
       [row.id, userId]
     );
     const thisMatch = humanInnings.rows.find((r) => r.this_match);
+    // Recent form is compared at this match's length: same run rate, this match's overs.
     const score = generateBotInnings({
       opponentScore: thisMatch ? Number(thisMatch.score) : null,
-      recentScores: humanInnings.rows.filter((r) => !r.this_match).map((r) => Number(r.score)),
+      recentScores: humanInnings.rows
+        .filter((r) => !r.this_match)
+        .map((r) => scaleScoreToOvers(Number(r.score), Number(r.overs), Number(row.overs))),
+      overs: Number(row.overs),
     });
 
     let resolvable: { p1: number; p2: number; result: MatchResultExtended } | null = null;
@@ -386,23 +397,40 @@ export class MetaIntegrationService {
   async listLiveTournaments() {
     // Same window rule as TournamentsService.assertRegistrationWindowOpen.
     const result = await this.pool.query(
-      `SELECT id, name, status, start_date, end_date,
-              (status = 'open'
-                AND (registration_opens_at IS NULL OR registration_opens_at <= NOW())
-                AND (registration_closes_at IS NULL OR registration_closes_at > NOW())) AS registration_open
-       FROM tournaments
-       WHERE status IN ('open', 'in_progress')
-       ORDER BY (status = 'in_progress') DESC, start_date ASC
+      `SELECT t.id, t.name, t.status, t.start_date, t.end_date, t.overs, t.max_players, t.play_format,
+              t.current_round_number, t.round_duration_minutes,
+              tr.ends_at AS round_closes_at,
+              (SELECT COUNT(*)::int FROM tournament_registrations r JOIN users u ON u.id = r.user_id
+                WHERE r.tournament_id = t.id AND NOT u.is_bot) AS player_count,
+              (t.status = 'open'
+                AND (t.registration_opens_at IS NULL OR t.registration_opens_at <= NOW())
+                AND (t.registration_closes_at IS NULL OR t.registration_closes_at > NOW())) AS registration_open
+       FROM tournaments t
+       LEFT JOIN tournament_rounds tr
+         ON tr.tournament_id = t.id AND tr.round_number = t.current_round_number AND t.status = 'in_progress'
+       WHERE t.status IN ('open', 'in_progress')
+       ORDER BY (t.status = 'in_progress') DESC, t.start_date ASC
        LIMIT 20`
     );
-    const tournaments = result.rows.map((r) => ({
-      id: r.id as string,
-      name: r.name as string,
-      status: r.status as 'open' | 'in_progress',
-      startDate: (r.start_date as Date).toISOString(),
-      endDate: (r.end_date as Date).toISOString(),
-      registrationOpen: r.registration_open === true,
-    }));
+    const tournaments = result.rows.map((r) => {
+      const overs = normalizeOvers(r.overs);
+      const live = r.status === 'in_progress';
+      return {
+        id: r.id as string,
+        name: r.name as string,
+        status: r.status as 'open' | 'in_progress',
+        startDate: (r.start_date as Date).toISOString(),
+        endDate: (r.end_date as Date).toISOString(),
+        registrationOpen: r.registration_open === true,
+        overs,
+        ballsPerInnings: ballsPerInnings(overs),
+        playerCount: Number(r.player_count ?? 0),
+        maxPlayers: (r.max_players as number | null) ?? null,
+        roundDurationMinutes: Number(r.round_duration_minutes),
+        currentRoundNumber: live ? Number(r.current_round_number ?? 1) : null,
+        roundClosesAt: live ? ((r.round_closes_at as Date | null)?.toISOString() ?? null) : null,
+      };
+    });
     return { hasLiveTournament: tournaments.length > 0, tournaments };
   }
 
@@ -423,7 +451,7 @@ export class MetaIntegrationService {
               m.venue_id, m.time_slot_id,
               opp.username AS opponent_username,
               v.name AS venue_name,
-              t.name AS tournament_name,
+              t.name AS tournament_name, COALESCE(t.overs, 1) AS overs,
               ts.start_time AS slot_start, ts.end_time AS slot_end,
               tr.starts_at AS round_starts, tr.ends_at AS round_ends
        FROM matches m
@@ -454,6 +482,8 @@ export class MetaIntegrationService {
       tournamentId: (r.tournament_id as string | null) ?? null,
       tournamentName: (r.tournament_name as string | null) ?? null,
       roundLabel: matchRoundLabel(r),
+      overs: normalizeOvers(r.overs),
+      ballsPerInnings: ballsPerInnings(r.overs),
       opponent: r.opponent_username as string,
       state: battedIn.has(r.id as string) ? 'waiting_for_opponent' : 'your_turn',
       deadline: ((r.slot_end ?? r.round_ends) as Date | null)?.toISOString() ?? null,
@@ -507,7 +537,7 @@ export class MetaIntegrationService {
         // Neither has batted, and both may be standing in front of the match
         // right now. Exactly one of them may bat; the other waits and then
         // chases what the first one sets.
-        const claimed = await this.claimTurn(row.id, userId);
+        const claimed = await this.claimTurn(row.id, userId, normalizeOvers(row.overs));
         if (claimed) {
           amSettingTarget = true;
         } else {
@@ -528,6 +558,8 @@ export class MetaIntegrationService {
           status: row.status as string,
           tournamentName: (row.tournament_name as string | null) ?? null,
           roundLabel: matchRoundLabel(row),
+          overs: normalizeOvers(row.overs),
+          ballsPerInnings: ballsPerInnings(row.overs),
           opponent: row.opponent_username,
           // A headset owner plays from home, so they hold a slot but no venue.
           // Both flows carry the same fields either way; the ones that do not
@@ -600,7 +632,7 @@ export class MetaIntegrationService {
    * already holds the turn: the expiry runs from the grant, so a client left
    * polling on a shelf cannot renew it forever.
    */
-  private async claimTurn(matchId: string, userId: string): Promise<boolean> {
+  private async claimTurn(matchId: string, userId: string, overs: number): Promise<boolean> {
     const claimed = await this.pool.query(
       `UPDATE matches
        SET active_player_id = $1,
@@ -614,7 +646,7 @@ export class MetaIntegrationService {
            OR active_player_since < NOW() - ($3::bigint * INTERVAL '1 millisecond')
          )
        RETURNING active_player_id`,
-      [userId, matchId, MATCH_TURN_HOLD_MS]
+      [userId, matchId, turnHoldMsForOvers(overs)]
     );
     return (claimed.rowCount ?? 0) > 0;
   }
@@ -769,7 +801,11 @@ export class MetaIntegrationService {
       if (!theirs) {
         const holder = match.active_player_id as string | null;
         const heldSince = match.active_player_since as Date | null;
-        const holdStands = isTurnHoldActive(holder, heldSince);
+        const oversRow = match.tournament_id
+          ? await client.query(`SELECT overs FROM tournaments WHERE id = $1`, [match.tournament_id])
+          : { rows: [] as Array<{ overs: number }> };
+        const holdMs = turnHoldMsForOvers(normalizeOvers(oversRow.rows[0]?.overs));
+        const holdStands = isTurnHoldActive(holder, heldSince, Date.now(), holdMs);
         if (holdStands && holder !== userId) {
           throw new AppError(
             'CONFLICT',
@@ -785,8 +821,8 @@ export class MetaIntegrationService {
       }
 
       await client.query(
-        `INSERT INTO match_innings (match_id, user_id, score, source) VALUES ($1, $2, $3, 'meta')`,
-        [matchId, userId, score]
+        `INSERT INTO match_innings (match_id, user_id, score, source, balls_faced) VALUES ($1, $2, $3, 'meta', $4)`,
+        [matchId, userId, score, input.ballsFaced ?? null]
       );
 
       // Matches paired before the setter's innings was recorded still carry an

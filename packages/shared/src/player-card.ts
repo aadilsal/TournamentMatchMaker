@@ -15,6 +15,8 @@ export interface PlayerCardTournament {
   name: string;
   status: 'upcoming' | 'live' | 'finished';
   startDate: string;
+  overs: number;
+  ballsPerInnings: number;
   playingAt: { type: 'venue'; id: string; name: string; city: string } | { type: 'home'; name: 'Home' } | null;
   myStatus: PlayerTournamentStatus;
   statusText: string;
