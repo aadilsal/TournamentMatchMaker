@@ -40,12 +40,16 @@ All requests and headers are unchanged (`x-meta-api-key` / `x-meta-ssh-public-ke
 | `overs` | integer, 1–20 | Overs per innings for **this match**. Use this to set up the innings. |
 | `ballsPerInnings` | integer, 6–120 | `overs × 6`. |
 
+Full response (new fields: `overs`, `ballsPerInnings`):
+
 ```json
 {
   "success": true,
   "data": {
     "inQueue": false,
     "tournamentId": "0c160535-eddf-45ab-a1f9-0040316b4f63",
+    "canSubmitSoloTarget": false,
+    "soloTargetState": "in_match",
     "match": {
       "id": "8f0f8a2e-2a7e-4c55-9d0f-6d1c2b7f4a11",
       "status": "confirmed",
@@ -54,6 +58,11 @@ All requests and headers are unchanged (`x-meta-api-key` / `x-meta-ssh-public-ke
       "overs": 5,
       "ballsPerInnings": 30,
       "opponent": "ali_khan",
+      "venueId": null,
+      "venue": null,
+      "timeSlotId": null,
+      "startTime": "2026-11-22T12:00:00.000Z",
+      "endTime": "2026-11-22T18:00:00.000Z",
       "chaseTarget": -1,
       "amChasing": false,
       "amSettingTarget": true,
@@ -61,6 +70,7 @@ All requests and headers are unchanged (`x-meta-api-key` / `x-meta-ssh-public-ke
       "opponentScore": -1,
       "waitingForOpponent": false
     },
+    "lastResult": null,
     "matches": [
       {
         "id": "8f0f8a2e-2a7e-4c55-9d0f-6d1c2b7f4a11",
@@ -78,7 +88,11 @@ All requests and headers are unchanged (`x-meta-api-key` / `x-meta-ssh-public-ke
 }
 ```
 
-The `match` example shows only the relevant fields; every other field is unchanged.
+`match.status` is `confirmed` until someone bats, then `in_progress` until the match is decided.
+
+`matches[].state` says whether this player still has to bat in that match (`your_turn`) or already has (`waiting_for_opponent`). It stays `your_turn` while the opponent is batting first. To decide whether the player may bat **right now**, use the `match` flags below.
+
+`canSubmitSoloTarget` and `soloTargetState` are still sent on every response. Solo target is not used in tournaments, so `canSubmitSoloTarget` is always `false`, and `soloTargetState` is `in_match`, `waiting_for_opponent` or `not_queued`. Use `amSettingTarget` (bat first), `amChasing` plus `chaseTarget` (chase), and `waitingForOpponent` (wait and keep polling) to drive the innings.
 
 A player can be in several tournaments with **different overs**, so always read `overs` from the match being played, never from a tournament the player saw earlier.
 
