@@ -94,7 +94,7 @@ export function AdminQueuePage() {
           actions: (
             <Button
               size="sm"
-              variant="ghost"
+              variant="outline"
               className="text-[var(--color-destructive)]"
               onClick={() => handleKick({ userId: e.userId, username: e.username })}
               disabled={kick.isPending}

@@ -146,14 +146,22 @@ export class DrawEntryService {
       `SELECT u.has_vr_headset,
               (SELECT COUNT(*)::int FROM tournament_registrations r
                  JOIN tournaments t ON t.id = r.tournament_id
-                WHERE r.user_id = u.id AND t.status IN ('open', 'closed', 'in_progress')) AS active_count
+                WHERE r.user_id = u.id AND t.status IN ('open', 'closed', 'in_progress')) AS active_count,
+              (SELECT COUNT(*)::int FROM tournaments t
+                WHERE t.status = 'open' AND t.play_format = 'draw' AND t.start_date > NOW()
+                  AND (t.registration_closes_at IS NULL OR t.registration_closes_at > NOW())
+                  AND (t.max_players IS NULL
+                       OR (SELECT COUNT(*) FROM tournament_registrations r2 WHERE r2.tournament_id = t.id) < t.max_players)
+              ) AS joinable_count
        FROM users u WHERE u.id = $1`,
       [userId]
     );
     if (!row.rows[0]) throw new AppError('NOT_FOUND', 'User not found', 404);
     const activeTournamentCount = Number(row.rows[0].active_count ?? 0);
+    // Choosing only makes sense when something is open; otherwise the dashboard is home.
+    const joinable = Number(row.rows[0].joinable_count ?? 0);
     return {
-      step: activeTournamentCount > 0 ? 'my_tournaments' : 'choose_tournament',
+      step: activeTournamentCount === 0 && joinable > 0 ? 'choose_tournament' : 'my_tournaments',
       hasVrHeadset: row.rows[0].has_vr_headset === true,
       activeTournamentCount,
     };

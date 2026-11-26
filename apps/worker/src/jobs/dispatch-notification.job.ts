@@ -6,6 +6,7 @@ import type { Redis } from 'ioredis';
 import { configuredEmailProviders, emailConfigFromEnv, sendEmailWithFallback, renderNotificationEmail } from '@vr-tournament/shared/email';
 import type { WorkerEnv } from '../config/env.js';
 import { emitToUser } from '../lib/socket-bridge.js';
+import { sendPushToUser } from '../lib/push.js';
 import { matchFoundEmailHtml } from '../templates/match-found.email.js';
 import { tournamentRegisteredEmailHtml } from '../templates/tournament-registered.email.js';
 
@@ -119,6 +120,8 @@ export async function processDispatchNotificationJob(
         createdAt: row.created_at.toISOString(),
       },
     });
+    // Same alert on the player's phones (installed app); never blocks the in-app or email paths.
+    await sendPushToUser(pool, env, userId, type, payload).catch((err) => console.warn('[push] send failed:', err));
   }
 
   if (channels.includes('email')) {

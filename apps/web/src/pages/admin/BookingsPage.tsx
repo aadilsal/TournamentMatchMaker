@@ -133,7 +133,7 @@ export function AdminBookingsPage() {
                 b.status === 'confirmed' ? (
                   <Button
                     size="sm"
-                    variant="ghost"
+                    variant="outline"
                     className="text-[var(--color-destructive)]"
                     onClick={() => handleCancel(b)}
                     disabled={cancel.isPending}

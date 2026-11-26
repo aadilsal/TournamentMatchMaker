@@ -143,7 +143,7 @@ export function ChooseWherePage() {
           <Link to="/join" className="text-sm text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]">
             ← Another tournament
           </Link>
-          <Button disabled={!choice || join.isPending} onClick={() => choice && join.mutate(choice)}>
+          <Button disabled={!choice || join.isPending} tooltip="Save where you play and join the tournament" onClick={() => choice && join.mutate(choice)}>
             {join.isPending ? 'Saving…' : current ? `Play at ${chosenName ?? '…'}` : chosenName ? `Join — play at ${chosenName}` : 'Choose where you play'}
           </Button>
         </div>

@@ -11,6 +11,7 @@ import { publicRateLimit, scopedRateLimit } from './middleware/rateLimit.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { createPlayersRouter } from './modules/players/players.routes.js';
 import { createLeaderboardsRouter } from './modules/players/leaderboards.routes.js';
+import { createPushRouter } from './modules/players/push.routes.js';
 import { createVenuesRouter } from './modules/venues/venues.routes.js';
 import { createSlotsRouter } from './modules/slots/slots.routes.js';
 import { createBookingsRouter } from './modules/bookings/bookings.routes.js';
@@ -73,6 +74,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   v1.use('/auth', createAuthRouter(pool, redis, env));
   v1.use('/players', scopedRateLimit(env, 'players'), createPlayersRouter(pool, env));
   v1.use('/leaderboards', scopedRateLimit(env, 'players'), createLeaderboardsRouter(pool));
+  v1.use('/push', scopedRateLimit(env, 'players'), createPushRouter(pool, env));
   v1.use('/venues', scopedRateLimit(env, 'venues', { read: 600 }), createVenuesRouter(pool, redis, env));
   v1.use('/venues/:id/slots', scopedRateLimit(env, 'slots', { read: 600 }), createSlotsRouter(pool, env));
   v1.use('/bookings', scopedRateLimit(env, 'bookings'), createBookingsRouter(pool, redis, env));

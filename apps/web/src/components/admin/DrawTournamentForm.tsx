@@ -160,10 +160,10 @@ export function DrawTournamentForm({ tournament }: { tournament?: Tournament }) 
             )}
 
             <div className="flex gap-2">
-              <Button type="submit" disabled={save.isPending}>
+              <Button type="submit" disabled={save.isPending} tooltip={editing ? 'Save the changes to this tournament' : 'Create the tournament as a draft; publish it when ready'}>
                 {save.isPending ? 'Saving…' : editing ? 'Save changes' : 'Create tournament'}
               </Button>
-              <Button type="button" variant="ghost" onClick={() => navigate(-1)}>Cancel</Button>
+              <Button type="button" variant="outline" tooltip="Go back without saving" onClick={() => navigate(-1)}>Cancel</Button>
             </div>
           </form>
         )}

@@ -131,7 +131,7 @@ export function ProfilePage() {
             <span className="flex items-center gap-1"><CalendarDays className="h-3.5 w-3.5" />Playing since {formatDate(profile.createdAt)}</span>
           </div>
         </div>
-        <Link to={`/players/${profile.username}`} className={buttonVariants({ variant: 'outline', size: 'sm', className: 'self-start sm:self-center' })}>
+        <Link to={`/players/${profile.username}`} title="See your profile as other players see it" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'self-start sm:self-center' })}>
           View public profile
         </Link>
       </motion.div>
@@ -173,7 +173,7 @@ export function ProfilePage() {
                     }}
                   />
                   <div className="flex flex-wrap items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={uploadAvatar.isPending} onClick={() => avatarInputRef.current?.click()}>
+                    <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={uploadAvatar.isPending} tooltip="Upload a profile photo (JPG, PNG or WebP)" onClick={() => avatarInputRef.current?.click()}>
                       <Upload className="h-3.5 w-3.5" />
                       {uploadAvatar.isPending ? 'Uploading…' : profile.hasProfilePicture ? 'Change photo' : 'Choose photo'}
                     </Button>
@@ -237,7 +237,7 @@ export function ProfilePage() {
                 <p className="mr-auto flex items-center gap-2 text-sm text-[var(--color-primary)]"><CheckCircle2 className="h-4 w-4" /> Profile saved</p>
               )}
               {update.isError && <p className="mr-auto text-sm text-[var(--color-destructive)]">{getUserErrorMessage(update.error)}</p>}
-              <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={update.isPending}>
+              <Button type="submit" size="lg" tooltip="Save your profile changes" className="w-full sm:w-auto" disabled={update.isPending}>
                 {update.isPending ? 'Saving…' : 'Save profile'}
               </Button>
             </div>

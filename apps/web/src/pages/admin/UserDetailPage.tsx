@@ -259,7 +259,7 @@ export function AdminUserDetailPage() {
                 </Button>
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => syncTier.mutate()}
                   disabled={syncTier.isPending}
                 >

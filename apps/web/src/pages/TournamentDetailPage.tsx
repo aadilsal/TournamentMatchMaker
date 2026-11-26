@@ -173,7 +173,7 @@ export function TournamentDetailPage() {
             registered actions below are shown, so nothing here can be read as
             "your join did not take". */}
         {tournament.status === 'open' && registrationSettled && !myRegistration && (
-          <Button onClick={handleJoin}>
+          <Button onClick={handleJoin} tooltip="Join this tournament and choose where you play">
             {isLoggedIn ? 'Join tournament' : 'Register to join'}
           </Button>
         )}

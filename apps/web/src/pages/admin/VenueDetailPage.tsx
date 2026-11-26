@@ -131,7 +131,7 @@ export function AdminVenueDetailPage() {
                 {isSuperAdmin && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   className="text-[var(--color-destructive)]"
                   onClick={() => handleRemoveAdmin(a.userId, a.username)}
                   disabled={removeAdmin.isPending}

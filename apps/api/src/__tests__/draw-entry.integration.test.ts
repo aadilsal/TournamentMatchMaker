@@ -757,3 +757,31 @@ describe('player profile stats and global leaderboards', () => {
     }
   });
 });
+
+describe('journey when nothing is open to join', () => {
+  it('sends a newcomer to the dashboard instead of an empty choose-a-tournament page', async () => {
+    await pool.query(`UPDATE tournaments SET status = 'closed' WHERE status = 'open'`);
+    const me = await user();
+    const res = await request(app).get('/api/v1/players/me/journey').set(auth(me));
+    expect(res.body.data).toMatchObject({ step: 'my_tournaments', activeTournamentCount: 0 });
+
+    const tid = await tournament({ startsIn: '1 day' });
+    await pool.query(`UPDATE tournaments SET status = 'open' WHERE id = $1`, [tid]);
+    expect((await request(app).get('/api/v1/players/me/journey').set(auth(me))).body.data.step).toBe('choose_tournament');
+  });
+});
+
+describe('phone match alerts (web push subscriptions)', () => {
+  it('saves a phone, moves it to whoever subscribes it last, and removes it on request', async () => {
+    const [a, b] = [await user(), await user()];
+    const sub = { endpoint: `https://push.example.com/send/${Date.now()}`, keys: { p256dh: 'BMx7p256dh-key-value-for-test', auth: 'auth-secret-1' } };
+    expect((await request(app).post('/api/v1/push/subscriptions').send(sub)).status).toBe(401);
+    expect((await request(app).post('/api/v1/push/subscriptions').set(auth(a)).send(sub)).status).toBe(201);
+    expect((await request(app).post('/api/v1/push/subscriptions').set(auth(b)).send(sub)).status).toBe(201);
+    const owner = await pool.query(`SELECT user_id FROM push_subscriptions WHERE endpoint = $1`, [sub.endpoint]);
+    expect(owner.rows).toEqual([{ user_id: b }]);
+    expect((await request(app).delete('/api/v1/push/subscriptions').query({ endpoint: sub.endpoint }).set(auth(b))).status).toBe(200);
+    expect((await pool.query(`SELECT 1 FROM push_subscriptions WHERE endpoint = $1`, [sub.endpoint])).rowCount).toBe(0);
+    expect((await request(app).get('/api/v1/push/public-key')).body.data).toHaveProperty('publicKey');
+  });
+});

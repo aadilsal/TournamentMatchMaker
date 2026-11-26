@@ -78,7 +78,7 @@ export function OpenTournaments() {
                     </span>
                   </div>
                 </div>
-                <Link to={`/join/${t.id}`} className={buttonVariants({ size: 'lg', className: 'mt-6 w-full gap-2' })}>
+                <Link to={`/join/${t.id}`} title="Choose where you play and join" className={buttonVariants({ size: 'lg', className: 'mt-6 w-full gap-2' })}>
                   Join tournament <ArrowRight className="h-4 w-4" />
                 </Link>
               </motion.div>

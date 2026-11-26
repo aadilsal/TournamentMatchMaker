@@ -7,6 +7,7 @@ import { Headset, MapPin, Plus, Target, Trophy, Swords } from 'lucide-react';
 import { apiDelete, apiGet, getAccessToken, getUserErrorMessage } from '@/lib/api';
 import { JOURNEY_KEYS, useJourney, useMyTournaments } from '@/lib/journey';
 import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
+import { PhoneAppCard } from '@/components/pwa/PhoneAppCard';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -53,7 +54,7 @@ export function MyTournamentsPage() {
             {card.skillTierLabel} · {card.record.wins} won · {card.record.losses} lost
           </p>
         </div>
-        <Link to="/join" className={buttonVariants({ variant: 'outline', className: 'gap-1.5' })}>
+        <Link to="/join" title="Browse open tournaments and join one" className={buttonVariants({ variant: 'outline', className: 'gap-1.5' })}>
           <Plus className="h-4 w-4" aria-hidden />
           Join another tournament
         </Link>
@@ -68,7 +69,16 @@ export function MyTournamentsPage() {
           {card.tournaments.length === 0 ? (
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-6 text-center">
               <p className="font-semibold">You&rsquo;re not in a tournament right now.</p>
-              <Link to="/join" className={buttonVariants({ className: 'mt-4' })}>Choose a tournament</Link>
+              {journey.data?.step === 'choose_tournament' || (dashboard.data?.openTournaments.length ?? 0) > 0 ? (
+                <Link to="/join" className={buttonVariants({ className: 'mt-4' })}>Choose a tournament</Link>
+              ) : (
+                <>
+                  <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
+                    No tournaments are open to join right now. New ones will show up here as soon as they open.
+                  </p>
+                  <Link to="/leaderboards" className={buttonVariants({ variant: 'outline', className: 'mt-4' })}>See the leaderboards</Link>
+                </>
+              )}
             </div>
           ) : (
             card.tournaments.map((t) => (
@@ -86,6 +96,7 @@ export function MyTournamentsPage() {
               <OpenToJoin d={dashboard.data} />
             </>
           )}
+          <PhoneAppCard />
           <MetaLinkCodeDisplay />
           <p className="text-xs text-[var(--color-muted-foreground)] px-1">
             Playing in VR — at home or at an arena? Type this code into the Quest app once so your scores land on your account.
@@ -173,8 +184,8 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
       <div className="flex flex-wrap gap-2">
         {t.myStatus === 'registered' && (
           <>
-            <Link to={`/join/${t.id}`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>Change where I play</Link>
-            <Button variant="ghost" size="sm" onClick={onLeave} disabled={leave.isPending}>
+            <Link to={`/join/${t.id}`} title="Pick a different venue, or Home" className={buttonVariants({ variant: 'outline', size: 'sm' })}>Change where I play</Link>
+            <Button variant="outline" size="sm" tooltip="Leave this tournament; you can join again until it starts" onClick={onLeave} disabled={leave.isPending}>
               {leave.isPending ? 'Leaving…' : 'Leave tournament'}
             </Button>
           </>
@@ -186,7 +197,7 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
             onSuccess={() => void queryClient.invalidateQueries({ queryKey: JOURNEY_KEYS.myTournaments })}
           />
         )}
-        <Link to={`/tournaments/${t.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>Tournament details</Link>
+        <Link to={`/tournaments/${t.id}`} title="See fixtures, live matches, players and stats" className={buttonVariants({ variant: 'outline', size: 'sm' })}>Tournament details</Link>
       </div>
     </article>
   );

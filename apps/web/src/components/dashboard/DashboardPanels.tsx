@@ -134,12 +134,14 @@ export function LiveNow({ d }: { d: PlayerDashboard }) {
       <ul className="space-y-1 text-sm">
         {d.liveTournaments.map((t) => (
           <li key={t.id}>
-            <Link to={`/tournaments/${t.id}`} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-[var(--color-muted)]/40">
+            <Link to={`/tournaments/${t.id}`} title="Watch live matches and results" className="group flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-[var(--color-muted)]/40">
               <span className="min-w-0">
                 <span className="block truncate font-medium">{t.name}</span>
                 <span className="text-xs text-[var(--color-muted-foreground)]">Round {t.roundNumber} · {t.playerCount} players · {oversLabel(t.overs)}</span>
               </span>
-              <span className="shrink-0 text-xs font-semibold text-[var(--color-primary)]">Watch</span>
+              <span className="shrink-0 rounded-md border border-[var(--color-primary)]/50 bg-[var(--color-primary)]/10 px-2.5 py-1 text-xs font-semibold text-[var(--color-primary)] transition-colors group-hover:bg-[var(--color-primary)] group-hover:text-white">
+                Watch
+              </span>
             </Link>
           </li>
         ))}
@@ -161,7 +163,7 @@ export function OpenToJoin({ d }: { d: PlayerDashboard }) {
                 {formatDateTime(t.startDate)} · {t.playerCount}{t.maxPlayers ? `/${t.maxPlayers}` : ''} · {oversLabel(t.overs)}
               </span>
             </span>
-            <Link to={`/join/${t.id}`} className={buttonVariants({ size: 'sm', variant: 'outline', className: 'shrink-0 gap-1' })}>
+            <Link to={`/join/${t.id}`} title="Choose where you play and join" className={buttonVariants({ size: 'sm', variant: 'outline', className: 'shrink-0 gap-1' })}>
               Join <ArrowRight className="h-3.5 w-3.5" aria-hidden />
             </Link>
           </li>

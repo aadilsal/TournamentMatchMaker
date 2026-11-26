@@ -78,7 +78,7 @@ export function MetaLinkCodeDisplay() {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => refetch()}
+          tooltip="Get a new code (the old one stops working)" onClick={() => refetch()}
           disabled={isFetching}
           className="gap-2"
         >

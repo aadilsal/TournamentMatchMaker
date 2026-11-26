@@ -90,7 +90,7 @@ export function ChooseTournamentPage() {
       )}
 
       {hasTournaments && (
-        <Link to="/my-tournaments" className={buttonVariants({ variant: 'ghost' })}>
+        <Link to="/my-tournaments" className={buttonVariants({ variant: 'outline' })}>
           ← Back to my tournaments
         </Link>
       )}

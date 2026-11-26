@@ -14,6 +14,9 @@ const envSchema = z.object({
   SMTP_PASS: z.string().optional(),
   SMTP_FROM_EMAIL: z.string().email().optional(),
   EMAIL_FROM_NAME: z.string().max(80).default('VR Cricket League by PixelPaddle'),
+  // Web Push keys for match alerts on phones; push stays off when they are unset.
+  VAPID_PUBLIC_KEY: z.string().min(20).optional(),
+  VAPID_PRIVATE_KEY: z.string().min(20).optional(),
   NOTIFICATION_EMAIL_ENABLED: z
     .enum(['true', 'false'])
     .default('true')

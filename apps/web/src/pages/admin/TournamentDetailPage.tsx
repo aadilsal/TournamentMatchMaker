@@ -435,7 +435,7 @@ export function AdminTournamentDetailPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => handleLifecycle('publish')}
+                tooltip="Make the tournament visible so players can join" onClick={() => handleLifecycle('publish')}
                 disabled={publish.isPending}
               >
                 {publish.isPending ? 'Publishing…' : 'Publish'}
@@ -445,14 +445,14 @@ export function AdminTournamentDetailPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => handleLifecycle('closeReg')}
+                tooltip="Stop new players from joining this tournament" onClick={() => handleLifecycle('closeReg')}
                 disabled={closeReg.isPending}
               >
                 {closeReg.isPending ? 'Closing…' : 'Close registration'}
               </Button>
             )}
             {tournament.status === 'open' && isDraw && (
-              <Button size="sm" variant="outline" onClick={() => handleLifecycle('start')} disabled={start.isPending}>
+              <Button size="sm" variant="outline" tooltip="Start now: registration closes and round 1 is drawn" onClick={() => handleLifecycle('start')} disabled={start.isPending}>
                 {start.isPending ? 'Starting…' : 'Start now'}
               </Button>
             )}
@@ -460,7 +460,7 @@ export function AdminTournamentDetailPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => handleLifecycle('start')}
+                tooltip="Start now: registration closes and round 1 is drawn" onClick={() => handleLifecycle('start')}
                 disabled={start.isPending}
               >
                 {start.isPending ? 'Starting…' : 'Start'}
@@ -471,7 +471,7 @@ export function AdminTournamentDetailPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleLifecycle('closeRound')}
+                  tooltip="End the current round now; unplayed matches are settled and the next round is drawn" onClick={() => handleLifecycle('closeRound')}
                   disabled={closeRound.isPending}
                 >
                   {closeRound.isPending ? 'Closing round…' : isDraw ? 'Close round now' : 'Close round'}
@@ -479,7 +479,7 @@ export function AdminTournamentDetailPage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handleLifecycle('complete')}
+                  tooltip="Finish the tournament and lock in the final results" onClick={() => handleLifecycle('complete')}
                   disabled={complete.isPending}
                 >
                   {complete.isPending ? 'Completing…' : 'Complete'}
@@ -488,16 +488,16 @@ export function AdminTournamentDetailPage() {
             )}
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => syncStats.mutate()}
+              variant="outline"
+              tooltip="Recount every player's wins, losses and rounds from the match records" onClick={() => syncStats.mutate()}
               disabled={syncStats.isPending}
             >
               {syncStats.isPending ? 'Syncing…' : 'Sync stats'}
             </Button>
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => setShowFlowGuide((v) => !v)}
+              variant="outline"
+              tooltip="Show how a tournament moves from draft to finished" onClick={() => setShowFlowGuide((v) => !v)}
               aria-expanded={showFlowGuide}
             >
               {showFlowGuide ? 'Hide guide' : 'How this works'}
@@ -570,7 +570,7 @@ export function AdminTournamentDetailPage() {
                 {isSuperAdmin && (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   className="text-[var(--color-destructive)]"
                   onClick={() => handleRemoveTournamentAdmin(a.userId, a.username)}
                   disabled={removeAdmin.isPending}
@@ -625,7 +625,7 @@ export function AdminTournamentDetailPage() {
             actions: (
               <Button
                 size="sm"
-                variant="ghost"
+                variant="outline"
                 onClick={() => {
                   setEditParticipantId(p.id);
                   setParticipantStatus(p.status);
@@ -674,7 +674,7 @@ export function AdminTournamentDetailPage() {
               actions: (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   className="text-[var(--color-destructive)]"
                   onClick={() =>
                     handleRemoveRegistration(r.userId, r.username ?? r.userId.slice(0, 8))
@@ -794,7 +794,7 @@ export function AdminTournamentDetailPage() {
               actions: (
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="outline"
                   onClick={() => {
                     setEditRoundId(r.id);
                     setRoundStatus(r.status);
@@ -935,7 +935,7 @@ export function AdminTournamentDetailPage() {
               <Button size="sm" onClick={handleSaveParticipant} disabled={updateParticipant.isPending}>
                 {updateParticipant.isPending ? 'Saving…' : 'Save'}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditParticipantId(null)}>Cancel</Button>
+              <Button size="sm" variant="outline" onClick={() => setEditParticipantId(null)}>Cancel</Button>
             </div>
         </div>
       </Modal>
@@ -967,7 +967,7 @@ export function AdminTournamentDetailPage() {
             <Button size="sm" onClick={() => updateRound.mutate()} disabled={updateRound.isPending}>
               {updateRound.isPending ? 'Saving…' : 'Save'}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setEditRoundId(null)}>Cancel</Button>
+            <Button size="sm" variant="outline" onClick={() => setEditRoundId(null)}>Cancel</Button>
           </div>
         </div>
       </Modal>
