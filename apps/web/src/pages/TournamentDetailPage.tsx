@@ -17,7 +17,7 @@ import { Tabs } from '@/components/ui/tabs';
 import { NormalMatchList } from '@/components/tournament/NormalMatchList';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
-import { DrawRoundsView } from '@/components/tournament/DrawRoundsView';
+import { DrawTournamentTabs } from '@/components/tournament/DrawTournamentTabs';
 import { DetailPageSkeleton } from '@/components/ui/route-fallback';
 import { QueryError } from '@/components/ui/query-error';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -216,7 +216,7 @@ export function TournamentDetailPage() {
         </p>
       )}
 
-      {isDraw && <DrawRoundsView tournamentId={tournament.id} />}
+      {isDraw && <DrawTournamentTabs tournament={tournament} />}
 
       {!isDraw && bracket && tabs.length > 0 && (
         <Card>

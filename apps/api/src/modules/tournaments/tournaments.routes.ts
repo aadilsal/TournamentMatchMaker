@@ -16,11 +16,18 @@ import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { TournamentsService } from './tournaments.service.js';
 import { DrawEntryService } from './draw-entry.service.js';
+import { TournamentViewService } from './tournament-view.service.js';
 
 export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env): Router {
   const router = Router();
   const service = new TournamentsService(pool, redis, env);
   const entry = new DrawEntryService(pool, env);
+  const viewService = new TournamentViewService(pool);
+  const views = {
+    players: (id: string) => viewService.players(id),
+    live: (id: string) => viewService.live(id),
+    stats: (id: string) => viewService.stats(id),
+  };
 
   // Draw-format entry: a venue or Home, no slots. Repeating it before the start changes where you play.
   router.post('/:id/join', authenticate(env), validate(joinTournamentSchema), async (req, res, next) => {
@@ -104,6 +111,17 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
       next(err);
     }
   });
+
+  // Public tournament page: who is playing, the live round and batting stats.
+  for (const view of ['players', 'live', 'stats'] as const) {
+    router.get(`/:id/${view}`, async (req, res, next) => {
+      try {
+        sendSuccess(res, await views[view](req.params.id as string));
+      } catch (err) {
+        next(err);
+      }
+    });
+  }
 
   router.get('/:id/rounds', async (req, res, next) => {
     try {

@@ -35,7 +35,7 @@ export function createGeoRouter(): Router {
   router.get('/reverse', validate(reverseQuerySchema, 'query'), async (req, res, next) => {
     try {
       const { lat, lng } = req.query as unknown as z.infer<typeof reverseQuerySchema>;
-      const location = await service.getLocationFromCoords(lat, lng);
+      const location = await service.getLocationFromCoordsOrIp(lat, lng, getClientIp(req));
       sendSuccess(res, location);
     } catch (err) {
       next(err);

@@ -655,3 +655,55 @@ describe('innings start, heartbeat, abandon and batting stats', () => {
     expect(m.rows[0].result.winnerId).toBe(a);
   });
 });
+
+describe('public tournament page: players, live round and stats', () => {
+  const view = (tid: string, what: string) => request(app).get(`/api/v1/tournaments/${tid}/${what}`);
+  const send = (matchId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send(body);
+
+  it('lists who is playing, where, and whether they are still in', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid } = await liveDrawMatch(a, b);
+    const res = await view(tid, 'players');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data[0]).toMatchObject({ status: 'in', playingAt: 'Home', roundReached: 1 });
+    expect((await view('not-a-uuid', 'players')).status).toBe(404);
+  });
+
+  it('shows the live round: to play, batting, chasing a target, then decided', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid, matchId } = await liveDrawMatch(a, b);
+    const state = async () => (await view(tid, 'live')).body.data;
+
+    expect((await state()).matches[0]).toMatchObject({ state: 'to_play', target: null });
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/start`).set(meta).send({ userId: a });
+    const batting = (await state()).matches[0];
+    expect(batting.state).toBe('batting');
+    expect(batting.player1.batting || batting.player2.batting).toBe(true);
+
+    await send(matchId, { userId: a, score: 25 });
+    expect((await state()).matches[0]).toMatchObject({ state: 'chasing', target: 26 });
+
+    await send(matchId, { userId: b, score: 10 });
+    const done = await state();
+    expect(done.round).toMatchObject({ number: 1, label: 'Final' });
+    expect(done.matches[0].state === 'decided' || done.round === null).toBe(true);
+  });
+
+  it('totals 4s, 6s and wickets and ranks the leaderboards, leaving bots out', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid, matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    await send(matchId, { userId: a, score: 40, fours: 2, sixes: 4, wicketsLost: 2 });
+    await send(matchId, { userId: b, score: 30, fours: 3, sixes: 1, wicketsLost: 0 });
+
+    const { totals, leaderboards } = (await view(tid, 'stats')).body.data;
+    expect(totals).toMatchObject({ innings: 2, runs: 70, fours: 5, sixes: 5, wicketsLost: 2, highest: 40, inningsWithStats: 2 });
+    const names = (list: Array<{ userId: string }>) => list.map((e) => e.userId);
+    expect(names(leaderboards.mostSixes)).toEqual([a, b]);
+    expect(names(leaderboards.mostFours)).toEqual([b, a]);
+    expect(names(leaderboards.fewestWicketsLost)).toEqual([b, a]);
+    expect(leaderboards.highestInnings[0]).toMatchObject({ userId: a, value: 40 });
+  });
+});

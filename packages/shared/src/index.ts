@@ -32,3 +32,5 @@ export * from './notification-copy.js';
 export * from './types.js';
 export * from './login-link.js';
 export * from './overs.js';
+export * from './batting-stats.js';
+export * from './tournament-view.js';

@@ -226,6 +226,21 @@ export class GeoService {
     }
   }
 
+  /** "Use my location": GPS coordinates first; the IP lookup when the map service is down or busy. */
+  async getLocationFromCoordsOrIp(lat: number, lng: number, clientIp: string): Promise<GeoLocation & { source: 'gps' | 'ip' }> {
+    try {
+      return { ...(await this.getLocationFromCoords(lat, lng)), source: 'gps' };
+    } catch (err) {
+      // Coordinates stay out of the log: they pinpoint the player.
+      console.warn(`[geo] reverse lookup failed (${err instanceof AppError ? err.code : 'provider error'}); using IP location`);
+    }
+    try {
+      return { ...(await this.getLocationFromIp(clientIp)), source: 'ip' };
+    } catch {
+      throw new AppError('GEO_LOOKUP_FAILED', 'Could not detect your location — please pick your country and city', 503);
+    }
+  }
+
   async getLocationFromIp(clientIp: string): Promise<GeoLocation> {
     const providers = [tryIpWho, tryIpApiCo, tryIpApiCom];
     let raw: GeoLocation | null = null;
