@@ -19,6 +19,10 @@ function forbidLocalhostApiInProd(): Plugin {
       for (const file of fs.readdirSync(assetsDir)) {
         if (!file.endsWith('.js')) continue;
         const content = fs.readFileSync(path.join(assetsDir, file), 'utf8');
+        // The root .env sets NODE_ENV=development for local work; a build that picks it up ships React dev mode and devtools.
+        if (content.includes('Each child in a list should have a unique') || content.includes('ReactQueryDevtools')) {
+          throw new Error(`[forbid-dev-build] ${file} is a development build — build with NODE_ENV=production`);
+        }
         if (content.includes('localhost:3000') || content.includes('127.0.0.1:3000')) {
           throw new Error(
             `[forbid-localhost-api] ${file} contains localhost:3000 — must use ${PRODUCTION_API_URL}`

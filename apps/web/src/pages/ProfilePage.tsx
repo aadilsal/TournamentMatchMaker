@@ -232,8 +232,7 @@ export function ProfilePage() {
               )}
             </section>
 
-            {/* Pinned to the bottom of the screen on phones so Save is always in reach. */}
-            <div className="sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-end gap-3 border-t border-[var(--color-border)] bg-[var(--color-background)]/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
+            <div className="flex flex-wrap items-center justify-end gap-3">
               {update.isSuccess && (
                 <p className="mr-auto flex items-center gap-2 text-sm text-[var(--color-primary)]"><CheckCircle2 className="h-4 w-4" /> Profile saved</p>
               )}
