@@ -703,7 +703,57 @@ describe('public tournament page: players, live round and stats', () => {
     const names = (list: Array<{ userId: string }>) => list.map((e) => e.userId);
     expect(names(leaderboards.mostSixes)).toEqual([a, b]);
     expect(names(leaderboards.mostFours)).toEqual([b, a]);
-    expect(names(leaderboards.fewestWicketsLost)).toEqual([b, a]);
+    // One innings each: nobody has the 3 needed for the wickets board yet.
+    expect(leaderboards.fewestWicketsPerOver).toEqual([]);
+    expect(totals).toMatchObject({ wicketInnings: 2, wicketOvers: 2, wicketsPerOver: 1 });
     expect(leaderboards.highestInnings[0]).toMatchObject({ userId: a, value: 40 });
+  });
+});
+
+describe('player dashboard', () => {
+  it('shows career stats, recent form, live tournaments and ones to join', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid, matchId } = await liveDrawMatch(a, b);
+    const openTid = await tournament({ startsIn: '1 hour' });
+    await pool.query(`UPDATE tournaments SET status = 'open' WHERE id = $1`, [openTid]);
+    await current(a);
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: a, score: 36, fours: 3, sixes: 2, wicketsLost: 1 });
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: b, score: 20 });
+
+    const res = await request(app).get('/api/v1/players/me/dashboard').set(auth(a));
+    expect(res.status).toBe(200);
+    const d = res.body.data;
+    expect(d.stats).toMatchObject({ matches: 1, wins: 1, losses: 0, winRate: 100, runs: 36, fours: 3, sixes: 2, wicketsLost: 1, highest: 36, tournamentsPlayed: 1 });
+    expect(d.recentForm[0]).toMatchObject({ result: 'W', myScore: 36, opponentScore: 20 });
+    expect(d.openTournaments.some((t: { id: string }) => t.id === openTid)).toBe(true);
+    expect(d.openTournaments.some((t: { id: string }) => t.id === tid)).toBe(false);
+    expect((await request(app).get('/api/v1/players/me/dashboard')).status).toBe(401);
+  });
+});
+
+describe('player profile stats and global leaderboards', () => {
+  it('shows a public career page and all-time boards without bots', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid, matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: a, score: 50, fours: 2, sixes: 6, wicketsLost: 0 });
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: b, score: 12, fours: 1, sixes: 0, wicketsLost: 2 });
+    const nameA = (await pool.query(`SELECT username FROM users WHERE id = $1`, [a])).rows[0].username;
+
+    const profile = await request(app).get(`/api/v1/players/${nameA}/stats`);
+    expect(profile.status).toBe(200);
+    expect(profile.body.data.stats).toMatchObject({ matches: 1, wins: 1, sixes: 6, fours: 2, highest: 50 });
+    expect(profile.body.data.recentMatches[0]).toMatchObject({ result: 'W', myScore: 50, opponentScore: 12, sixes: 6 });
+    expect(profile.body.data.tournaments.find((t: { id: string }) => t.id === tid)).toBeDefined();
+    expect((await request(app).get('/api/v1/players/no-such-player-xyz/stats')).status).toBe(404);
+
+    const boards = (await request(app).get('/api/v1/leaderboards')).body.data;
+    expect(boards.batting.mostSixes[0].value).toBeGreaterThanOrEqual(6);
+    expect(boards.batting.mostSixes.some((e: { userId: string }) => e.userId === a)).toBe(true);
+    const bots = await pool.query(`SELECT id FROM users WHERE is_bot`);
+    const botIds = new Set(bots.rows.map((r) => r.id));
+    for (const list of Object.values(boards.batting) as Array<Array<{ userId: string }>>) {
+      expect(list.some((e) => botIds.has(e.userId))).toBe(false);
+    }
   });
 });

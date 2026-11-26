@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Trophy, LogOut, User, Menu, X, Shield, Swords } from 'lucide-react';
+import { Trophy, LogOut, User, Menu, X, Shield, Swords, Medal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { SocketSyncProvider } from '@/components/sync/SocketSyncProvider';
@@ -12,8 +12,14 @@ import { useAuthUser } from '@/hooks/useAuthUser';
 import { cn } from '@/lib/utils';
 
 // Players get one place to go; guests can browse tournaments.
-const playerNav = [{ href: '/my-tournaments', label: 'My tournaments', icon: Swords }];
-const guestNav = [{ href: '/tournaments', label: 'Tournaments', icon: Trophy }];
+const playerNav = [
+  { href: '/my-tournaments', label: 'Dashboard', icon: Swords },
+  { href: '/leaderboards', label: 'Leaderboards', icon: Medal },
+];
+const guestNav = [
+  { href: '/tournaments', label: 'Tournaments', icon: Trophy },
+  { href: '/leaderboards', label: 'Leaderboards', icon: Medal },
+];
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate();

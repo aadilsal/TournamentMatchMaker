@@ -49,7 +49,7 @@ export function AdminDashboardPage() {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
         {card('/admin/users', { label: 'Users', value: data.users, sub: `${data.players} players` })}
         {card('/admin/venues', { label: 'Venues', value: data.venues, sub: `${data.activeVenues} active` })}
         {card('/admin/matches?view=ongoing', {
@@ -57,9 +57,6 @@ export function AdminDashboardPage() {
           value: data.matches.ongoing,
           sub: `${data.matches.total} total`,
         })}
-      </div>
-
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {card('/admin/tournaments?status=open', {
           label: 'Open tournaments',
           value: data.tournaments.open,

@@ -1,6 +1,7 @@
 import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BuybackOption, PlayerCardTournament, Tournament } from '@vr-tournament/shared';
+import type { BuybackOption, PlayerCardTournament, PlayerDashboard, Tournament } from '@vr-tournament/shared';
+import { LiveNow, NextUp, OpenToJoin, RecentForm, StatStrip, TierProgress } from '@/components/dashboard/DashboardPanels';
 import { oversLabel } from '@vr-tournament/shared';
 import { Headset, MapPin, Plus, Target, Trophy, Swords } from 'lucide-react';
 import { apiDelete, apiGet, getAccessToken, getUserErrorMessage } from '@/lib/api';
@@ -31,6 +32,12 @@ export function MyTournamentsPage() {
     enabled: loggedIn,
     refetchInterval: 30_000,
   });
+  const dashboard = useQuery({
+    queryKey: ['player-dashboard'],
+    queryFn: () => apiGet<PlayerDashboard>('/players/me/dashboard'),
+    enabled: loggedIn,
+    refetchInterval: 60_000,
+  });
 
   if (!loggedIn) return <Navigate to="/login?returnTo=%2Fmy-tournaments" replace />;
   if (isLoading) return <ListSkeleton count={3} />;
@@ -52,8 +59,12 @@ export function MyTournamentsPage() {
         </Link>
       </header>
 
+      <NextUp tournaments={card.tournaments} />
+      {dashboard.data && <StatStrip stats={dashboard.data.stats} />}
+
       <div className="grid gap-6 lg:grid-cols-3">
         <section className="lg:col-span-2 space-y-4" aria-label="My tournaments">
+          <h2 className="text-lg font-semibold">My tournaments</h2>
           {card.tournaments.length === 0 ? (
             <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-6 text-center">
               <p className="font-semibold">You&rsquo;re not in a tournament right now.</p>
@@ -67,6 +78,14 @@ export function MyTournamentsPage() {
         </section>
 
         <aside className="space-y-3">
+          {dashboard.data && (
+            <>
+              <TierProgress stats={dashboard.data.stats} />
+              <RecentForm d={dashboard.data} />
+              <LiveNow d={dashboard.data} />
+              <OpenToJoin d={dashboard.data} />
+            </>
+          )}
           <MetaLinkCodeDisplay />
           <p className="text-xs text-[var(--color-muted-foreground)] px-1">
             Playing in VR — at home or at an arena? Type this code into the Quest app once so your scores land on your account.

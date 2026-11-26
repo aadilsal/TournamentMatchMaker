@@ -370,8 +370,42 @@ export function DataTable({
     );
   }
 
+  const [titleCol, ...restCols] = columns;
   return (
-    <AdminCard className="overflow-x-auto">
+    <>
+      {/* Phones: one card per row, so no column is hidden off-screen. */}
+      <ul className="space-y-3 sm:hidden">
+        {rows.map((row, i) => (
+          <li
+            key={i}
+            className={cn(
+              'rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 space-y-3',
+              onRowClick && 'cursor-pointer active:bg-[var(--color-muted)]/40'
+            )}
+            onClick={onRowClick ? () => onRowClick(row, i) : undefined}
+          >
+            {titleCol && <div className="font-semibold break-words">{row[titleCol.key]}</div>}
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              {restCols
+                .filter((col) => col.label)
+                .map((col) => (
+                  <div key={col.key} className="min-w-0">
+                    <dt className="text-xs text-[var(--color-muted-foreground)]">{col.label}</dt>
+                    <dd className="mt-0.5 break-words">{row[col.key] ?? '—'}</dd>
+                  </div>
+                ))}
+            </dl>
+            {restCols
+              .filter((col) => !col.label && row[col.key] != null)
+              .map((col) => (
+                <div key={col.key} className="flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-3" onClick={(e) => e.stopPropagation()}>
+                  {row[col.key]}
+                </div>
+              ))}
+          </li>
+        ))}
+      </ul>
+    <AdminCard className="hidden overflow-x-auto sm:block">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--color-border)] bg-[var(--color-muted)]/30">
@@ -408,6 +442,7 @@ export function DataTable({
         </tbody>
       </table>
     </AdminCard>
+    </>
   );
 }
 

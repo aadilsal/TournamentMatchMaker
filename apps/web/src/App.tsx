@@ -20,6 +20,7 @@ const MyTournamentsPage = lazyNamed(() => import('@/pages/MyTournamentsPage'), '
 const TournamentsPage = lazyNamed(() => import('@/pages/TournamentsPage'), 'TournamentsPage');
 const TournamentDetailPage = lazyNamed(() => import('@/pages/TournamentDetailPage'), 'TournamentDetailPage');
 const PublicProfilePage = lazyNamed(() => import('@/pages/PublicProfilePage'), 'PublicProfilePage');
+const LeaderboardsPage = lazyNamed(() => import('@/pages/LeaderboardsPage'), 'LeaderboardsPage');
 const ForgotPasswordPage = lazyNamed(() => import('@/pages/ForgotPasswordPage'), 'ForgotPasswordPage');
 const ResetPasswordPage = lazyNamed(() => import('@/pages/ResetPasswordPage'), 'ResetPasswordPage');
 const AutoLoginPage = lazyNamed(() => import('@/pages/AutoLoginPage'), 'AutoLoginPage');
@@ -111,6 +112,7 @@ export function App() {
         <Route path="/terms" element={<AppShell><TermsPage /></AppShell>} />
         <Route path="/privacy" element={<AppShell><PrivacyPage /></AppShell>} />
         <Route path="/players/:username" element={<AppShell><PublicProfilePage /></AppShell>} />
+        <Route path="/leaderboards" element={<AppShell><LeaderboardsPage /></AppShell>} />
         <Route path="/profile" element={<AppShell><ProfilePage /></AppShell>} />
         {/* Guided flow: start → choose a tournament → where you play → my tournaments. */}
         <Route path="/start" element={<AppShell><StartPage /></AppShell>} />

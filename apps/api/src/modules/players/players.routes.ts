@@ -7,11 +7,13 @@ import { validate } from '../../middleware/validate.js';
 import { sendSuccess } from '../../lib/response.js';
 import { PlayersService } from './players.service.js';
 import { DrawEntryService } from '../tournaments/draw-entry.service.js';
+import { DashboardService } from './dashboard.service.js';
 
 export function createPlayersRouter(pool: Pool, _env: Env): Router {
   const router = Router();
   const service = new PlayersService(pool);
   const entry = new DrawEntryService(pool, _env);
+  const dashboard = new DashboardService(pool);
 
   // Which step of the guided flow the player is on; the web app routes from this.
   router.get('/me/journey', authenticate(_env), async (req, res, next) => {
@@ -23,6 +25,15 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
   });
 
   // The player's card (same as the headset's): one entry per tournament with what to do next.
+  // Dashboard: career stats, recent form, live and open tournaments.
+  router.get('/me/dashboard', authenticate(_env), async (req, res, next) => {
+    try {
+      sendSuccess(res, await dashboard.forPlayer(req.user!.sub));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/me/tournaments', authenticate(_env), validate(timeZoneQuerySchema, 'query'), async (req, res, next) => {
     try {
       const { timeZone } = req.query as { timeZone?: string };
@@ -87,6 +98,15 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
     try {
       const profile = await service.getPublicByUsername(req.params.username as string);
       sendSuccess(res, profile);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Public career page: stats, recent innings with 4s/6s, tournament history.
+  router.get('/:username/stats', async (req, res, next) => {
+    try {
+      sendSuccess(res, await dashboard.profile(req.params.username as string));
     } catch (err) {
       next(err);
     }

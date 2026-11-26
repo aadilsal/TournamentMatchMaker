@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { LeaderboardEntry, LiveMatch, Tournament, TournamentLive, TournamentPlayer, TournamentStats } from '@vr-tournament/shared';
-import { oversLabel, timeLeft } from '@vr-tournament/shared';
+import { WICKETS_MIN_INNINGS_TOURNAMENT, oversLabel, timeLeft } from '@vr-tournament/shared';
 import { Crown, Flame, Headset, MapPin, Radio, Shield, Target, Trophy, Users } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
@@ -83,7 +83,10 @@ function Overview({ tournament: t, players, live, stats }: { tournament: Tournam
           <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
             <Highlight label="Most 6s" value={top(stats.leaderboards.mostSixes)} />
             <Highlight label="Most 4s" value={top(stats.leaderboards.mostFours)} />
-            <Highlight label="Fewest wickets lost" value={top(stats.leaderboards.fewestWicketsLost)} />
+            <Highlight
+              label="Fewest wickets / over"
+              value={stats.leaderboards.fewestWicketsPerOver[0] ? `${stats.leaderboards.fewestWicketsPerOver[0].username} · ${stats.leaderboards.fewestWicketsPerOver[0].value}` : '—'}
+            />
             <Highlight label="Highest innings" value={top(stats.leaderboards.highestInnings)} />
           </CardContent>
         </Card>
@@ -204,7 +207,12 @@ function Board({ title, icon: Icon, entries, empty }: { title: string; icon: typ
             {entries.map((e, i) => (
               <li key={`${e.userId}-${i}`} className="flex items-center justify-between gap-2 text-sm">
                 <span className="truncate"><span className="mr-2 inline-block w-4 text-[var(--color-muted-foreground)] tabular-nums">{i + 1}</span>{e.username}</span>
-                <span className="tabular-nums font-semibold">{e.value}</span>
+                <span className="text-right tabular-nums font-semibold">
+                  {e.value}
+                  {e.wickets != null && (
+                    <span className="block text-[11px] font-normal text-[var(--color-muted-foreground)]">{e.wickets} wkts · {e.overs} ov</span>
+                  )}
+                </span>
               </li>
             ))}
           </ol>
@@ -235,7 +243,12 @@ function StatsPanel({ stats, loading }: { stats?: TournamentStats; loading: bool
       <div className="grid gap-4 md:grid-cols-2">
         <Board title="Most 6s" icon={Flame} entries={lb.mostSixes} empty={waiting} />
         <Board title="Most 4s" icon={Flame} entries={lb.mostFours} empty={waiting} />
-        <Board title="Fewest wickets lost" icon={Shield} entries={lb.fewestWicketsLost} empty={waiting} />
+        <Board
+          title="Fewest wickets per over"
+          icon={Shield}
+          entries={lb.fewestWicketsPerOver}
+          empty={`Needs ${WICKETS_MIN_INNINGS_TOURNAMENT} innings that report wickets`}
+        />
         <Board title="Most runs" icon={Target} entries={lb.mostRuns} empty="No innings played yet" />
         <Board title="Highest innings" icon={Trophy} entries={lb.highestInnings} empty="No innings played yet" />
       </div>

@@ -1,5 +1,5 @@
 // Public tournament page data: players, the live round and batting stats.
-import type { BattingLeaderboards, BattingTotals } from './batting-stats.js';
+import type { BattingLeaderboards, BattingTotals, LeaderboardEntry } from './batting-stats.js';
 
 /** registered = before the start; in = still playing; out = knocked out; champion = won it. */
 export type TournamentPlayerStatus = 'registered' | 'in' | 'out' | 'champion';
@@ -49,4 +49,76 @@ export interface TournamentLive {
 export interface TournamentStats {
   totals: BattingTotals;
   leaderboards: BattingLeaderboards;
+}
+
+/** One decided match in the player's recent form. */
+export interface FormEntry {
+  matchId: string;
+  tournamentId: string | null;
+  tournamentName: string | null;
+  opponent: string;
+  myScore: number | null;
+  opponentScore: number | null;
+  result: 'W' | 'L';
+  decidedAt: string;
+}
+
+/** One innings on a profile, with the batting breakdown when the headset sent it. */
+export interface ProfileMatch {
+  matchId: string;
+  tournamentId: string | null;
+  tournamentName: string | null;
+  opponent: string;
+  myScore: number | null;
+  opponentScore: number | null;
+  /** Null while the match is still being played. */
+  result: 'W' | 'L' | null;
+  fours: number | null;
+  sixes: number | null;
+  wicketsLost: number | null;
+  playedAt: string;
+}
+
+/** A tournament on a profile and how far the player got. */
+export interface ProfileTournament {
+  id: string;
+  name: string;
+  overs: number;
+  startDate: string;
+  finish: TournamentPlayerStatus;
+  roundReached: number | null;
+}
+
+/** Public career page: stats, recent innings and tournament history. */
+export interface PlayerProfileStats {
+  username: string;
+  stats: PlayerDashboard['stats'];
+  recentMatches: ProfileMatch[];
+  tournaments: ProfileTournament[];
+}
+
+/** All-time leaderboards across every tournament; bots left out. */
+export interface GlobalLeaderboards {
+  batting: BattingLeaderboards;
+  topRated: LeaderboardEntry[];
+}
+
+/** The logged-in player's home: career numbers, recent form and tournaments to watch or join. */
+export interface PlayerDashboard {
+  stats: BattingTotals & {
+    matches: number;
+    wins: number;
+    losses: number;
+    /** 0–100, null before the first decided match. */
+    winRate: number | null;
+    tournamentsPlayed: number;
+    tournamentsWon: number;
+    ratingPoints: number;
+    skillTier: number;
+    /** Points still needed for the next tier; null at the top tier. */
+    nextTier: { tier: number; pointsNeeded: number } | null;
+  };
+  recentForm: FormEntry[];
+  liveTournaments: Array<{ id: string; name: string; overs: number; roundNumber: number; playerCount: number }>;
+  openTournaments: Array<{ id: string; name: string; overs: number; startDate: string; playerCount: number; maxPlayers: number | null }>;
 }

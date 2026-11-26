@@ -135,9 +135,10 @@ export class TournamentViewService {
   async stats(tournamentId: string): Promise<TournamentStats> {
     await this.tournament(tournamentId);
     const rows = await this.pool.query(
-      `SELECT mi.user_id, u.username, mi.score, mi.fours, mi.sixes, mi.wickets_lost
+      `SELECT mi.user_id, u.username, mi.score, mi.fours, mi.sixes, mi.wickets_lost, COALESCE(t.overs, 1) AS overs
        FROM match_innings mi
        JOIN matches m ON m.id = mi.match_id
+       JOIN tournaments t ON t.id = m.tournament_id
        JOIN users u ON u.id = mi.user_id
        WHERE m.tournament_id = $1 AND NOT u.is_bot AND mi.source <> 'bot'`,
       [tournamentId]
@@ -149,6 +150,7 @@ export class TournamentViewService {
       fours: r.fours != null ? Number(r.fours) : null,
       sixes: r.sixes != null ? Number(r.sixes) : null,
       wicketsLost: r.wickets_lost != null ? Number(r.wickets_lost) : null,
+      overs: Number(r.overs),
     }));
     return { totals: battingTotals(innings), leaderboards: battingLeaderboards(innings) };
   }
