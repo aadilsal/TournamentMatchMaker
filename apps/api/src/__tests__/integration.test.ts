@@ -310,6 +310,25 @@ describe('API Integration', () => {
     expect(Array.isArray(res.body.data)).toBe(true);
   });
 
+  it('pages tournaments per tab with totals', async () => {
+    const all = await request(app).get('/api/v1/tournaments?page=1&limit=50');
+    expect(all.status).toBe(200);
+    const { active, completed } = all.body.meta.counts;
+    expect(all.body.meta.total).toBe(active + completed);
+
+    const done = await request(app).get('/api/v1/tournaments?view=completed&page=1&limit=1');
+    expect(done.body.meta.total).toBe(completed);
+    expect(done.body.data.length).toBe(Math.min(1, completed));
+    expect(done.body.data.every((t: { status: string }) => t.status === 'completed')).toBe(true);
+
+    const live = await request(app).get('/api/v1/tournaments?view=active&page=1&limit=50');
+    expect(live.body.meta.total).toBe(active);
+    expect(live.body.data.every((t: { status: string }) => t.status !== 'completed')).toBe(true);
+
+    const beyond = await request(app).get('/api/v1/tournaments?view=active&page=999&limit=10');
+    expect(beyond.body.data).toEqual([]);
+  });
+
   it('joins and leaves matchmaking queue', async () => {
     const join = await request(app)
       .post('/api/v1/matchmaking/queue')

@@ -173,6 +173,10 @@ export const tournamentListQuerySchema = z.object({
   tier: z.coerce.number().int().min(1).max(5).optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
   cursor: z.string().uuid().optional(),
+  // Public list tabs: 'active' is everything not completed.
+  view: z.enum(['active', 'completed']).optional(),
+  // Page number (1-based); when set the response meta carries totals per tab.
+  page: z.coerce.number().int().min(1).max(10_000).optional(),
 });
 
 export const tournamentMatchesQuerySchema = z.object({

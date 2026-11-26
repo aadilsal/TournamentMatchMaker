@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import type {
   QueuePairFailedEvent,
@@ -8,7 +8,7 @@ import type {
   Tournament,
   User,
 } from '@vr-tournament/shared';
-import { apiGet, getAccessToken } from '@/lib/api';
+import { apiGet, apiGetList, getAccessToken } from '@/lib/api';
 import {
   LIVE_QUERY_KEYS,
   LIVE_STALE_TIME,
@@ -27,9 +27,10 @@ import { CricketBallLoader } from '@/components/ui/cricket-loader';
 import { Trophy, Calendar, Users, Info } from 'lucide-react';
 import { motion } from 'motion/react';
 import { oversLabel } from '@vr-tournament/shared';
-import { Crown } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Crown } from 'lucide-react';
 
 type TournamentView = 'active' | 'completed';
+const PAGE_SIZE = 10;
 
 export function TournamentsPage() {
   const navigate = useNavigate();
@@ -39,22 +40,23 @@ export function TournamentsPage() {
   // Finished seasons are noise on the default view — they stay one click away.
   const [view, setView] = useState<TournamentView>('active');
 
-  const { data: tournaments = [], isLoading, error, refetch } = useQuery({
-    queryKey: ['tournaments'],
-    queryFn: () => apiGet<Tournament[]>('/tournaments'),
+  const [pages, setPages] = useState<Record<TournamentView, number>>({ active: 1, completed: 1 });
+  const page = pages[view];
+
+  // 'active' includes closed tournaments: registration is shut but they still have to be played.
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ['tournaments', view, page],
+    queryFn: () => apiGetList<Tournament>('/tournaments', { view, page, limit: PAGE_SIZE }),
+    placeholderData: keepPreviousData,
   });
 
-  const { active, completed } = useMemo(
-    () => ({
-      // 'closed' means registration is shut, not that the tournament is over —
-      // it still has to be played, so it stays under Live & upcoming.
-      active: tournaments.filter((t) => t.status !== 'completed'),
-      completed: tournaments.filter((t) => t.status === 'completed'),
-    }),
-    [tournaments]
-  );
-
-  const visible = view === 'completed' ? completed : active;
+  const visible = data?.items ?? [];
+  const counts = data?.meta.counts;
+  const totalPages = Math.max(1, Math.ceil((data?.meta.total ?? 0) / PAGE_SIZE));
+  const goToPage = (p: number) => {
+    setPages((prev) => ({ ...prev, [view]: p }));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const { data: queueStatus } = useQuery({
     queryKey: LIVE_QUERY_KEYS.matchmakingStatus,
@@ -162,13 +164,13 @@ export function TournamentsPage() {
         </motion.div>
       )}
 
-      {!isLoading && tournaments.length > 0 && (
+      {!isLoading && (counts?.active ?? 0) + (counts?.completed ?? 0) > 0 && (
         <Tabs
           active={view}
           onChange={(id) => setView(id as TournamentView)}
           tabs={[
-            { id: 'active', label: `Live & upcoming (${active.length})` },
-            { id: 'completed', label: `Completed (${completed.length})` },
+            { id: 'active', label: `Live & upcoming (${counts?.active ?? 0})` },
+            { id: 'completed', label: `Completed (${counts?.completed ?? 0})` },
           ]}
         />
       )}
@@ -266,7 +268,46 @@ export function TournamentsPage() {
           })}
         </div>
       )}
+
+      {!isLoading && !error && totalPages > 1 && (
+        <Pager page={page} totalPages={totalPages} onPage={goToPage} />
+      )}
     </div>
+  );
+}
+
+/** Numbered pages with Previous / Next; long runs collapse to an ellipsis. */
+function Pager({ page, totalPages, onPage }: { page: number; totalPages: number; onPage: (p: number) => void }) {
+  const nums = Array.from({ length: totalPages }, (_, i) => i + 1).filter(
+    (n) => n === 1 || n === totalPages || Math.abs(n - page) <= 1
+  );
+  return (
+    <nav aria-label="Tournament pages" className="mt-8 flex flex-wrap items-center justify-center gap-2">
+      <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)} tooltip="Show the previous 10 tournaments">
+        <ChevronLeft className="h-4 w-4" aria-hidden /> Previous
+      </Button>
+      {nums.map((n, i) => (
+        <span key={n} className="flex items-center gap-2">
+          {i > 0 && n - nums[i - 1] > 1 && <span className="px-1 text-[var(--color-muted-foreground)]">…</span>}
+          <Button
+            variant={n === page ? 'default' : 'outline'}
+            size="sm"
+            className="min-w-9"
+            aria-current={n === page ? 'page' : undefined}
+            onClick={() => onPage(n)}
+            tooltip={`Go to page ${n}`}
+          >
+            {n}
+          </Button>
+        </span>
+      ))}
+      <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => onPage(page + 1)} tooltip="Show the next 10 tournaments">
+        Next <ChevronRight className="h-4 w-4" aria-hidden />
+      </Button>
+      <p className="w-full text-center text-xs text-[var(--color-muted-foreground)]">
+        Page {page} of {totalPages}
+      </p>
+    </nav>
   );
 }
 

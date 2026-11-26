@@ -1,9 +1,9 @@
 import { Trophy } from 'lucide-react';
 
-/** The image panel beside the login and register forms (wide screens only). */
+/** The image panel beside the login and register forms (wide screens only); pinned while the form scrolls. */
 export function AuthShowcase() {
   return (
-    <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden flex-col bg-[#0a0a0a]">
+    <div className="hidden lg:flex lg:w-1/2 lg:sticky lg:top-16 lg:self-start lg:h-[calc(100dvh-4rem)] relative overflow-hidden flex-col bg-[#0a0a0a]">
 
       {/* Subtle dot grid — visible in the dark top area */}
       <div
@@ -56,7 +56,8 @@ export function AuthShowcase() {
       />
 
       {/* Bottom branding — chips sit above the heading with equal spacing on both sides */}
-      <div className="relative z-10 mt-auto px-10 pb-10 pt-8 flex flex-col gap-8">
+      <div aria-hidden className="h-[46%] shrink-0" />
+      <div className="relative z-10 flex-1 px-10 pb-10 pt-8 flex flex-col justify-center gap-8">
 
         {/* Chips row — equal gap above (pt-8) and below (gap-8) matches heading spacing */}
         <div className="flex items-center gap-3">

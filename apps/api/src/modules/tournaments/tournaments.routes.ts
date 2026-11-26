@@ -50,7 +50,13 @@ export function createTournamentsRouter(pool: Pool, redis: RedisClient, env: Env
   router.get('/', validate(tournamentListQuerySchema, 'query'), async (req, res, next) => {
     try {
       const result = await service.list(req.query as never);
-      sendSuccess(res, result.items, { cursor: result.nextCursor });
+      sendSuccess(
+        res,
+        result.items,
+        'page' in result
+          ? { total: result.total, counts: result.counts, page: result.page, limit: (req.query as { limit?: number }).limit }
+          : { cursor: result.nextCursor }
+      );
     } catch (err) {
       next(err);
     }

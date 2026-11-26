@@ -47,6 +47,8 @@ export interface ApiMeta {
   cursor?: string | null;
   total?: number;
   limit?: number;
+  page?: number;
+  counts?: Record<string, number>;
 }
 
 export interface User {

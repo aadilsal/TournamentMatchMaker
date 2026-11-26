@@ -164,6 +164,35 @@ export class TournamentsService {
       params.push(query.tier);
       where += ` AND t.skill_tier = $${params.length}`;
     }
+    const baseWhere = where;
+    const baseParams = [...params];
+    if (query.view === 'completed') where += " AND t.status = 'completed'";
+    if (query.view === 'active') where += " AND t.status <> 'completed'";
+    if (query.page) {
+      // Numbered pages: offset paging plus totals for both tabs.
+      params.push(query.limit, (query.page - 1) * query.limit);
+      const [pageRows, countRows] = await Promise.all([
+        this.pool.query(
+          `SELECT t.*,
+                  (SELECT COUNT(*)::int FROM tournament_registrations tr WHERE tr.tournament_id = t.id) AS registration_count,
+                  (SELECT username FROM users cu WHERE cu.id = t.champion_id) AS champion_name
+           FROM tournaments t
+           ${where}
+           ORDER BY ${statusRank('t')} DESC, t.start_date DESC, t.id DESC
+           LIMIT $${params.length - 1} OFFSET $${params.length}`,
+          params
+        ),
+        this.pool.query<{ active: number; completed: number }>(
+          `SELECT COUNT(*) FILTER (WHERE t.status <> 'completed')::int AS active,
+                  COUNT(*) FILTER (WHERE t.status = 'completed')::int AS completed
+           FROM tournaments t ${baseWhere}`,
+          baseParams
+        ),
+      ]);
+      const counts = countRows.rows[0] ?? { active: 0, completed: 0 };
+      const total = query.view ? counts[query.view] : counts.active + counts.completed;
+      return { items: pageRows.rows.map(mapTournament), nextCursor: null, total, counts, page: query.page };
+    }
     if (query.cursor) {
       // Keyset on the same tuple the rows are ordered by. The old cursor
       // compared t.id, a random UUID unrelated to the sort, so pages overlapped

@@ -88,6 +88,10 @@ export function MyTournamentsPage() {
         </section>
 
         <aside className="space-y-3">
+          <MetaLinkCodeDisplay />
+          <p className="text-xs text-[var(--color-muted-foreground)] px-1">
+            Playing in VR — at home or at an arena? Type this code into the Quest app once so your scores land on your account.
+          </p>
           {dashboard.data && (
             <>
               <TierProgress stats={dashboard.data.stats} />
@@ -97,10 +101,6 @@ export function MyTournamentsPage() {
             </>
           )}
           <PhoneAppCard />
-          <MetaLinkCodeDisplay />
-          <p className="text-xs text-[var(--color-muted-foreground)] px-1">
-            Playing in VR — at home or at an arena? Type this code into the Quest app once so your scores land on your account.
-          </p>
         </aside>
       </div>
     </div>
