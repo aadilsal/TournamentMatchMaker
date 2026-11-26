@@ -6,6 +6,15 @@ export const metaSubmitScoreSchema = z.object({
   score: z.number().int().min(0).max(999),
   // Optional, recorded for checking only; never used to reject a score.
   ballsFaced: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER).optional(),
+  // Optional batting breakdown for stats; dropped (not rejected) when it does not fit the score.
+  fours: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER).optional(),
+  sixes: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER).optional(),
+  wicketsLost: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER).optional(),
+});
+
+/** `POST /matches/:id/start` and `/heartbeat`: the batter's user id. */
+export const metaInningsActionSchema = z.object({
+  userId: z.string().uuid(),
 });
 
 export const metaSoloTargetSchema = z.object({
@@ -38,6 +47,8 @@ export const metaCurrentMatchQuerySchema = z.object({
   userId: z.string().uuid(),
   /** Optional: only this tournament's match, for a player in several. */
   tournamentId: z.string().uuid().optional(),
+  /** `true` from headsets that call `/start`; polling then never claims the turn. */
+  explicitStart: z.enum(['true', 'false']).optional(),
 });
 
 /**
@@ -58,4 +69,5 @@ export const metaVerifyLinkCodeSchema = z.object({
 
 export type MetaSubmitScoreInput = z.infer<typeof metaSubmitScoreSchema>;
 export type MetaSoloTargetInput = z.infer<typeof metaSoloTargetSchema>;
+export type MetaInningsActionInput = z.infer<typeof metaInningsActionSchema>;
 export type MetaVerifyLinkCodeInput = z.infer<typeof metaVerifyLinkCodeSchema>;

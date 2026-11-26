@@ -166,6 +166,8 @@ async function replayDrawMatch(
       return readMatchState(pool, matchId);
     }
     await client.query(`DELETE FROM match_innings WHERE match_id = $1`, [matchId]);
+    // A replay is a new match: each player gets one fresh attempt.
+    await client.query(`DELETE FROM innings_attempts WHERE match_id = $1`, [matchId]);
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

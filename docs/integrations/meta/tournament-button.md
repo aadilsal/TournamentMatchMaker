@@ -177,7 +177,7 @@ public class TournamentButtonPoller : MonoBehaviour
 ## How to test
 
 1. Call the endpoint with your key: today it returns `hasLiveTournament: false` → button disabled.
-2. Ask the Pixel Paddle team to publish a test tournament → within your next poll it returns
+2. Ask the PixelPaddle team to publish a test tournament → within your next poll it returns
    `true` with that tournament → button enabled.
 3. Once that tournament closes registration without starting, or is completed → `false` again → button disabled.
 4. Call without the key → `401` → button stays disabled and you log a configuration error.
@@ -188,4 +188,4 @@ Full Meta integration guide: `docs/integrations/meta/integration-api.md`, sectio
 including authentication (section 3), the response envelope (section 4) and the other
 endpoints (current match, score submission, solo target, headset link code).
 
-Questions or issues: contact the Pixel Paddle backend team.
+Questions or issues: contact the PixelPaddle backend team.

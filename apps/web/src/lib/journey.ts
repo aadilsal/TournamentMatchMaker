@@ -65,4 +65,4 @@ export function formatRoundLength(minutes: number): string {
 }
 
 /** Steps shown in the flow header. */
-export const JOURNEY_STEPS = ['Choose a tournament', 'Where you play', 'Play'] as const;
+export const JOURNEY_STEPS = ['Choose a tournament', 'Where you play'] as const;

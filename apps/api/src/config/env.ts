@@ -19,7 +19,7 @@ const envSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM_EMAIL: z.string().email().optional(),
-  EMAIL_FROM_NAME: z.string().max(80).default('VR Cricket League by Pixel Paddle'),
+  EMAIL_FROM_NAME: z.string().max(80).default('VR Cricket League by PixelPaddle'),
   NOTIFICATION_EMAIL_ENABLED: z
     .enum(['true', 'false'])
     .default('true')

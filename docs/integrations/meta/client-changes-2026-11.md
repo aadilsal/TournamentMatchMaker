@@ -61,4 +61,4 @@ A player can now be in several tournaments with an open match in each.
 4. Tie (submit equal scores from both players) → same match comes back with `lastResult.outcome = "tie"`.
 5. Odd field → computer opponent; the human bats first and the result arrives on the next poll.
 
-Ask the Pixel Paddle team for a test tournament on staging to run these.
+Ask the PixelPaddle team for a test tournament on staging to run these.

@@ -1,4 +1,4 @@
-# Deploying Pixel Paddle to production
+# Deploying PixelPaddle to production
 
 Production is a GCP VM — project `jarvis-ai-450720`, zone `us-east1-b`, instance
 `pixelpaddle-backend`, IP `34.148.7.172`. There is no deploy automation: CI only

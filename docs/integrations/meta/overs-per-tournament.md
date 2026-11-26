@@ -178,4 +178,4 @@ The rule is 10 minutes, plus 4 minutes for each over after the first. No headset
 - [ ] Optional: show the round, player count and round closing time from `GET /tournaments/live`.
 - [ ] Optional: send `ballsFaced` with the score.
 
-To test with more than one over, ask the Pixel Paddle team to create a tournament with, for example, 2 overs.
+To test with more than one over, ask the PixelPaddle team to create a tournament with, for example, 2 overs.

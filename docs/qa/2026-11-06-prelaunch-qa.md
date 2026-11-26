@@ -1,4 +1,4 @@
-# Pixel Paddle — Pre-launch QA Report
+# PixelPaddle — Pre-launch QA Report
 
 **Date:** 2026-11-06 · **Launch target:** 2026-11-15 · **Build:** `main` @ `1c25a49`
 **Scope:** web app (player + admin SPA), REST API, worker, Socket.io, Stripe/Meta integration surfaces

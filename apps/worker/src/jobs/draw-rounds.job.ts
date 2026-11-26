@@ -298,6 +298,15 @@ async function settleOpenDrawMatches(
   );
 
   for (const match of open.rows) {
+    // A started innings with no score by the close counts as 0.
+    await client.query(
+      `INSERT INTO match_innings (match_id, user_id, score, source)
+       SELECT a.match_id, a.user_id, 0, 'abandoned' FROM innings_attempts a
+       WHERE a.match_id = $1
+         AND NOT EXISTS (SELECT 1 FROM match_innings mi WHERE mi.match_id = a.match_id AND mi.user_id = a.user_id)
+       ON CONFLICT DO NOTHING`,
+      [match.id]
+    );
     const innings = await client.query(
       `SELECT user_id, score FROM match_innings WHERE match_id = $1 ORDER BY played_at ASC`,
       [match.id]

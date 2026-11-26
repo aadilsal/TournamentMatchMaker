@@ -27,6 +27,12 @@ import { normalizeOvers } from './overs.js';
  */
 export const MATCH_TURN_HOLD_MS = 10 * 60 * 1000;
 
+/** A started innings with no heartbeat for this long is abandoned and counts as 0. */
+export const INNINGS_HEARTBEAT_TIMEOUT_MS = 3 * 60 * 1000;
+
+/** How often the headset should send a heartbeat while batting. */
+export const INNINGS_HEARTBEAT_INTERVAL_SECONDS = 30;
+
 /** The hold grows with the innings: 10 minutes for one over, 4 more per extra over. */
 export function turnHoldMsForOvers(overs: number): number {
   return MATCH_TURN_HOLD_MS + (normalizeOvers(overs) - 1) * 4 * 60 * 1000;

@@ -1,4 +1,4 @@
-# Pixel Paddle / VR Cricket League — Meta Quest Integration API
+# PixelPaddle / VR Cricket League — Meta Quest Integration API
 
 **Version:** 2.5  
 **Last updated:** November 2026  
@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-Pixel Paddle is a tournament matchmaking platform. Players register on the web, join tournaments, book venue slots, and get paired for VR cricket matches. **Scores and solo targets must be submitted from the Meta Quest headset** — the web app does not accept manual scores.
+PixelPaddle is a tournament matchmaking platform. Players register on the web, join tournaments, book venue slots, and get paired for VR cricket matches. **Scores and solo targets must be submitted from the Meta Quest headset** — the web app does not accept manual scores.
 
 This document describes the **server-to-server HTTP API** your VR application should call. All endpoints are authenticated with a shared API key or a shared SSH public key (not end-user JWTs).
 
@@ -17,7 +17,7 @@ This document describes the **server-to-server HTTP API** your VR application sh
 
 ```
 ┌─────────────────┐     x-meta-api-key      ┌──────────────────────────┐
-│  Meta Quest VR  │ ───────────────────────▶│  Pixel Paddle API        │
+│  Meta Quest VR  │ ───────────────────────▶│  PixelPaddle API        │
 │  Game Client    │                         │  /api/v1/integrations/   │
 └─────────────────┘                         │  meta/*                  │
         │                                   └──────────────────────────┘
@@ -60,8 +60,8 @@ Every request **must** include at least one of the shared authentication headers
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `x-meta-api-key` | Yes* | Shared secret issued by Pixel Paddle |
-| `x-meta-ssh-public-key` | Yes* | Shared SSH public key issued by Pixel Paddle |
+| `x-meta-api-key` | Yes* | Shared secret issued by PixelPaddle |
+| `x-meta-ssh-public-key` | Yes* | Shared SSH public key issued by PixelPaddle |
 | `Content-Type` | Yes (POST) | `application/json` |
 | `Accept` | Recommended | `application/json` |
 
@@ -84,7 +84,7 @@ Accept: application/json
 **Security notes:**
 - Store the shared values securely on your backend or in the Quest app’s secure config — never embed in public repos.
 - The API key and SSH public key identify **your integration**, not the player. Player identity is passed as `userId` (UUID) in each request body/query.
-- `userId` is the Pixel Paddle user UUID. Your app must obtain this after the player authenticates on web (e.g. deep link, QR code, account linking). We can provide a test account for staging.
+- `userId` is the PixelPaddle user UUID. Your app must obtain this after the player authenticates on web (e.g. deep link, QR code, account linking). We can provide a test account for staging.
 
 ---
 
@@ -152,7 +152,7 @@ GET /matches/current?userId={userId}
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `userId` | UUID string | Yes | Pixel Paddle user ID |
+| `userId` | UUID string | Yes | PixelPaddle user ID |
 | `tournamentId` | UUID string | No | Only this tournament's match — use it after the player picks one (see *Players in more than one tournament*) |
 
 #### Example request
@@ -603,10 +603,10 @@ If `canSubmitSoloTarget` is `true`, prompt the player to play solo and then call
 
 ### 5.4 Identity — verify 4-digit link code
 
-Use this flow to securely link a headset to a player's account. The player views a randomly generated 4-digit code on their Pixel Paddle web profile and types it into the VR game. On success, the backend invalidates the code and returns the player's `userId` and `username`.
+Use this flow to securely link a headset to a player's account. The player views a randomly generated 4-digit code on their PixelPaddle web profile and types it into the VR game. On success, the backend invalidates the code and returns the player's `userId` and `username`.
 
 ```
-Quest app                         Pixel Paddle API
+Quest app                         PixelPaddle API
    │  player enters 4-digit code        │
    │ ─ POST /identity/verify-link-code ─▶│  verifies code
    │ ◀───────────── userId ─────────────│
@@ -663,7 +663,7 @@ curl -s -X POST "https://api.pixelpaddle.example/api/v1/integrations/meta/identi
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `userId` | UUID | **The Pixel Paddle user ID** — store it and use in all other endpoints |
+| `userId` | UUID | **The PixelPaddle user ID** — store it and use in all other endpoints |
 | `username` | string | Player's display name |
 | `player` | object \| null | The personalised player card (§5.6), so the headset can greet the player straight away. `null` only if it could not be built — the link itself still succeeded |
 
@@ -763,7 +763,7 @@ GET /players/profile?userId=<uuid>&timeZone=Asia/Karachi
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `userId` | UUID | Yes | Pixel Paddle user ID |
+| `userId` | UUID | Yes | PixelPaddle user ID |
 | `timeZone` | IANA zone | No | Times inside `statusText` are written in this zone; UTC when omitted |
 
 #### Example response
@@ -1097,4 +1097,4 @@ Please confirm with our team before go-live:
 
 ---
 
-*Document generated from Pixel Paddle API implementation (`apps/api/src/modules/integrations/`). For technical questions, contact the Pixel Paddle engineering team.*
+*Document generated from PixelPaddle API implementation (`apps/api/src/modules/integrations/`). For technical questions, contact the PixelPaddle engineering team.*

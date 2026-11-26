@@ -5,7 +5,7 @@ import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 export type EmailProvider = 'resend' | 'smtp' | 'ses';
 
 export interface EmailConfig {
-  /** Display name shown as the sender, e.g. "VR Cricket League by Pixel Paddle". */
+  /** Display name shown as the sender, e.g. "VR Cricket League by PixelPaddle". */
   fromName?: string;
   /** Page where players manage notifications (List-Unsubscribe). */
   unsubscribeUrl?: string;
@@ -140,7 +140,7 @@ export interface EmailEnv {
 
 export function emailConfigFromEnv(env: EmailEnv): EmailConfig {
   return {
-    fromName: env.EMAIL_FROM_NAME ?? 'VR Cricket League by Pixel Paddle',
+    fromName: env.EMAIL_FROM_NAME ?? 'VR Cricket League by PixelPaddle',
     unsubscribeUrl: env.APP_URL ? `${env.APP_URL.replace(/\/$/, '')}/profile` : undefined,
     resend: { apiKey: env.RESEND_API_KEY, from: env.RESEND_FROM_EMAIL },
     smtp: {

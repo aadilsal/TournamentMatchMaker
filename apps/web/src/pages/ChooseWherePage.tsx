@@ -41,6 +41,11 @@ export function ChooseWherePage() {
     enabled: loggedIn,
   });
 
+  // Load My tournaments' code now so the hop after joining is instant.
+  useEffect(() => {
+    void import('@/pages/MyTournamentsPage');
+  }, []);
+
   const current = mine.data?.tournaments.find((t) => t.id === tournamentId)?.playingAt ?? null;
   useEffect(() => {
     if (choice || !current) return;
@@ -49,12 +54,15 @@ export function ChooseWherePage() {
 
   const join = useMutation({
     mutationFn: (body: Choice) => apiPost<{ created: boolean }>(`/tournaments/${tournamentId}/join`, body),
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: JOURNEY_KEYS.myTournaments });
-      void queryClient.invalidateQueries({ queryKey: JOURNEY_KEYS.journey });
+    // Fresh data first, so My tournaments never opens on the stale "no tournaments yet" cache.
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: JOURNEY_KEYS.myTournaments }),
+        queryClient.refetchQueries({ queryKey: JOURNEY_KEYS.journey }),
+      ]).catch(() => {});
       void queryClient.invalidateQueries({ queryKey: ['tournaments'] });
       toast.success(result.created ? `You're in ${tournament.data?.name ?? 'the tournament'}!` : 'Saved — your place to play is updated.');
-      navigate('/my-tournaments');
+      navigate('/my-tournaments', { replace: true });
     },
     onError: (err) => toast.error(getUserErrorMessage(err)),
   });

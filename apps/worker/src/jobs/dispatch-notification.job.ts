@@ -139,7 +139,7 @@ export async function processDispatchNotificationJob(
       const venue = payload.venue as { name?: string } | undefined;
       const slot = payload.slot as { startTime?: string } | undefined;
       const autoConfirmed = payload.autoConfirmed === true;
-      subject = autoConfirmed ? 'Your Match Is Ready — Pixel Paddle' : 'Match Found — Confirm Now';
+      subject = autoConfirmed ? 'Your Match Is Ready — PixelPaddle' : 'Match Found — Confirm Now';
       html = matchFoundEmailHtml({
         opponentUsername: opponent?.username ?? 'opponent',
         venueName: venue?.name,

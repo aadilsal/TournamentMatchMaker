@@ -584,3 +584,74 @@ describe('overs per tournament', () => {
     expect(row.rows[0].balls_faced).toBe(6);
   });
 });
+
+describe('innings start, heartbeat, abandon and batting stats', () => {
+  const start = (matchId: string, userId: string) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/start`).set(meta).send({ userId });
+  const beat = (matchId: string, userId: string) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/heartbeat`).set(meta).send({ userId });
+  const poll = (userId: string) =>
+    request(app).get('/api/v1/integrations/meta/matches/current').set(meta).query({ userId, explicitStart: 'true' });
+  const goStale = (matchId: string, userId: string) =>
+    pool.query(`UPDATE innings_attempts SET last_heartbeat_at = NOW() - INTERVAL '4 minutes' WHERE match_id = $1 AND user_id = $2`, [matchId, userId]);
+
+  it('stores 4s, 6s and wickets, and drops 4s/6s that cannot fit the score', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    expect((await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta)
+      .send({ userId: a, score: 30, fours: 3, sixes: 2, wicketsLost: 1 })).status).toBe(200);
+    expect((await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta)
+      .send({ userId: b, score: 10, fours: 2, sixes: 2, wicketsLost: 0 })).status).toBe(200);
+    const rows = await pool.query(`SELECT user_id, fours, sixes, wickets_lost FROM match_innings WHERE match_id = $1`, [matchId]);
+    const by = (id: string) => rows.rows.find((r) => r.user_id === id);
+    expect(by(a)).toMatchObject({ fours: 3, sixes: 2, wickets_lost: 1 });
+    expect(by(b)).toMatchObject({ fours: null, sixes: null, wickets_lost: 0 });
+  });
+
+  it('polling never claims the turn; Play does, and the other player waits', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    expect((await poll(a)).body.data.match.amSettingTarget).toBe(true);
+    expect((await poll(b)).body.data.match.amSettingTarget).toBe(true);
+
+    const started = await start(matchId, b);
+    expect(started.status).toBe(200);
+    expect(started.body.data).toMatchObject({ amChasing: false, heartbeatIntervalSeconds: 30, abandonAfterSeconds: 180 });
+
+    const waiting = (await poll(a)).body.data.match;
+    expect(waiting).toMatchObject({ waitingForOpponent: true, amSettingTarget: false });
+    expect(waiting.opponentBattingSince).not.toBeNull();
+    expect(waiting.turnFreesAt).not.toBeNull();
+    expect((await start(matchId, a)).status).toBe(409);
+    expect((await start(matchId, b)).body.error.code).toBe('INNINGS_ALREADY_STARTED');
+    expect((await beat(matchId, b)).status).toBe(200);
+    expect((await poll(b)).body.data.match.myInningsStartedAt).not.toBeNull();
+  });
+
+  it('a batter-first who stops sending heartbeats scores 0, and the opponent chases 1', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await start(matchId, a);
+    await goStale(matchId, a);
+
+    const chase = (await poll(b)).body.data.match;
+    expect(chase).toMatchObject({ amChasing: true, chaseTarget: 1, opponentScore: 0 });
+    const row = await pool.query(`SELECT score, source FROM match_innings WHERE match_id = $1 AND user_id = $2`, [matchId, a]);
+    expect(row.rows[0]).toMatchObject({ score: 0, source: 'abandoned' });
+    expect((await beat(matchId, a)).body.error.code).toBe('INNINGS_ABANDONED');
+  });
+
+  it('a chaser who abandons scores 0, so the target-setter wins', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    await score(matchId, a, 18);
+    expect((await start(matchId, b)).body.data).toMatchObject({ amChasing: true, chaseTarget: 19 });
+    await goStale(matchId, b);
+    await poll(a);
+    const m = await pool.query(`SELECT status, result FROM matches WHERE id = $1`, [matchId]);
+    expect(m.rows[0].status).toBe('completed');
+    expect(m.rows[0].result.winnerId).toBe(a);
+  });
+});

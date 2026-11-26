@@ -251,6 +251,21 @@ async function playToTheEnd(tid: string, noShow?: (uid: string) => boolean) {
     expect(t.champion_id).toBeNull();
   });
 
+  it('counts a started innings with no score as 0 at round close', async () => {
+    const tid = await drawTournament('Abandoned final');
+    const [a, b] = [await player(), await player()];
+    await enter(tid, a);
+    await enter(tid, b);
+    await run();
+    const [m] = await openMatches(tid);
+    await pool.query(`INSERT INTO innings_attempts (match_id, user_id) VALUES ($1, $2)`, [m.id, m.player1_id]);
+    await closeRoundNow(tid);
+    await run();
+    const inn = await pool.query(`SELECT score, source FROM match_innings WHERE match_id = $1 AND user_id = $2`, [m.id, m.player1_id]);
+    expect(inn.rows[0]).toMatchObject({ score: 0, source: 'abandoned' });
+    expect((await tournamentRow(tid)).champion_id).toBe(m.player1_id);
+  });
+
   it('finishes at once with one entrant, and with none', async () => {
     const solo = await drawTournament('Solo');
     const only = await player();

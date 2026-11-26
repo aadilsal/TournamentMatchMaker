@@ -53,6 +53,7 @@ const MIGRATION_MARKERS = {
   },
   '1738000000020_login-links': { table: 'login_links' },
   '1738000000021_tournament-overs': { column: { table: 'tournaments', name: 'overs' } },
+  '1738000000022_innings-stats-and-attempts': { table: 'innings_attempts' },
 };
 
 async function tableExists(client, table) {

@@ -4,6 +4,7 @@ import {
   metaMatchIdParamSchema,
   metaPlayerCardQuerySchema,
   metaSoloTargetSchema,
+  metaInningsActionSchema,
   metaSubmitScoreSchema,
   metaVerifyLinkCodeSchema,
 } from '@vr-tournament/shared';
@@ -65,8 +66,8 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     validate(metaCurrentMatchQuerySchema, 'query'),
     async (req, res, next) => {
       try {
-        const { userId, tournamentId } = req.query as { userId: string; tournamentId?: string };
-        const data = await service.getCurrentMatch(userId, tournamentId ?? null);
+        const { userId, tournamentId, explicitStart } = req.query as { userId: string; tournamentId?: string; explicitStart?: string };
+        const data = await service.getCurrentMatch(userId, tournamentId ?? null, explicitStart === 'true');
         sendSuccess(res, data);
       } catch (err) {
         next(err);
@@ -105,6 +106,34 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
       try {
         const match = await service.submitScore(req.params.id as string, req.body);
         sendSuccess(res, match);
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  metaApiRouter.post(
+    '/matches/:id/start',
+    metaPollRateLimit(env),
+    validate(metaMatchIdParamSchema, 'params'),
+    validate(metaInningsActionSchema),
+    async (req, res, next) => {
+      try {
+        sendSuccess(res, await service.startInnings(req.params.id as string, req.body.userId));
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  metaApiRouter.post(
+    '/matches/:id/heartbeat',
+    metaPollRateLimit(env),
+    validate(metaMatchIdParamSchema, 'params'),
+    validate(metaInningsActionSchema),
+    async (req, res, next) => {
+      try {
+        sendSuccess(res, await service.heartbeat(req.params.id as string, req.body.userId));
       } catch (err) {
         next(err);
       }

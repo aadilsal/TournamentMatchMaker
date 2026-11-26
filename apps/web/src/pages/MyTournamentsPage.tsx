@@ -2,10 +2,9 @@ import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BuybackOption, PlayerCardTournament, Tournament } from '@vr-tournament/shared';
 import { oversLabel } from '@vr-tournament/shared';
-import { Headset, MapPin, Plus, Trophy, Swords } from 'lucide-react';
+import { Headset, MapPin, Plus, Target, Trophy, Swords } from 'lucide-react';
 import { apiDelete, apiGet, getAccessToken, getUserErrorMessage } from '@/lib/api';
 import { JOURNEY_KEYS, useJourney, useMyTournaments } from '@/lib/journey';
-import { JourneySteps } from '@/components/journey/JourneySteps';
 import { MetaLinkCodeDisplay } from '@/components/meta/MetaLinkCodeDisplay';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
 import { Badge } from '@/components/ui/badge';
@@ -38,11 +37,8 @@ export function MyTournamentsPage() {
   if (error || !card) return <QueryError error={error} resource="your tournaments" onRetry={() => refetch()} />;
   if (card.tournaments.length === 0 && journey.data?.step === 'choose_tournament') return <Navigate to="/join" replace />;
 
-  const firstTime = card.tournaments.length === 1 && card.tournaments[0].myStatus === 'registered';
-
   return (
     <div className="space-y-6">
-      {firstTime && <JourneySteps current={2} />}
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{card.greeting}</h1>
@@ -131,14 +127,27 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
       </p>
 
       {m && (
-        <div className="rounded-lg border border-[var(--color-border)] p-3 flex flex-wrap items-center justify-between gap-2">
-          <span className="flex items-center gap-2 font-medium">
-            <Swords className="h-4 w-4 text-[var(--color-primary)]" aria-hidden />
-            vs {m.opponent}
-          </span>
-          {m.state === 'your_turn' && <Badge variant="success">Your turn — play in the Quest app</Badge>}
-          {m.state === 'waiting_for_opponent' && <Badge variant="info">You scored {score(m.myScore)} — waiting for {m.opponent}</Badge>}
-          {m.state === 'decided' && <Badge variant="neutral">You {score(m.myScore)} – {score(m.opponentScore)} {m.opponent}</Badge>}
+        <div className="rounded-lg border border-[var(--color-border)] p-3 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 font-medium">
+              <Swords className="h-4 w-4 text-[var(--color-primary)]" aria-hidden />
+              vs {m.opponent}
+            </span>
+            {m.state === 'your_turn' && m.opponentScore < 0 && <Badge variant="success">You bat first — set the target in the Quest app</Badge>}
+            {m.state === 'waiting_for_opponent' && <Badge variant="info">You scored {score(m.myScore)} — {m.opponent} needs {m.myScore + 1}</Badge>}
+            {m.state === 'decided' && <Badge variant="neutral">You {score(m.myScore)} – {score(m.opponentScore)} {m.opponent}</Badge>}
+          </div>
+          {/* The opponent has batted: the chase is the one thing to show. */}
+          {m.state === 'your_turn' && m.opponentScore >= 0 && (
+            <div className="flex items-center gap-4 rounded-lg border border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 px-4 py-3">
+              <Target className="h-8 w-8 shrink-0 text-[var(--color-primary)]" aria-hidden />
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-primary)]">Target to chase</p>
+                <p className="text-2xl font-extrabold leading-tight">{m.opponentScore + 1} to win</p>
+                <p className="text-sm text-[var(--color-muted-foreground)]">{m.opponent} scored {m.opponentScore}. Play your innings in the Quest app.</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

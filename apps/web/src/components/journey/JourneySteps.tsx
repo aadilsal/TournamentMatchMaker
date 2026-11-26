@@ -2,8 +2,8 @@ import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { JOURNEY_STEPS } from '@/lib/journey';
 
-/** Progress through the guided flow: 1 Tournament · 2 Where you play · 3 Play. */
-export function JourneySteps({ current }: { current: 0 | 1 | 2 }) {
+/** Progress through joining: 1 Tournament · 2 Where you play; hidden once joined. */
+export function JourneySteps({ current }: { current: 0 | 1 }) {
   return (
     <ol className="flex flex-wrap items-center justify-center gap-2 text-sm" aria-label="Your progress">
       {JOURNEY_STEPS.map((label, i) => {

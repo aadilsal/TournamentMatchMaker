@@ -280,6 +280,12 @@ export interface MetaCurrentMatchResponse {
      * with a real target once their innings lands.
      */
     waitingForOpponent: boolean;
+    /** When this player's started innings began (`/start`); null if not started. Additive. */
+    myInningsStartedAt: string | null;
+    /** When the opponent started batting first; null if they are not batting. Additive. */
+    opponentBattingSince: string | null;
+    /** If the opponent stops sending heartbeats, their innings is abandoned at this time. Additive. */
+    turnFreesAt: string | null;
   } | null;
   /**
    * The player's most recently decided match, for a few minutes after it ends.

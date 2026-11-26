@@ -12,6 +12,8 @@ import type {
 } from '@vr-tournament/shared';
 import {
   DRAW_PHASE,
+  INNINGS_HEARTBEAT_INTERVAL_SECONDS,
+  INNINGS_HEARTBEAT_TIMEOUT_MS,
   MATCH_RESULT_VISIBILITY_MS,
   NO_SCORE,
   QUEUE_MEMBER,
@@ -39,6 +41,18 @@ import { requeuePlayer } from '../../lib/requeue-player.js';
 import { enqueueCloseRoundNow, enqueuePairNow } from '../../lib/matchmaking-queue.js';
 
 /** "Semi-final", "Round 2"…; draw matches carry their label, classic ones derive it from the round. */
+/** The headset's 4s/6s/wickets, or nulls when they cannot be right (boundaries worth more than the score). */
+function battingStats(input: MetaSubmitScoreInput): { fours: number | null; sixes: number | null; wicketsLost: number | null } {
+  const fours = input.fours ?? null;
+  const sixes = input.sixes ?? null;
+  const boundaryRuns = (fours ?? 0) * 4 + (sixes ?? 0) * 6;
+  if (boundaryRuns > input.score) {
+    console.warn(`[meta] dropped 4s/6s for user ${input.userId}: ${boundaryRuns} boundary runs > score ${input.score}`);
+    return { fours: null, sixes: null, wicketsLost: input.wicketsLost ?? null };
+  }
+  return { fours, sixes, wicketsLost: input.wicketsLost ?? null };
+}
+
 function matchRoundLabel(row: Record<string, unknown>): string | null {
   const stored = ((row.result ?? {}) as { roundLabel?: string }).roundLabel;
   if (stored) return stored;
@@ -388,6 +402,141 @@ export class MetaIntegrationService {
     };
   }
 
+  /**
+   * Started innings that stopped sending heartbeats count as 0.
+   * Runs lazily on every headset call that touches these matches; the worker covers round close.
+   */
+  private async expireAbandonedInnings(matchIds: string[]): Promise<void> {
+    if (matchIds.length === 0) return;
+    const stale = await this.pool.query(
+      `SELECT a.match_id, a.user_id
+       FROM innings_attempts a
+       JOIN matches m ON m.id = a.match_id
+       WHERE a.match_id = ANY($1)
+         AND m.status IN ('confirmed', 'in_progress')
+         AND a.last_heartbeat_at < NOW() - ($2::bigint * INTERVAL '1 millisecond')
+         AND NOT EXISTS (SELECT 1 FROM match_innings mi WHERE mi.match_id = a.match_id AND mi.user_id = a.user_id)`,
+      [matchIds, INNINGS_HEARTBEAT_TIMEOUT_MS]
+    );
+    for (const r of stale.rows) {
+      try {
+        await this.submitScore(r.match_id as string, { userId: r.user_id as string, score: 0 }, { source: 'abandoned' });
+      } catch (err) {
+        // A closed round or a race with a real score: the worker or that score already settled it.
+        if (!(err instanceof AppError)) console.error('Abandoned innings could not be recorded:', err);
+      }
+    }
+  }
+
+  /** The batter pressed Play: claims the turn (when batting first) and starts the one allowed attempt. */
+  async startInnings(matchId: string, userId: string) {
+    await this.expireAbandonedInnings([matchId]);
+    const client = await this.pool.connect();
+    let startedAt: Date;
+    let chaseTarget = NO_SCORE;
+    let overs = 1;
+    try {
+      await client.query('BEGIN');
+      const m = (await client.query(`SELECT * FROM matches WHERE id = $1 FOR UPDATE`, [matchId])).rows[0];
+      if (!m) throw new AppError('NOT_FOUND', 'Match not found', 404);
+      if (m.player1_id !== userId && m.player2_id !== userId) {
+        throw new AppError('FORBIDDEN', 'User is not a participant in this match', 403);
+      }
+      if (!['confirmed', 'in_progress'].includes(m.status as string)) {
+        throw new AppError('CONFLICT', 'Match is not currently playable', 409);
+      }
+      await assertMatchSlotPlayable(client, m.time_slot_id, { tournament_id: m.tournament_id, round_number: m.round_number });
+      if (m.tournament_id) {
+        overs = normalizeOvers((await client.query(`SELECT overs FROM tournaments WHERE id = $1`, [m.tournament_id])).rows[0]?.overs);
+      }
+
+      const opponentId = m.player1_id === userId ? m.player2_id : m.player1_id;
+      const innings = await client.query(`SELECT user_id, score FROM match_innings WHERE match_id = $1`, [matchId]);
+      if (innings.rows.some((r) => r.user_id === userId)) {
+        throw new AppError('CONFLICT', 'You have already played your innings in this match', 409);
+      }
+      const attempts = await client.query(
+        `SELECT user_id, last_heartbeat_at > NOW() - ($2::bigint * INTERVAL '1 millisecond') AS fresh
+         FROM innings_attempts WHERE match_id = $1`,
+        [matchId, INNINGS_HEARTBEAT_TIMEOUT_MS]
+      );
+      if (attempts.rows.some((r) => r.user_id === userId)) {
+        throw new AppError('INNINGS_ALREADY_STARTED', 'Your innings has already started — finish it, or it counts as 0', 409);
+      }
+
+      const theirs = innings.rows.find((r) => r.user_id === opponentId);
+      if (theirs) {
+        chaseTarget = chaseTargetFor(Number(theirs.score));
+      } else {
+        const opponentBatting = attempts.rows.some((r) => r.user_id === opponentId && r.fresh);
+        const legacyHold =
+          m.active_player_id === opponentId &&
+          isTurnHoldActive(m.active_player_id, m.active_player_since, Date.now(), turnHoldMsForOvers(overs));
+        if (opponentBatting || legacyHold) {
+          throw new AppError('CONFLICT', 'Your opponent is playing this match right now — wait for their score, then chase it', 409);
+        }
+        await client.query(
+          `UPDATE matches SET active_player_id = $1, active_player_since = NOW(), updated_at = NOW() WHERE id = $2`,
+          [userId, matchId]
+        );
+      }
+
+      startedAt = (
+        await client.query(
+          `INSERT INTO innings_attempts (match_id, user_id) VALUES ($1, $2) RETURNING started_at`,
+          [matchId, userId]
+        )
+      ).rows[0].started_at as Date;
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return {
+      matchId,
+      startedAt: startedAt.toISOString(),
+      amChasing: chaseTarget !== NO_SCORE,
+      chaseTarget,
+      overs,
+      ballsPerInnings: ballsPerInnings(overs),
+      heartbeatIntervalSeconds: INNINGS_HEARTBEAT_INTERVAL_SECONDS,
+      abandonAfterSeconds: INNINGS_HEARTBEAT_TIMEOUT_MS / 1000,
+    };
+  }
+
+  /** Keeps a started innings alive; three minutes without one and it counts as 0. */
+  async heartbeat(matchId: string, userId: string) {
+    await this.expireAbandonedInnings([matchId]);
+    const alive = await this.pool.query(
+      `UPDATE innings_attempts a SET last_heartbeat_at = NOW()
+       WHERE a.match_id = $1 AND a.user_id = $2
+         AND NOT EXISTS (SELECT 1 FROM match_innings mi WHERE mi.match_id = a.match_id AND mi.user_id = a.user_id)
+       RETURNING a.last_heartbeat_at`,
+      [matchId, userId]
+    );
+    if (!alive.rows[0]) {
+      const recorded = await this.pool.query(
+        `SELECT source FROM match_innings WHERE match_id = $1 AND user_id = $2`,
+        [matchId, userId]
+      );
+      if (recorded.rows[0]?.source === 'abandoned') {
+        throw new AppError('INNINGS_ABANDONED', 'No heartbeat for 3 minutes — this innings was counted as 0', 409);
+      }
+      if (recorded.rows[0]) throw new AppError('CONFLICT', 'Your innings is already recorded', 409);
+      throw new AppError('INNINGS_NOT_STARTED', 'Start the innings first', 409);
+    }
+    // Keeps the turn hold fresh too, so a long innings never loses its turn.
+    await this.pool.query(
+      `UPDATE matches SET active_player_since = NOW() WHERE id = $1 AND active_player_id = $2`,
+      [matchId, userId]
+    );
+    const last = alive.rows[0].last_heartbeat_at as Date;
+    return { ok: true, abandonsAt: new Date(last.getTime() + INNINGS_HEARTBEAT_TIMEOUT_MS).toISOString() };
+  }
+
   /** Personalised card for the headset: profile, record and standing in each tournament. No private data. */
   async getPlayerCard(userId: string, timeZone?: string): Promise<PlayerCard> {
     return buildPlayerCard(this.pool, userId, timeZone);
@@ -434,7 +583,18 @@ export class MetaIntegrationService {
     return { hasLiveTournament: tournaments.length > 0, tournaments };
   }
 
-  async getCurrentMatch(userId: string, tournamentId?: string | null): Promise<MetaCurrentMatchResponse> {
+  async getCurrentMatch(
+    userId: string,
+    tournamentId?: string | null,
+    explicitStart = false
+  ): Promise<MetaCurrentMatchResponse> {
+    // Abandoned innings become 0 before anything is read, so the opponent sees the real state.
+    const open = await this.pool.query(
+      `SELECT id FROM matches WHERE (player1_id = $1 OR player2_id = $1) AND status IN ('confirmed', 'in_progress')`,
+      [userId]
+    );
+    await this.expireAbandonedInnings(open.rows.map((r) => r.id as string));
+
     // Before anything is read: a bot opponent bats on the player's first poll,
     // so the answer below already reflects its innings — either as the target
     // to chase, or as a match that has just been decided.
@@ -513,6 +673,15 @@ export class MetaIntegrationService {
       const chaseTarget =
         opponentInnings === null ? NO_SCORE : chaseTargetFor(opponentInnings);
 
+      const attemptRows = await this.pool.query(
+        `SELECT user_id, started_at, last_heartbeat_at,
+                last_heartbeat_at > NOW() - ($2::bigint * INTERVAL '1 millisecond') AS fresh
+         FROM innings_attempts WHERE match_id = $1`,
+        [row.id, INNINGS_HEARTBEAT_TIMEOUT_MS]
+      );
+      const myAttempt = myInnings === null ? attemptRows.rows.find((r) => r.user_id === userId) : undefined;
+      const oppAttempt = opponentInnings === null ? attemptRows.rows.find((r) => r.user_id === opponentId) : undefined;
+
       let amSettingTarget = false;
       let amChasing = false;
       let waitingForOpponent = false;
@@ -533,6 +702,17 @@ export class MetaIntegrationService {
         // The opponent's innings is on the board, so there is no contention
         // left to resolve — this player chases a real number.
         amChasing = true;
+      } else if (oppAttempt?.fresh) {
+        // The opponent pressed Play and is still sending heartbeats.
+        waitingForOpponent = true;
+      } else if (myAttempt || explicitStart) {
+        // Headsets that call /start claim the turn there, never by polling.
+        const legacyHeld =
+          !myAttempt &&
+          row.active_player_id === opponentId &&
+          isTurnHoldActive(row.active_player_id, row.active_player_since, Date.now(), turnHoldMsForOvers(normalizeOvers(row.overs)));
+        if (legacyHeld) waitingForOpponent = true;
+        else amSettingTarget = true;
       } else {
         // Neither has batted, and both may be standing in front of the match
         // right now. Exactly one of them may bat; the other waits and then
@@ -576,6 +756,11 @@ export class MetaIntegrationService {
           myScore: myInnings ?? NO_SCORE,
           opponentScore: opponentInnings ?? NO_SCORE,
           waitingForOpponent,
+          myInningsStartedAt: myAttempt ? (myAttempt.started_at as Date).toISOString() : null,
+          opponentBattingSince: oppAttempt?.fresh ? (oppAttempt.started_at as Date).toISOString() : null,
+          turnFreesAt: oppAttempt?.fresh
+            ? new Date((oppAttempt.last_heartbeat_at as Date).getTime() + INNINGS_HEARTBEAT_TIMEOUT_MS).toISOString()
+            : null,
         },
         // Only a draw match replayed after a tie has a decision to report while still open.
         lastResult: drawTieReplay(row, userId, myInnings, opponentInnings),
@@ -715,8 +900,10 @@ export class MetaIntegrationService {
     });
   }
 
-  async submitScore(matchId: string, input: MetaSubmitScoreInput) {
+  async submitScore(matchId: string, input: MetaSubmitScoreInput, opts: { source?: 'meta' | 'abandoned' } = {}) {
     const { userId, score } = input;
+    const source = opts.source ?? 'meta';
+    const stats = source === 'abandoned' ? { fours: null, sixes: null, wicketsLost: null } : battingStats(input);
 
     // Claim this player's half of the scoreline under a row lock. Two headsets
     // finishing at the same instant used to read the same empty result and both
@@ -798,14 +985,19 @@ export class MetaIntegrationService {
       // with), or when they hold the match. Anyone else is being told to wait,
       // and a score arriving from them is an innings played blind — the exact
       // parallel play this prevents.
-      if (!theirs) {
+      if (!theirs && source !== 'abandoned') {
         const holder = match.active_player_id as string | null;
         const heldSince = match.active_player_since as Date | null;
         const oversRow = match.tournament_id
           ? await client.query(`SELECT overs FROM tournaments WHERE id = $1`, [match.tournament_id])
           : { rows: [] as Array<{ overs: number }> };
         const holdMs = turnHoldMsForOvers(normalizeOvers(oversRow.rows[0]?.overs));
-        const holdStands = isTurnHoldActive(holder, heldSince, Date.now(), holdMs);
+        const opponentBatting = await client.query(
+          `SELECT 1 FROM innings_attempts
+           WHERE match_id = $1 AND user_id = $2 AND last_heartbeat_at > NOW() - ($3::bigint * INTERVAL '1 millisecond')`,
+          [matchId, opponentId, INNINGS_HEARTBEAT_TIMEOUT_MS]
+        );
+        const holdStands = isTurnHoldActive(holder, heldSince, Date.now(), holdMs) || (opponentBatting.rowCount ?? 0) > 0;
         if (holdStands && holder !== userId) {
           throw new AppError(
             'CONFLICT',
@@ -821,8 +1013,9 @@ export class MetaIntegrationService {
       }
 
       await client.query(
-        `INSERT INTO match_innings (match_id, user_id, score, source, balls_faced) VALUES ($1, $2, $3, 'meta', $4)`,
-        [matchId, userId, score, input.ballsFaced ?? null]
+        `INSERT INTO match_innings (match_id, user_id, score, source, balls_faced, fours, sixes, wickets_lost)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [matchId, userId, score, source, input.ballsFaced ?? null, stats.fours, stats.sixes, stats.wicketsLost]
       );
 
       // Matches paired before the setter's innings was recorded still carry an

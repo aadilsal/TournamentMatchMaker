@@ -23,6 +23,12 @@ describe('sign-in links in emails', () => {
     expect(email.html).not.toContain('expires in 30 minutes');
   });
 
+  it('spells the brand PixelPaddle, never "Pixel Paddle"', () => {
+    const email = renderNotificationEmail('round_started', payload, APP, 'tok123')!;
+    expect(email.html).toContain('PixelPaddle');
+    expect(`${email.html}${email.text}`).not.toMatch(/Pixel Paddle/);
+  });
+
   it('never adds sign-in to the password reset email', () => {
     expect(passwordResetEmail({ link: `${APP}/reset-password?token=x` }, APP).html).not.toContain('auto-login');
   });

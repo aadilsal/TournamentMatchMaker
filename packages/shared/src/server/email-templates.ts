@@ -103,7 +103,7 @@ export function renderEmailLayout(
     <table role="presentation" cellpadding="0" cellspacing="0"><tr>
       <td width="38" height="38" align="center" bgcolor="${C.brand}" style="background:${C.brand};border-radius:9px;font:20px/38px ${FONT}">🏏</td>
       <td style="padding-left:12px;font:900 15px/1.2 ${FONT};color:${C.text};letter-spacing:2px">VR CRICKET LEAGUE<br>
-        <span style="font:400 11px/1.6 ${FONT};color:${C.muted};letter-spacing:1px">by Pixel Paddle</span></td>
+        <span style="font:400 11px/1.6 ${FONT};color:${C.muted};letter-spacing:1px">by PixelPaddle</span></td>
     </tr></table>
   </td></tr>
   <tr><td bgcolor="${C.card}" style="background:${C.card};border:1px solid ${C.border};border-top:4px solid ${C.brand};border-radius:16px;padding:30px 28px 26px">
@@ -118,14 +118,14 @@ export function renderEmailLayout(
     You're receiving this because you have a VR Cricket League account.<br>
     <a href="${esc(appUrl)}/profile" style="color:${C.muted}">Manage notifications</a> &nbsp;·&nbsp;
     <a href="${esc(appUrl)}" style="color:${C.muted}">${esc(appUrl.replace(/^https?:\/\//, ''))}</a><br>
-    © ${new Date().getFullYear()} Pixel Paddle
+    © ${new Date().getFullYear()} PixelPaddle
   </td></tr>
 </table>
 </td></tr></table>
 </body></html>`;
 
   const text = [
-    'VR CRICKET LEAGUE by Pixel Paddle',
+    'VR CRICKET LEAGUE by PixelPaddle',
     '',
     l.eyebrow ? l.eyebrow.toUpperCase() : '',
     l.title,
