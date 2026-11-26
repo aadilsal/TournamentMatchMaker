@@ -179,7 +179,8 @@ export class TournamentsService {
 
     const result = await this.pool.query(
       `SELECT t.*,
-              (SELECT COUNT(*)::int FROM tournament_registrations tr WHERE tr.tournament_id = t.id) AS registration_count
+              (SELECT COUNT(*)::int FROM tournament_registrations tr WHERE tr.tournament_id = t.id) AS registration_count,
+              (SELECT username FROM users cu WHERE cu.id = t.champion_id) AS champion_name
        FROM tournaments t
        ${where}
        ORDER BY ${statusRank('t')} DESC, t.start_date DESC, t.id DESC

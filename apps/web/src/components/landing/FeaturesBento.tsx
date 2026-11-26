@@ -9,18 +9,18 @@ const features = [
   },
   {
     icon: Layers,
-    title: 'Super Over format',
-    description: '6 balls. Maximum pressure. The Super Over format distils cricket to its purest, most intense moment — every delivery counts.',
+    title: 'Super Over to T20',
+    description: '1 to 20 overs a side. Every tournament sets its own format, from a six-ball Super Over sprint to a full T20 chase.',
   },
   {
     icon: MapPin,
     title: 'VR cricket arenas',
-    description: 'No headset? No problem. Find a certified VR cricket venue within 50km — we handle the slot booking.',
+    description: 'No headset? No problem. Pick a VR cricket arena near you when you join, and play your matches there.',
   },
   {
     icon: Users,
     title: 'Skill-tier matchmaking',
-    description: 'Matched by tier, not by luck. Fast queue-based pairing gets you into your first over in seconds.',
+    description: 'Every round is a fresh knockout draw, seeded by rating, so the strongest players meet in the final.',
   },
   {
     icon: BarChart3,
@@ -29,8 +29,8 @@ const features = [
   },
   {
     icon: Shield,
-    title: 'Guaranteed slots',
-    description: 'Book your arena time and it\'s yours — no last-minute surprises, no conflicts. Your slot is locked the moment you confirm.',
+    title: 'Play on your schedule',
+    description: 'Each round stays open for hours. Play your innings any time before it closes, at the arena or at home.',
   },
 ];
 

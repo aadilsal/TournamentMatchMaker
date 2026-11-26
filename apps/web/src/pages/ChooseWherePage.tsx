@@ -9,6 +9,7 @@ import { formatDateTime } from '@/lib/format';
 import { JOURNEY_KEYS, useMyTournaments } from '@/lib/journey';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { JourneySteps } from '@/components/journey/JourneySteps';
+import { BackButton } from '@/components/ui/back-button';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { GridSkeleton } from '@/components/ui/skeleton';
@@ -95,6 +96,7 @@ export function ChooseWherePage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-24">
+      <BackButton to="/join" label="Back to tournaments" />
       <JourneySteps current={1} />
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Where will you play {t.name}?</h1>

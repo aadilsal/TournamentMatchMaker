@@ -9,6 +9,7 @@ import { API_URL } from '@/lib/config';
 import { formatDate } from '@/lib/format';
 import { QueryError } from '@/components/ui/query-error';
 import { PlayerStatsView } from '@/components/profile/PlayerStatsView';
+import { BackButton } from '@/components/ui/back-button';
 
 export function PublicProfilePage() {
   const { username } = useParams<{ username: string }>();
@@ -46,6 +47,7 @@ export function PublicProfilePage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
+      <BackButton to="/leaderboards" />
       <div className="flex flex-col sm:flex-row gap-6 items-start">
         <div className="shrink-0">
           {avatarUrl ? (

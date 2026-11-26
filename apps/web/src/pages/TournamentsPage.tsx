@@ -26,6 +26,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { CricketBallLoader } from '@/components/ui/cricket-loader';
 import { Trophy, Calendar, Users, Info } from 'lucide-react';
 import { motion } from 'motion/react';
+import { oversLabel } from '@vr-tournament/shared';
+import { Crown } from 'lucide-react';
 
 type TournamentView = 'active' | 'completed';
 
@@ -188,6 +190,7 @@ export function TournamentsPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {visible.map((t, i) => {
+            if (t.status === 'completed') return <CompletedTournamentCard key={t.id} t={t} i={i} />;
             const { label, variant } = tournamentStatusBadge(t.status);
             return (
               <motion.div
@@ -264,5 +267,51 @@ export function TournamentsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/** A finished tournament: who won, the format, the field size and when it ran. */
+function CompletedTournamentCard({ t, i }: { t: Tournament; i: number }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, delay: i * 0.05 }}>
+      <article className="group flex h-full flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] transition-colors hover:border-amber-400/40">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-gradient-to-r from-amber-500/15 via-amber-500/5 to-transparent px-5 py-3">
+          <span className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
+            <Trophy className="h-4 w-4" aria-hidden /> Finished
+          </span>
+          <span className="text-xs text-[var(--color-muted-foreground)]">{formatDate(t.endDate)}</span>
+        </div>
+        <div className="flex flex-1 flex-col gap-4 p-5">
+          <h3 className="text-lg font-semibold leading-snug">{t.name}</h3>
+          {t.championName ? (
+            <Link
+              to={`/players/${encodeURIComponent(t.championName)}`}
+              title="See the champion's profile"
+              className="flex items-center gap-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2.5 transition-colors hover:bg-amber-400/15"
+            >
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-400/20 text-amber-300"><Crown className="h-5 w-5" aria-hidden /></span>
+              <span className="min-w-0">
+                <span className="block text-[11px] font-semibold uppercase tracking-wider text-amber-300">Champion</span>
+                <span className="block truncate font-semibold">{t.championName}</span>
+              </span>
+            </Link>
+          ) : (
+            <p className="rounded-lg border border-[var(--color-border)] px-3 py-2.5 text-sm text-[var(--color-muted-foreground)]">No champion: the final was not played.</p>
+          )}
+          <div className="flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full border border-[var(--color-border)] px-2.5 py-1">{oversLabel(t.overs)}</span>
+            <span className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1"><Users className="h-3 w-3" aria-hidden />{t.registrationCount ?? 0} {(t.registrationCount ?? 0) === 1 ? 'player' : 'players'}</span>
+            <span className="flex items-center gap-1 rounded-full border border-[var(--color-border)] px-2.5 py-1"><Calendar className="h-3 w-3" aria-hidden />{formatDate(t.startDate)} – {formatDate(t.endDate)}</span>
+          </div>
+          <Link
+            to={`/tournaments/${t.id}`}
+            title="See every round, result and the tournament stats"
+            className={buttonVariants({ variant: 'outline', className: 'mt-auto w-full' })}
+          >
+            View results
+          </Link>
+        </div>
+      </article>
+    </motion.div>
   );
 }

@@ -14,6 +14,7 @@ import { getUserErrorMessage } from '@/lib/user-messages';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
+import { BackButton } from '@/components/ui/back-button';
 import { NormalMatchList } from '@/components/tournament/NormalMatchList';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { BuybackButton } from '@/components/tournament/BuybackButton';
@@ -138,6 +139,7 @@ export function TournamentDetailPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      <BackButton to="/tournaments" label="Back to tournaments" />
       <div>
         <h1 className="text-3xl font-bold">{tournament.name}</h1>
         <p className="text-[var(--color-muted-foreground)] mt-1">

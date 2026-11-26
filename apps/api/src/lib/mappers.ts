@@ -158,6 +158,7 @@ interface TournamentRow {
   champion_id?: string | null;
   created_at: Date;
   registration_count?: number;
+  champion_name?: string | null;
 }
 
 interface RegistrationRow {
@@ -227,6 +228,7 @@ export function mapTournament(row: TournamentRow): Tournament {
     roundDurationMinutes: row.round_duration_minutes ?? 180,
     initialPlayerCount: row.initial_player_count ?? null,
     registrationCount: row.registration_count,
+    championName: row.champion_name ?? null,
     playFormat: row.play_format === 'draw' ? 'draw' : 'classic',
     overs: normalizeOvers(row.overs),
     championId: row.champion_id ?? null,

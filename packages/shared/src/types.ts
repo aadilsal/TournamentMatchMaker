@@ -164,6 +164,8 @@ export interface Tournament {
   roundDurationMinutes: number;
   initialPlayerCount: number | null;
   registrationCount?: number;
+  /** Winner's username once finished (list view). */
+  championName?: string | null;
   /** 'draw': new format (draw per round, no slots); 'classic': queue + slots. */
   playFormat: 'classic' | 'draw';
   /** Overs per innings, 1–20; the same for every match in every round. */

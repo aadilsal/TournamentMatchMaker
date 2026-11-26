@@ -30,6 +30,7 @@ import { CountryCityFields } from '@/components/location/CountryCityFields';
 import { fetchLocationFromCoords } from '@/lib/location-api';
 import { sanitizeReturnTo } from '@/lib/return-to';
 import { GuestOnly } from '@/components/auth/GuestOnly';
+import { AuthShowcase } from '@/components/auth/AuthShowcase';
 
 /* ─────────────────────────────────────────────
    Animated cricket delivery banner
@@ -511,7 +512,10 @@ function RegisterForm() {
     shouldShowFieldError(field, form, touched, schemaErrors, availabilityErrors);
 
   return (
-    <div className="max-w-lg mx-auto">
+    <div className="min-h-[calc(100dvh-4rem)] flex -my-6 sm:-my-8 -mx-4 sm:-mx-6">
+      <AuthShowcase />
+      <div className="w-full lg:w-1/2 flex justify-center px-4 py-8 sm:px-6 sm:py-12 bg-[var(--color-background)]">
+    <div className="w-full max-w-lg">
       <Card className="border-[var(--color-border)] shadow-lg shadow-red-950/20 overflow-hidden">
         <CricketDeliveryBanner />
         <CardHeader className="space-y-1">
@@ -521,7 +525,7 @@ function RegisterForm() {
           </div>
           <CardTitle className="text-2xl">Create your account</CardTitle>
           <CardDescription>
-            Register to join tournaments and book VR arena slots.
+            Join tournaments, play at an arena or from home, and climb the leaderboards.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -837,6 +841,8 @@ function RegisterForm() {
           </p>
         </CardContent>
       </Card>
+    </div>
+      </div>
     </div>
   );
 }

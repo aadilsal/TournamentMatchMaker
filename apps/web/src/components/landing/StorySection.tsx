@@ -10,7 +10,7 @@ const chapters = [
     label: 'Discover',
     title: 'Find your ground',
     description:
-      'PostGIS-powered geo search finds certified VR cricket venues within 50km. Filter by city, check live capacity, and pick your arena before slots fill up.',
+      'Pick a tournament, then choose where you play: a VR cricket arena near you, or Home on your own Meta Quest.',
     accent: 'from-red-600/50 via-red-900/30 to-transparent',
     glow: 'shadow-red-500/20',
     visual: 'venues' as const,
@@ -19,10 +19,10 @@ const chapters = [
     id: 'book',
     step: '02',
     icon: Calendar,
-    label: 'Book',
+    label: 'Play',
     title: 'Reserve your crease',
     description:
-      'Pick a match session and lock it in instantly. PostgreSQL row locks and Redis slot guards guarantee your slot — zero conflicts, even at tournament launch.',
+      'When the round starts you are drawn against one opponent. Play your innings any time before the round closes.',
     accent: 'from-red-500/40 via-red-950/30 to-transparent',
     glow: 'shadow-red-500/20',
     visual: 'slots' as const,
@@ -34,7 +34,7 @@ const chapters = [
     label: 'Match',
     title: 'Enter the over',
     description:
-      'Skill-tier matchmaking pairs you with the right opponent. Both on Meta Quest? Play remote. Need a venue? We auto-book the nearest VR cricket arena.',
+      'Bat first to set the target, or chase it. Win to go through to the next round; the last player standing is champion.',
     accent: 'from-white/10 via-red-900/30 to-transparent',
     glow: 'shadow-red-500/20',
     visual: 'queue' as const,

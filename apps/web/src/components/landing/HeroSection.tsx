@@ -69,9 +69,9 @@ export function HeroSection() {
             transition={{ duration: 0.7, delay: 0.25 }}
             className="mt-6 text-lg text-[var(--color-muted-foreground)] leading-relaxed"
           >
-            The first VR cricket league. Register, book your arena
-            slot, and compete in Super Over format — with a Meta Quest at home
-            or at a VR venue near you.
+            The first VR cricket league. Join a tournament, play each round
+            when it suits you, and chase the target — from a Super Over to T20,
+            on your Meta Quest at home or at a VR arena near you.
           </motion.p>
 
           <motion.div
@@ -96,7 +96,7 @@ export function HeroSection() {
             transition={{ delay: 0.75, duration: 1 }}
             className="mt-10 flex flex-wrap gap-6 text-sm text-[var(--color-muted-foreground)]"
           >
-            {['Super Over format', 'VR arena or Meta Quest', 'Skill-tier matchmaking'].map((item) => (
+            {['Super Over to T20', 'VR arena or Meta Quest', 'Knockout draw'].map((item) => (
               <span key={item} className="flex items-center gap-2">
                 <span className="h-1 w-1 rounded-full bg-[var(--color-primary)]" />
                 {item}
@@ -114,10 +114,10 @@ export function HeroSection() {
         className="absolute right-6 top-1/4 hidden lg:flex flex-col gap-2 z-20"
       >
         <span className="rounded-lg border border-[var(--color-primary)]/35 bg-[var(--color-card)]/75 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-[var(--color-primary)]">
-          🏏 Super Over
+          🏏 1–20 overs
         </span>
         <span className="rounded-lg border border-white/25 bg-[var(--color-card)]/75 backdrop-blur-md px-3 py-1.5 text-xs font-semibold text-white">
-          6 balls only
+          Knockout draw
         </span>
       </motion.div>
 
