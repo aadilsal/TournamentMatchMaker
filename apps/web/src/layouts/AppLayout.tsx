@@ -11,6 +11,8 @@ import { getAccessToken, setAccessToken, apiGet, apiPost } from '@/lib/api';
 import { API_URL } from '@/lib/config';
 import { disconnectSocket } from '@/hooks/useSocket';
 import { useAuthUser } from '@/hooks/useAuthUser';
+import { useLiveStatsSync } from '@/hooks/useLiveStatsSync';
+import { UnlockCelebration } from '@/components/achievements/UnlockCelebration';
 import { cn } from '@/lib/utils';
 
 type NavItem = { href: string; label: string; icon: typeof Trophy };
@@ -105,6 +107,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const queryClient = useQueryClient();
   const isLoggedIn = !!getAccessToken();
+  useLiveStatsSync(isLoggedIn);
 
   // "Live now" chip when any tournament is being played.
   const live = useQuery({
@@ -195,6 +198,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       >
         {children}
       </motion.main>
+      <UnlockCelebration enabled={isLoggedIn} />
 
       <footer className="border-t border-white/[0.06] bg-[var(--color-card)]/40 pb-20 md:pb-0">
         <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-[1.4fr_1fr_1fr_1fr]">

@@ -40,6 +40,8 @@ export interface LeaderboardEntry {
   /** Wickets board only: the totals behind the rate. */
   wickets?: number;
   overs?: number;
+  /** The player's shown title, when they have one. */
+  title?: string | null;
 }
 
 export interface BattingLeaderboards {

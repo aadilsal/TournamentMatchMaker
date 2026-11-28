@@ -785,3 +785,117 @@ describe('phone match alerts (web push subscriptions)', () => {
     expect((await request(app).get('/api/v1/push/public-key')).body.data).toHaveProperty('publicKey');
   });
 });
+
+describe('ball by ball', () => {
+  const start = (matchId: string, userId: string) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/start`).set(meta).send({ userId });
+  const balls = (matchId: string, userId: string, list: Array<Record<string, unknown>>) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/balls`).set(meta).send({ userId, balls: list });
+  const ball = (seq: number, runs: number, totalRuns: number, wicketsLost = 0, wicket = false) => ({ seq, runs, totalRuns, wicketsLost, wicket });
+
+  it('needs a started innings', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    const res = await balls(matchId, a, [ball(1, 4, 4)]);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('INNINGS_NOT_STARTED');
+  });
+
+  it('stores each ball once, survives resends, and shows fans the live score', async () => {
+    const [a, b] = [await user(), await user()];
+    const { tid, matchId } = await liveDrawMatch(a, b);
+    expect((await start(matchId, a)).status).toBe(200);
+
+    const first = await balls(matchId, a, [ball(1, 1, 1), ball(2, 4, 5)]);
+    expect(first.status).toBe(200);
+    expect(first.body.data).toMatchObject({ accepted: 2, duplicates: 0, legalBalls: 2, totalRuns: 5, needed: null });
+    expect(first.body.data.abandonsAt).toBeTruthy();
+
+    // A retry after a dropped connection resends ball 2 with ball 3.
+    const resent = await balls(matchId, a, [ball(2, 4, 5), ball(3, 6, 11, 1, true)]);
+    expect(resent.body.data).toMatchObject({ accepted: 1, duplicates: 1, legalBalls: 3, totalRuns: 11, wicketsLost: 1 });
+
+    const view = (await request(app).get(`/api/v1/live/matches/${matchId}`)).body.data;
+    expect(view.status).toBe('live');
+    expect(view.innings[0]).toMatchObject({ userId: a, state: 'batting', runs: 11, wickets: 1, overs: '0.3' });
+    expect(view.innings[0].balls.map((x: { runs: number }) => x.runs)).toEqual([1, 4, 6]);
+    expect(view.innings[1]).toMatchObject({ userId: b, state: 'waiting' });
+
+    const live = (await request(app).get(`/api/v1/tournaments/${tid}/live`)).body.data.matches[0];
+    const batter = [live.player1, live.player2].find((s: { batting: boolean }) => s.batting);
+    expect(batter.live).toEqual({ runs: 11, wickets: 1, overs: '0.3' });
+  });
+
+  it('refuses balls beyond the overs and after the innings is recorded', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await start(matchId, a);
+    expect((await balls(matchId, a, [ball(7, 1, 1)])).status).toBe(400);
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: a, score: 10 });
+    expect((await balls(matchId, a, [ball(1, 1, 1)])).status).toBe(409);
+  });
+
+  it('tells the chaser what they need after every ball', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await start(matchId, a);
+    await request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId: a, score: 10 });
+    await start(matchId, b);
+    const res = await balls(matchId, b, [ball(1, 4, 4)]);
+    expect(res.body.data.needed).toEqual({ runs: 7, balls: 5 });
+    const view = (await request(app).get(`/api/v1/live/matches/${matchId}`)).body.data;
+    expect(view.innings[1]).toMatchObject({ userId: b, state: 'batting', target: 11 });
+    expect(view.headline).toContain('needs 7 off 5');
+  });
+});
+
+describe('titles and badges', () => {
+  const score = (matchId: string, userId: string, body: Record<string, unknown>) =>
+    request(app).post(`/api/v1/integrations/meta/matches/${matchId}/scores`).set(meta).send({ userId, ...body });
+
+  it('awards badges and a title from a win, alerts new players, and lets them pick their title', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    expect((await score(matchId, a, { score: 90, fours: 3, sixes: 12, wicketsLost: 0 })).status).toBe(200);
+    expect((await score(matchId, b, { score: 10 })).status).toBe(200);
+    await settle();
+
+    const res = await request(app).get('/api/v1/players/me/achievements').set(auth(a));
+    expect(res.status).toBe(200);
+    const by = (code: string) => res.body.data.achievements.find((x: { code: string }) => x.code === code);
+    for (const code of ['first_match', 'first_win', 'first_six', 'six_10', 'debut', 'half_century', 'six_shower', 'clean_sheet']) {
+      expect(by(code).earned).toBe(true);
+    }
+    expect(by('six_50')).toMatchObject({ earned: false, progress: 12 });
+    expect(res.body.data.displayTitle).toBe('Six Hitter');
+
+    // A new sign-up hears about their first unlocks.
+    expect((await queued(a, 'achievement_unlocked')).length).toBeGreaterThan(0);
+
+    expect((await request(app).put('/api/v1/players/me/title').set(auth(a)).send({ code: 'six_50' })).status).toBe(400);
+    expect((await request(app).put('/api/v1/players/me/title').set(auth(a)).send({ code: 'six_10' })).body.data.displayTitle).toBe('Six Hitter');
+
+    const boards = (await request(app).get('/api/v1/leaderboards')).body.data;
+    expect(boards.batting.mostSixes.find((e: { userId: string }) => e.userId === a).title).toBe('Six Hitter');
+    const pub = (await request(app).get(`/api/v1/players/drawer${Number((await pool.query(`SELECT username FROM users WHERE id = $1`, [a])).rows[0].username.replace('drawer', ''))}/achievements`));
+    expect(pub.status).toBe(200);
+  });
+
+  it('backfills badges earned before the first sync without alerting', async () => {
+    const [a, b] = [await user(), await user()];
+    const { matchId } = await liveDrawMatch(a, b);
+    await current(a);
+    await score(matchId, a, { score: 20, sixes: 1 });
+    await score(matchId, b, { score: 5 });
+    await settle();
+    // As if the player existed before badges shipped.
+    await pool.query(`DELETE FROM user_achievements WHERE user_id = $1`, [a]);
+    await pool.query(`UPDATE users SET achievements_synced_at = NULL WHERE id = $1`, [a]);
+    const before = (await queued(a, 'achievement_unlocked')).length;
+    const res = await request(app).get('/api/v1/players/me/achievements').set(auth(a));
+    expect(res.body.data.earnedCount).toBeGreaterThan(0);
+    await settle();
+    expect((await queued(a, 'achievement_unlocked')).length).toBe(before);
+  });
+});

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import {
   INNINGS_HEARTBEAT_TIMEOUT_MS,
+  oversText,
   battingLeaderboards,
   battingTotals,
   type InningsRow,
@@ -95,6 +96,20 @@ export class TournamentViewService {
       return r ? Number(r.score) : null;
     };
     const isBatting = (matchId: string, userId: string) => batting.some((b) => b.match_id === matchId && b.user_id === userId);
+    // Latest ball of each innings in progress.
+    const lastBalls = batting.length
+      ? (
+          await this.pool.query(
+            `SELECT DISTINCT ON (match_id, user_id) match_id, user_id, seq, total_runs, wickets_lost
+             FROM innings_balls WHERE match_id = ANY($1) ORDER BY match_id, user_id, seq DESC`,
+            [batting.map((b) => b.match_id)]
+          )
+        ).rows
+      : [];
+    const liveOf = (matchId: string, userId: string, bat: boolean) => {
+      const r = bat ? lastBalls.find((b) => b.match_id === matchId && b.user_id === userId) : undefined;
+      return r ? { runs: Number(r.total_runs), wickets: Number(r.wickets_lost), overs: oversText(Number(r.seq)) } : null;
+    };
 
     let label = `Round ${roundNumber}`;
     const live: LiveMatch[] = matches.rows.map((m) => {
@@ -119,8 +134,8 @@ export class TournamentViewService {
       return {
         id: m.id as string,
         state,
-        player1: { username: m.p1 as string, isBot: m.b1 === true, score: s1, batting: bat1 },
-        player2: { username: m.p2 as string, isBot: m.b2 === true, score: s2, batting: bat2 },
+        player1: { username: m.p1 as string, isBot: m.b1 === true, score: s1, batting: bat1, live: liveOf(m.id, m.player1_id, bat1) },
+        player2: { username: m.p2 as string, isBot: m.b2 === true, score: s2, batting: bat2, live: liveOf(m.id, m.player2_id, bat2) },
         target: !decided && firstScore != null ? firstScore + 1 : null,
         winner: winnerId === m.player1_id ? (m.p1 as string) : winnerId === m.player2_id ? (m.p2 as string) : null,
         tieReplay: result.tiedFirstBatterId != null,

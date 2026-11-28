@@ -11,6 +11,7 @@ import { publicRateLimit, scopedRateLimit } from './middleware/rateLimit.js';
 import { createAuthRouter } from './modules/auth/auth.routes.js';
 import { createPlayersRouter } from './modules/players/players.routes.js';
 import { createLeaderboardsRouter } from './modules/players/leaderboards.routes.js';
+import { createLiveRouter } from './modules/live/live.routes.js';
 import { createPushRouter } from './modules/players/push.routes.js';
 import { createVenuesRouter } from './modules/venues/venues.routes.js';
 import { createSlotsRouter } from './modules/slots/slots.routes.js';
@@ -71,6 +72,7 @@ export function createApp(pool: Pool, redis: RedisClient, env: Env): Express {
   v1.use(publicRateLimit(env));
 
   v1.use('/geo', createGeoRouter());
+  v1.use('/live', createLiveRouter(pool));
   v1.use('/auth', createAuthRouter(pool, redis, env));
   v1.use('/players', scopedRateLimit(env, 'players'), createPlayersRouter(pool, env));
   v1.use('/leaderboards', scopedRateLimit(env, 'players'), createLeaderboardsRouter(pool));

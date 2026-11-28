@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User } from '@vr-tournament/shared';
+import type { PlayerAchievements, User } from '@vr-tournament/shared';
+import { AchievementsView } from '@/components/achievements/AchievementsView';
+import { TitleByName } from '@/components/achievements/BadgeArt';
 import { apiGet, apiPatch, getAccessToken } from '@/lib/api';
 import { prepareAvatarUpload } from '@/lib/avatar-upload';
 import { getUserErrorMessage } from '@/lib/user-messages';
@@ -36,7 +38,13 @@ const VR_DEVICES = [
 export function ProfilePage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<'stats' | 'edit'>('stats');
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState<'stats' | 'badges' | 'edit'>(params.get('tab') === 'badges' ? 'badges' : 'stats');
+  const achievements = useQuery({
+    queryKey: ['achievements', 'me'],
+    queryFn: () => apiGet<PlayerAchievements>('/players/me/achievements'),
+    enabled: !!getAccessToken(),
+  });
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     username: '',
@@ -120,6 +128,7 @@ export function ProfilePage() {
         )}
         <div className="min-w-0 flex-1 space-y-2">
           <h1 className="truncate text-3xl font-bold">{profile.username}</h1>
+          <TitleByName name={achievements.data?.displayTitle} size="md" />
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-[var(--color-muted-foreground)]">
             {profile.city && (
               <span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[profile.city, profile.country].filter(Boolean).join(', ')}</span>
@@ -137,12 +146,23 @@ export function ProfilePage() {
       </motion.div>
 
       <Tabs
-        tabs={[{ id: 'stats', label: 'My stats' }, { id: 'edit', label: 'Edit profile' }]}
+        tabs={[
+          { id: 'stats', label: 'My stats' },
+          { id: 'badges', label: achievements.data ? `Badges (${achievements.data.earnedCount})` : 'Badges' },
+          { id: 'edit', label: 'Edit profile' },
+        ]}
         active={tab}
-        onChange={(t) => setTab(t as 'stats' | 'edit')}
+        onChange={(t) => setTab(t as 'stats' | 'badges' | 'edit')}
       />
 
       {tab === 'stats' && <PlayerStatsView username={profile.username} showTier />}
+
+      {tab === 'badges' &&
+        (achievements.data ? (
+          <AchievementsView data={achievements.data} editable />
+        ) : (
+          <p className="text-sm text-[var(--color-muted-foreground)]">Loading your badges…</p>
+        ))}
 
       {tab === 'edit' && (
         <div className="grid gap-5 lg:grid-cols-3">

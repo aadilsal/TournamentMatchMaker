@@ -9,6 +9,8 @@ import type {
   MetaSoloTargetInput,
   MetaSoloTargetState,
   MetaSubmitScoreInput,
+  MetaBallsInput,
+  LiveBallEvent,
 } from '@vr-tournament/shared';
 import {
   DRAW_PHASE,
@@ -17,9 +19,11 @@ import {
   MATCH_RESULT_VISIBILITY_MS,
   NO_SCORE,
   QUEUE_MEMBER,
+  ballLabel,
   ballsPerInnings,
   chaseTargetFor,
   generateBotInnings,
+  neededToWin,
   isSlotEnded,
   knockoutRoundLabel,
   isSlotStartPast,
@@ -39,6 +43,9 @@ import { AppError } from '../../lib/response.js';
 import { applyMatchOutcome, assertMatchSlotPlayable } from '../../lib/match-outcome.js';
 import { requeuePlayer } from '../../lib/requeue-player.js';
 import { enqueueCloseRoundNow, enqueuePairNow } from '../../lib/matchmaking-queue.js';
+import { emitMatchUpdated } from '../../socket/sync-events.js';
+import { emitLive } from '../../socket/emitters.js';
+import { syncAchievementsQuietly } from '../../lib/achievements.js';
 
 /** "Semi-final", "Round 2"…; draw matches carry their label, classic ones derive it from the round. */
 /** The headset's 4s/6s/wickets, or nulls when they cannot be right (boundaries worth more than the score). */
@@ -435,6 +442,8 @@ export class MetaIntegrationService {
     let startedAt: Date;
     let chaseTarget = NO_SCORE;
     let overs = 1;
+    let players: string[] = [];
+    let tournamentId: string | null = null;
     try {
       await client.query('BEGIN');
       const m = (await client.query(`SELECT * FROM matches WHERE id = $1 FOR UPDATE`, [matchId])).rows[0];
@@ -445,6 +454,8 @@ export class MetaIntegrationService {
       if (!['confirmed', 'in_progress'].includes(m.status as string)) {
         throw new AppError('CONFLICT', 'Match is not currently playable', 409);
       }
+      players = [m.player1_id, m.player2_id];
+      tournamentId = m.tournament_id ?? null;
       await assertMatchSlotPlayable(client, m.time_slot_id, { tournament_id: m.tournament_id, round_number: m.round_number });
       if (m.tournament_id) {
         overs = normalizeOvers((await client.query(`SELECT overs FROM tournaments WHERE id = $1`, [m.tournament_id])).rows[0]?.overs);
@@ -495,6 +506,15 @@ export class MetaIntegrationService {
       client.release();
     }
 
+    // The other player's dashboard switches to "batting now" straight away.
+    emitMatchUpdated(players, { matchId, status: 'in_progress', tournamentId });
+    emitLive([`match:${matchId}`, tournamentId ? `tournament:${tournamentId}` : ''], 'live:innings', {
+      matchId,
+      tournamentId,
+      batterId: userId,
+      state: 'batting',
+    });
+
     return {
       matchId,
       startedAt: startedAt.toISOString(),
@@ -535,6 +555,85 @@ export class MetaIntegrationService {
     );
     const last = alive.rows[0].last_heartbeat_at as Date;
     return { ok: true, abandonsAt: new Date(last.getTime() + INNINGS_HEARTBEAT_TIMEOUT_MS).toISOString() };
+  }
+
+  /** Balls from the headset while batting: stored once each, pushed to fans, and counted as a heartbeat. */
+  async recordBalls(matchId: string, input: MetaBallsInput) {
+    const { userId } = input;
+    const beat = await this.heartbeat(matchId, userId);
+    const m = (
+      await this.pool.query(
+        `SELECT m.player1_id, m.player2_id, m.tournament_id, t.overs, u.username
+         FROM matches m LEFT JOIN tournaments t ON t.id = m.tournament_id JOIN users u ON u.id = $2
+         WHERE m.id = $1`,
+        [matchId, userId]
+      )
+    ).rows[0];
+    const perInnings = ballsPerInnings(normalizeOvers(m?.overs));
+    const balls = [...input.balls].sort((a, b) => a.seq - b.seq);
+    if (balls.some((b) => b.seq > perInnings)) {
+      throw new AppError('VALIDATION_ERROR', `This match has ${perInnings} balls per innings`, 400);
+    }
+
+    const inserted = await this.pool.query(
+      `INSERT INTO innings_balls (match_id, user_id, seq, runs, is_wicket, total_runs, wickets_lost)
+       SELECT $1, $2, b.seq, b.runs, b.wicket, b.total_runs, b.wickets_lost
+       FROM unnest($3::smallint[], $4::smallint[], $5::boolean[], $6::smallint[], $7::smallint[])
+            AS b(seq, runs, wicket, total_runs, wickets_lost)
+       ON CONFLICT (match_id, user_id, seq) DO NOTHING
+       RETURNING seq, runs, is_wicket, total_runs, wickets_lost, created_at`,
+      [
+        matchId,
+        userId,
+        balls.map((b) => b.seq),
+        balls.map((b) => b.runs),
+        balls.map((b) => b.wicket ?? false),
+        balls.map((b) => b.totalRuns),
+        balls.map((b) => b.wicketsLost),
+      ]
+    );
+
+    const opponentId = m.player1_id === userId ? m.player2_id : m.player1_id;
+    const theirs = (await this.pool.query(`SELECT score FROM match_innings WHERE match_id = $1 AND user_id = $2`, [matchId, opponentId])).rows[0];
+    const target = theirs ? chaseTargetFor(Number(theirs.score)) : null;
+    const last = (
+      await this.pool.query(
+        `SELECT seq, total_runs, wickets_lost FROM innings_balls WHERE match_id = $1 AND user_id = $2 ORDER BY seq DESC LIMIT 1`,
+        [matchId, userId]
+      )
+    ).rows[0];
+
+    const rooms = [`match:${matchId}`, m.tournament_id ? `tournament:${m.tournament_id}` : ''];
+    for (const r of inserted.rows.sort((a, b) => Number(a.seq) - Number(b.seq))) {
+      const event: LiveBallEvent = {
+        matchId,
+        tournamentId: m.tournament_id ?? null,
+        batterId: userId,
+        batter: m.username as string,
+        ball: {
+          seq: Number(r.seq),
+          label: ballLabel(Number(r.seq)),
+          runs: Number(r.runs),
+          wicket: r.is_wicket === true,
+          totalRuns: Number(r.total_runs),
+          wicketsLost: Number(r.wickets_lost),
+          at: (r.created_at as Date).toISOString(),
+        },
+        needed: neededToWin(target, Number(r.total_runs), Number(r.seq), perInnings),
+      };
+      emitLive(rooms, 'live:ball', event);
+    }
+
+    const accepted = inserted.rowCount ?? 0;
+    return {
+      accepted,
+      duplicates: balls.length - accepted,
+      legalBalls: Number(last?.seq ?? 0),
+      totalRuns: Number(last?.total_runs ?? 0),
+      wicketsLost: Number(last?.wickets_lost ?? 0),
+      needed: neededToWin(target, Number(last?.total_runs ?? 0), Number(last?.seq ?? 0), perInnings),
+      abandonsAt: beat.abandonsAt,
+    };
   }
 
   /** Personalised card for the headset: profile, record and standing in each tournament. No private data. */
@@ -1071,6 +1170,20 @@ export class MetaIntegrationService {
       client.release();
     }
 
+    emitLive([`match:${matchId}`, match.tournament_id ? `tournament:${match.tournament_id}` : ''], 'live:innings', {
+      matchId,
+      tournamentId: match.tournament_id ?? null,
+      batterId: userId,
+      state: 'done',
+    });
+    // The final score is official; a different ball-by-ball total is logged for review.
+    const lastBall = (
+      await this.pool.query(`SELECT total_runs FROM innings_balls WHERE match_id = $1 AND user_id = $2 ORDER BY seq DESC LIMIT 1`, [matchId, userId])
+    ).rows[0];
+    if (lastBall && Number(lastBall.total_runs) !== score) {
+      console.warn(`[balls] total mismatch match=${matchId} user=${userId} balls=${lastBall.total_runs} final=${score}`);
+    }
+
     const p1 = updated.player1Score;
     const p2 = updated.player2Score;
 
@@ -1084,6 +1197,10 @@ export class MetaIntegrationService {
       if (!bothInningsIn && match.phase === DRAW_PHASE && this.env) {
         await notifyOpponentPlayed(this.pool, this.env, matchId, userId, score);
       }
+      // 4s, 6s and runs from this innings can unlock titles and badges straight away.
+      await syncAchievementsQuietly(this.pool, [userId], this.env);
+      // First innings in: both dashboards refresh now, not on the next poll.
+      emitMatchUpdated([match.player1_id, match.player2_id], { matchId, status: 'in_progress', tournamentId: match.tournament_id });
       const full = await this.pool.query(`${MATCH_SELECT} WHERE m.id = $1`, [matchId]);
       return toMetaMatchResponse(full.rows[0], userId);
     }

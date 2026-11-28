@@ -55,6 +55,10 @@ const MIGRATION_MARKERS = {
   '1738000000021_tournament-overs': { column: { table: 'tournaments', name: 'overs' } },
   '1738000000022_innings-stats-and-attempts': { table: 'innings_attempts' },
   '1738000000023_push-subscriptions': { table: 'push_subscriptions' },
+  // Default changes only; safe to re-run.
+  '1738000000024_rating-start-300': { dataOnly: true },
+  '1738000000025_innings-balls': { table: 'innings_balls' },
+  '1738000000026_achievements': { table: 'user_achievements' },
 };
 
 async function tableExists(client, table) {

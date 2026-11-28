@@ -14,6 +14,7 @@ import { createApp } from './app.js';
 import { socketAuth } from './socket/auth.middleware.js';
 import { registerSocketHandlers } from './socket/handlers.js';
 import { setIo } from './socket/emitters.js';
+import { registerLiveNamespace } from './socket/live.js';
 import { subscribeSocketBridge } from './socket/bridge.js';
 
 const env = loadEnv();
@@ -37,6 +38,7 @@ io.adapter(createAdapter(pubClient, subClient));
 io.use(socketAuth(env));
 setIo(io);
 registerSocketHandlers(io, pool, redis, env);
+registerLiveNamespace(io);
 subscribeSocketBridge(bridgeSub, io);
 
 httpServer.listen(env.PORT, () => {

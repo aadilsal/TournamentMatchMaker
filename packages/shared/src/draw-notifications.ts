@@ -85,13 +85,27 @@ export function drawWonNotice(r: {
   walkover: boolean;
   isFinal: boolean;
   nextDrawAt: string | Date | null;
+  points?: PointsChange | null;
 }): DrawNotice {
   const how = r.walkover
     ? `${r.opponent} didn't play in time`
     : `You beat ${r.opponent} ${r.myScore}–${r.opponentScore}`;
-  if (r.isFinal) return { title: `You won ${r.tournamentName}! 🏆`, message: `${how} in the Final. You're the champion of ${r.tournamentName}!` };
+  const pts = pointsLine(r.points);
+  if (r.isFinal) return { title: `You won ${r.tournamentName}! 🏆`, message: `${how} in the Final. You're the champion of ${r.tournamentName}!${pts}` };
   const next = r.nextDrawAt ? ` The next draw is in ${timeLeft(r.nextDrawAt)}.` : '';
-  return { title: `You're through! — ${r.tournamentName}`, message: `${how} in your ${r.roundLabel}. You're through to the next round.${next}` };
+  return { title: `You're through! — ${r.tournamentName}`, message: `${how} in your ${r.roundLabel}. You're through to the next round.${pts}${next}` };
+}
+
+/** Rating change after a result. */
+export interface PointsChange {
+  change: number;
+  ratingPoints: number;
+}
+
+/** " +30 points (330 total)." — empty when the result was not rated (e.g. against a bot). */
+function pointsLine(p: PointsChange | null | undefined): string {
+  if (!p) return '';
+  return ` ${p.change >= 0 ? '+' : '−'}${Math.abs(p.change)} points (${p.ratingPoints} total).`;
 }
 
 export function drawLostNotice(r: {
@@ -102,6 +116,7 @@ export function drawLostNotice(r: {
   opponentScore: number | null;
   walkover: boolean;
   buyback: { priceCents: number; until: string | Date } | null;
+  points?: PointsChange | null;
 }): DrawNotice {
   const how = r.walkover
     ? `You didn't play your ${r.roundLabel} in time`
@@ -109,7 +124,7 @@ export function drawLostNotice(r: {
   const buyback = r.buyback
     ? ` You can buy back in for ${money(r.buyback.priceCents)} in the next ${timeLeft(r.buyback.until)}.`
     : ' Thanks for playing!';
-  return { title: `You're out of ${r.tournamentName}`, message: `${how}, so you're out of ${r.tournamentName}.${buyback}` };
+  return { title: `You're out of ${r.tournamentName}`, message: `${how}, so you're out of ${r.tournamentName}.${pointsLine(r.points)}${buyback}` };
 }
 
 export function buybackCompletedNotice(r: { tournamentName: string }): DrawNotice {

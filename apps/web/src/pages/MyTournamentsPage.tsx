@@ -1,7 +1,8 @@
 import { Link, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { BuybackOption, PlayerCardTournament, PlayerDashboard, Tournament } from '@vr-tournament/shared';
-import { LiveNow, NextUp, OpenToJoin, RecentForm, StatStrip, TierProgress } from '@/components/dashboard/DashboardPanels';
+import { LatestBadges, LiveNow, NextUp, OpenToJoin, RecentForm, StatStrip, TierProgress } from '@/components/dashboard/DashboardPanels';
+import { TitleByName } from '@/components/achievements/BadgeArt';
 import { oversLabel } from '@vr-tournament/shared';
 import { Headset, MapPin, Plus, Target, Trophy, Swords } from 'lucide-react';
 import { apiDelete, apiGet, getAccessToken, getUserErrorMessage } from '@/lib/api';
@@ -15,6 +16,7 @@ import { ListSkeleton } from '@/components/ui/skeleton';
 import { QueryError } from '@/components/ui/query-error';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { toast } from '@/components/ui/toast';
+import { useLiveMatch } from '@/hooks/useLiveScores';
 
 const STATUS_BADGE: Record<PlayerCardTournament['status'], { label: string; variant: 'info' | 'success' | 'neutral' }> = {
   upcoming: { label: 'Starts soon', variant: 'info' },
@@ -50,6 +52,11 @@ export function MyTournamentsPage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{card.greeting}</h1>
+          {dashboard.data?.displayTitle && (
+            <div className="mt-1.5">
+              <TitleByName name={dashboard.data.displayTitle} size="md" />
+            </div>
+          )}
           <p className="text-[var(--color-muted-foreground)] mt-1">
             {card.skillTierLabel} · {card.record.wins} won · {card.record.losses} lost
           </p>
@@ -96,6 +103,7 @@ export function MyTournamentsPage() {
             <>
               <TierProgress stats={dashboard.data.stats} />
               <RecentForm d={dashboard.data} />
+              <LatestBadges />
               <LiveNow d={dashboard.data} />
               <OpenToJoin d={dashboard.data} />
             </>
@@ -111,6 +119,9 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
   const queryClient = useQueryClient();
   const askConfirm = useConfirm();
   const badge = STATUS_BADGE[t.status];
+  // The opponent's innings, ball by ball, while they bat first.
+  const oppLive = useLiveMatch(t.match?.id, !!t.match?.opponentBattingSince);
+  const oppBatting = oppLive.data?.innings.find((s) => s.state === 'batting' && s.legalBalls > 0);
   const leave = useMutation({
     mutationFn: () => apiDelete(`/tournaments/${t.id}/join`),
     onSuccess: () => {
@@ -163,7 +174,17 @@ function TournamentCard({ t, buyback }: { t: PlayerCardTournament; buyback: Buyb
               <Swords className="h-4 w-4 text-[var(--color-primary)]" aria-hidden />
               vs {m.opponent}
             </span>
-            {m.state === 'your_turn' && m.opponentScore < 0 && <Badge variant="success">You bat first — set the target in the Quest app</Badge>}
+            {m.state === 'your_turn' && m.opponentScore < 0 && !m.opponentBattingSince && (
+              <Badge variant="success">You bat first — set the target in the Quest app</Badge>
+            )}
+            {m.state === 'your_turn' && m.opponentBattingSince && (
+              <Link to={`/matches/${m.id}/live`} title="Watch their innings ball by ball">
+                <Badge variant="warning">
+                  {m.opponent} is batting
+                  {oppBatting ? ` ${oppBatting.runs}/${oppBatting.wickets} (${oppBatting.overs})` : ' now'} — you chase next
+                </Badge>
+              </Link>
+            )}
             {m.state === 'waiting_for_opponent' && <Badge variant="info">You scored {score(m.myScore)} — {m.opponent} needs {m.myScore + 1}</Badge>}
             {m.state === 'decided' && <Badge variant="neutral">You {score(m.myScore)} – {score(m.opponentScore)} {m.opponent}</Badge>}
           </div>

@@ -8,6 +8,11 @@ import { sendSuccess } from '../../lib/response.js';
 import { PlayersService } from './players.service.js';
 import { DrawEntryService } from '../tournaments/draw-entry.service.js';
 import { DashboardService } from './dashboard.service.js';
+import { z } from 'zod';
+import { AppError } from '../../lib/response.js';
+import { chooseTitle, playerAchievements, syncAchievements } from '../../lib/achievements.js';
+
+const titleSchema = z.object({ code: z.string().max(40).nullable() });
 
 export function createPlayersRouter(pool: Pool, _env: Env): Router {
   const router = Router();
@@ -28,6 +33,7 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
   // Dashboard: career stats, recent form, live and open tournaments.
   router.get('/me/dashboard', authenticate(_env), async (req, res, next) => {
     try {
+      await syncAchievements(pool, req.user!.sub, _env).catch((err: unknown) => console.error('Achievement sync failed:', err));
       sendSuccess(res, await dashboard.forPlayer(req.user!.sub));
     } catch (err) {
       next(err);
@@ -98,6 +104,35 @@ export function createPlayersRouter(pool: Pool, _env: Env): Router {
     try {
       const profile = await service.getPublicByUsername(req.params.username as string);
       sendSuccess(res, profile);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Titles and badges: catches up any unlocks, then lists every one with progress and rarity.
+  router.get('/me/achievements', authenticate(_env), async (req, res, next) => {
+    try {
+      await syncAchievements(pool, req.user!.sub, _env);
+      sendSuccess(res, await playerAchievements(pool, req.user!.sub));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put('/me/title', authenticate(_env), validate(titleSchema), async (req, res, next) => {
+    try {
+      sendSuccess(res, await chooseTitle(pool, req.user!.sub, (req.body as { code: string | null }).code));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:username/achievements', async (req, res, next) => {
+    try {
+      const u = (await pool.query(`SELECT id FROM users WHERE LOWER(username) = LOWER($1) AND is_bot = FALSE`, [req.params.username])).rows[0];
+      if (!u) throw new AppError('NOT_FOUND', 'Player not found', 404);
+      await syncAchievements(pool, u.id as string, _env);
+      sendSuccess(res, await playerAchievements(pool, u.id as string));
     } catch (err) {
       next(err);
     }

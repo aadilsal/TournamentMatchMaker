@@ -19,6 +19,7 @@ const ChooseWherePage = lazyNamed(() => import('@/pages/ChooseWherePage'), 'Choo
 const MyTournamentsPage = lazyNamed(() => import('@/pages/MyTournamentsPage'), 'MyTournamentsPage');
 const TournamentsPage = lazyNamed(() => import('@/pages/TournamentsPage'), 'TournamentsPage');
 const TournamentDetailPage = lazyNamed(() => import('@/pages/TournamentDetailPage'), 'TournamentDetailPage');
+const LiveMatchPage = lazyNamed(() => import('@/pages/LiveMatchPage'), 'LiveMatchPage');
 const PublicProfilePage = lazyNamed(() => import('@/pages/PublicProfilePage'), 'PublicProfilePage');
 const LeaderboardsPage = lazyNamed(() => import('@/pages/LeaderboardsPage'), 'LeaderboardsPage');
 const ForgotPasswordPage = lazyNamed(() => import('@/pages/ForgotPasswordPage'), 'ForgotPasswordPage');
@@ -121,6 +122,7 @@ export function App() {
         <Route path="/my-tournaments" element={<AppShell><MyTournamentsPage /></AppShell>} />
         <Route path="/tournaments" element={<AppShell><TournamentsPage /></AppShell>} />
         <Route path="/tournaments/:id" element={<AppShell><TournamentDetailPage /></AppShell>} />
+        <Route path="/matches/:id/live" element={<AppShell><LiveMatchPage /></AppShell>} />
         {/* Old player pages (slots, bookings, queue) now lead into the guided flow. */}
         {['/play', '/welcome', '/venues', '/venues/:id', '/bookings', '/matches', '/matchmaking'].map((path) => (
           <Route key={path} path={path} element={<Navigate to="/start" replace />} />

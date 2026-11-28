@@ -1,13 +1,15 @@
 import type { Pool } from 'pg';
 import {
-  TIER_THRESHOLDS,
   WICKETS_MIN_INNINGS_ALL_TIME,
+  nextTierFor,
+  tierFloor,
   battingLeaderboards,
   battingTotals,
   normalizeOvers,
   type FormEntry,
   type GlobalLeaderboards,
   type InningsRow,
+  type LeaderboardEntry,
   type PlayerDashboard,
   type PlayerProfileStats,
   type ProfileMatch,
@@ -63,7 +65,7 @@ export class DashboardService {
     ]);
     const wins = decided.rows.filter((r) => r.won).length;
     const matches = decided.rows.length;
-    const next = TIER_THRESHOLDS.find((t) => t.minPoints > ratingPoints);
+    const next = nextTierFor(skillTier, ratingPoints);
     const stats: PlayerDashboard['stats'] = {
       ...battingTotals(innings.rows.map((r) => inningsRow(userId, username, r))),
       matches,
@@ -74,13 +76,14 @@ export class DashboardService {
       tournamentsWon: tournaments.rows[0]?.won ?? 0,
       ratingPoints,
       skillTier,
-      nextTier: next ? { tier: next.tier, pointsNeeded: next.minPoints - ratingPoints } : null,
+      nextTier: next,
+      tierProtected: ratingPoints < tierFloor(skillTier),
     };
     return { stats, decided: decided.rows };
   }
 
   async forPlayer(userId: string): Promise<PlayerDashboard> {
-    const user = (await this.pool.query(`SELECT username, rating_points, skill_tier FROM users WHERE id = $1`, [userId])).rows[0];
+    const user = (await this.pool.query(`SELECT username, rating_points, skill_tier, display_title FROM users WHERE id = $1`, [userId])).rows[0];
     if (!user) throw new AppError('NOT_FOUND', 'Player not found', 404);
     const [{ stats, decided }, live, open] = await Promise.all([
       this.career(userId, user.username, Number(user.rating_points ?? 0), Number(user.skill_tier ?? 3)),
@@ -116,6 +119,7 @@ export class DashboardService {
     }));
 
     return {
+      displayTitle: (user.display_title as string | null) ?? null,
       stats,
       recentForm,
       liveTournaments: live.rows.map((t) => ({
@@ -140,7 +144,7 @@ export class DashboardService {
   async profile(username: string): Promise<PlayerProfileStats> {
     const user = (
       await this.pool.query(
-        `SELECT id, username, rating_points, skill_tier FROM users WHERE LOWER(username) = LOWER($1) AND NOT is_bot`,
+        `SELECT id, username, rating_points, skill_tier, display_title FROM users WHERE LOWER(username) = LOWER($1) AND NOT is_bot`,
         [username]
       )
     ).rows[0];
@@ -200,7 +204,7 @@ export class DashboardService {
               : 'out',
       roundReached: t.round_number != null ? Number(t.round_number) : null,
     }));
-    return { username: user.username as string, stats, recentMatches, tournaments: history };
+    return { username: user.username as string, displayTitle: (user.display_title as string | null) ?? null, stats, recentMatches, tournaments: history };
   }
 
   /** All-time boards over every human innings, plus the highest rated players. */
@@ -222,7 +226,7 @@ export class DashboardService {
         [BOARD_SIZE]
       ),
     ]);
-    return {
+    const boards: GlobalLeaderboards = {
       batting: battingLeaderboards(
         innings.rows.map((r) => inningsRow(r.user_id as string, r.username as string, r)),
         BOARD_SIZE,
@@ -235,5 +239,17 @@ export class DashboardService {
         innings: Number(r.innings),
       })),
     };
+    return withTitles(this.pool, boards);
   }
+}
+
+/** Adds each player's shown title to every leaderboard row. */
+async function withTitles(pool: Pool, boards: GlobalLeaderboards): Promise<GlobalLeaderboards> {
+  const all = [...Object.values(boards.batting).flat(), ...boards.topRated] as LeaderboardEntry[];
+  const ids = [...new Set(all.map((e) => e.userId))];
+  if (!ids.length) return boards;
+  const rows = await pool.query(`SELECT id, display_title FROM users WHERE id = ANY($1)`, [ids]);
+  const titleOf = new Map(rows.rows.map((r) => [r.id as string, (r.display_title as string | null) ?? null]));
+  for (const e of all) e.title = titleOf.get(e.userId) ?? null;
+  return boards;
 }

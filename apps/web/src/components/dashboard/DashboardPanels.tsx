@@ -1,7 +1,11 @@
 import { Link } from 'react-router-dom';
-import type { PlayerCardTournament, PlayerDashboard } from '@vr-tournament/shared';
-import { TIER_THRESHOLDS, oversLabel, pointsToTier, timeLeft } from '@vr-tournament/shared';
-import { ArrowRight, Flame, Radio, Shield, Swords, Target, Trophy, TrendingUp } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import type { PlayerAchievements, PlayerCardTournament, PlayerDashboard } from '@vr-tournament/shared';
+import { useLiveMatch } from '@/hooks/useLiveScores';
+import { apiGet } from '@/lib/api';
+import { BadgeArt } from '@/components/achievements/BadgeArt';
+import { RATING_LOSS_POINTS, RATING_WIN_POINTS, oversLabel, tierFloor, timeLeft } from '@vr-tournament/shared';
+import { ArrowRight, Flame, Medal, Radio, Shield, Swords, Target, Trophy, TrendingUp } from 'lucide-react';
 import { buttonVariants } from '@/components/ui/button';
 import { formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -12,6 +16,7 @@ export function NextUp({ tournaments }: { tournaments: PlayerCardTournament[] })
   if (!t?.match) return null;
   const m = t.match;
   const chasing = m.opponentScore >= 0;
+  if (m.opponentBattingSince) return <OpponentBatting t={t} />;
   return (
     <section
       aria-label="Next up"
@@ -36,6 +41,50 @@ export function NextUp({ tournaments }: { tournaments: PlayerCardTournament[] })
   );
 }
 
+/** "hamza is batting now": the opponent holds the turn; you chase once they finish. */
+function OpponentBatting({ t }: { t: PlayerCardTournament }) {
+  const m = t.match!;
+  const live = useLiveMatch(m.id);
+  const batting = live.data?.innings.find((s) => s.state === 'batting');
+  return (
+    <section
+      aria-label="Opponent batting"
+      aria-live="polite"
+      className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-amber-400/40 bg-gradient-to-r from-amber-500/15 to-[var(--color-card)] p-5"
+    >
+      <div className="flex items-center gap-4">
+        <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-amber-400/20 text-amber-300">
+          <Radio className="h-6 w-6" aria-hidden />
+          <span className="absolute right-1 top-1 h-2.5 w-2.5 animate-pulse rounded-full bg-amber-400" aria-hidden />
+        </span>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-amber-300">Batting now · {t.name}</p>
+          <p className="text-xl font-extrabold">
+            {m.opponent} is batting
+            {batting && batting.legalBalls > 0 && (
+              <span className="ml-2 tabular-nums text-amber-300">
+                {batting.runs}/{batting.wickets} <span className="text-sm font-semibold">({batting.overs})</span>
+              </span>
+            )}
+          </p>
+          <p className="text-sm text-[var(--color-muted-foreground)]">
+            You'll chase their score once they finish. We'll alert you when it's your turn.
+            {m.turnFreesAt ? ` If they drop out, their innings counts as 0 at ${clockTime(m.turnFreesAt)}.` : ''}
+          </p>
+        </div>
+      </div>
+      <Link to={`/matches/${m.id}/live`} title="Watch their innings ball by ball" className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+        Watch live
+      </Link>
+    </section>
+  );
+}
+
+/** "3:40 PM" in the viewer's own time zone. */
+export function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
 function Stat({ label, value, hint, icon: Icon }: { label: string; value: string; hint?: string; icon: typeof Trophy }) {
   return (
     <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4">
@@ -58,16 +107,18 @@ export function StatStrip({ stats: s }: { stats: PlayerDashboard['stats'] }) {
       <Stat icon={Flame} label="6s" value={String(s.sixes)} />
       <Stat icon={Flame} label="4s" value={String(s.fours)} />
       <Stat icon={Shield} label="Best" value={s.highest != null ? String(s.highest) : '—'} hint="highest innings" />
-      <Stat icon={Trophy} label="Titles" value={String(s.tournamentsWon)} hint={`${s.tournamentsPlayed} played`} />
+      <Stat icon={Trophy} label="Trophies" value={String(s.tournamentsWon)} hint={`tournaments won of ${s.tournamentsPlayed}`} />
     </section>
   );
 }
 
 /** Rating and how far it is to the next tier. */
 export function TierProgress({ stats: s }: { stats: PlayerDashboard['stats'] }) {
-  const floor = TIER_THRESHOLDS.find((t) => t.tier === pointsToTier(s.ratingPoints))?.minPoints ?? 0;
+  const floor = tierFloor(s.skillTier);
   const ceiling = s.nextTier ? s.ratingPoints + s.nextTier.pointsNeeded : s.ratingPoints;
-  const pct = s.nextTier ? Math.max(4, Math.round(((s.ratingPoints - floor) / Math.max(1, ceiling - floor)) * 100)) : 100;
+  const pct = s.nextTier
+    ? Math.min(100, Math.max(4, Math.round(((s.ratingPoints - floor) / Math.max(1, ceiling - floor)) * 100)))
+    : 100;
   return (
     <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-card)] p-4 space-y-2">
       <div className="flex items-center justify-between text-sm">
@@ -78,8 +129,12 @@ export function TierProgress({ stats: s }: { stats: PlayerDashboard['stats'] }) 
         <div className="h-2 rounded-full bg-[var(--color-primary)]" style={{ width: `${pct}%` }} />
       </div>
       <p className="text-xs text-[var(--color-muted-foreground)]">
-        {s.nextTier ? `${s.nextTier.pointsNeeded} points to Tier ${s.nextTier.tier} · +30 a win` : 'Top tier reached'}
+        {s.nextTier ? `${s.nextTier.pointsNeeded} points to Tier ${s.nextTier.tier}` : 'Top tier reached'}
+        {` · +${RATING_WIN_POINTS} a win, ${RATING_LOSS_POINTS} a loss`}
       </p>
+      {s.tierProtected && (
+        <p className="text-xs text-amber-300">Tier {s.skillTier} is protected: you keep it even though your points dipped.</p>
+      )}
     </div>
   );
 }
@@ -146,6 +201,43 @@ export function LiveNow({ d }: { d: PlayerDashboard }) {
           </li>
         ))}
       </ul>
+    </Panel>
+  );
+}
+
+/** Latest unlocks and the closest badge still to earn. */
+export function LatestBadges() {
+  const { data } = useQuery({ queryKey: ['achievements', 'me'], queryFn: () => apiGet<PlayerAchievements>('/players/me/achievements') });
+  if (!data) return null;
+  const latest = data.achievements
+    .filter((a) => a.earned)
+    .sort((a, b) => (b.earnedAt ?? '').localeCompare(a.earnedAt ?? ''))
+    .slice(0, 3);
+  const nextUp = data.achievements
+    .filter((a) => !a.earned && a.progress > 0)
+    .sort((a, b) => b.progress / b.threshold - a.progress / a.threshold)[0];
+  return (
+    <Panel title={`Badges · ${data.earnedCount}/${data.total}`} icon={Medal}>
+      {latest.length ? (
+        <ul className="flex justify-around gap-2">
+          {latest.map((a) => (
+            <li key={a.code} className="flex w-20 flex-col items-center gap-1 text-center" title={a.description}>
+              <BadgeArt icon={a.icon} tier={a.tier} size={52} />
+              <span className="text-[11px] font-medium leading-tight">{a.name}</span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-sm text-[var(--color-muted-foreground)]">Play your first match to earn your first badge.</p>
+      )}
+      {nextUp && (
+        <p className="text-xs text-[var(--color-muted-foreground)]">
+          Next: <span className="font-semibold text-[var(--color-foreground)]">{nextUp.name}</span> · {nextUp.progress}/{nextUp.threshold}
+        </p>
+      )}
+      <Link to="/profile?tab=badges" title="See every title and badge" className={buttonVariants({ variant: 'outline', size: 'sm', className: 'w-full' })}>
+        See all badges
+      </Link>
     </Panel>
   );
 }

@@ -31,6 +31,7 @@ import { GridSkeleton } from '@/components/ui/skeleton';
 import { Tabs } from '@/components/ui/tabs';
 import { KnockoutBracket } from '@/components/tournament/KnockoutBracket';
 import { useAdminMutation } from '@/hooks/useAdminMutation';
+import { liveScoreText, useTournamentLive } from '@/hooks/useLiveScores';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import {
   PARTICIPANT_STATUS_OPTIONS,
@@ -112,6 +113,8 @@ export function AdminTournamentDetailPage() {
     queryFn: () => apiGet<Match[]>(`/admin/tournaments/${id}/matches`),
     enabled: !!id && tab === 'matches',
   });
+  // Live scores for the current round while the matches tab is open.
+  const liveRound = useTournamentLive(id, tab === 'matches' && tournament?.status === 'in_progress');
 
   const bracketQ = useQuery({
     queryKey: ['admin', 'tournament', id, 'bracket'],
@@ -695,17 +698,36 @@ export function AdminTournamentDetailPage() {
           columns={[
             { key: 'players', label: 'Players' },
             { key: 'status', label: 'Status' },
+            { key: 'score', label: 'Score' },
             { key: 'round', label: 'Round' },
           ]}
-          rows={matches.map((m) => ({
-            players: (
-              <Link to={`/admin/matches/${m.id}`} className="inline-flex min-h-10 items-center hover:underline">
-                {m.player1?.username} vs {m.player2?.username}
-              </Link>
-            ),
-            status: <StatusBadge status={m.status} />,
-            round: m.roundNumber ?? '—',
-          }))}
+          rows={matches.map((m) => {
+            const r = (m.result ?? {}) as { player1Score?: number | null; player2Score?: number | null };
+            const lm = liveRound.byMatch.get(m.id);
+            const liveText = liveScoreText(lm);
+            return {
+              players: (
+                <Link to={`/admin/matches/${m.id}`} className="inline-flex min-h-10 items-center hover:underline">
+                  {m.player1?.username} vs {m.player2?.username}
+                </Link>
+              ),
+              status: <StatusBadge status={m.status} />,
+              score:
+                m.status === 'completed' ? (
+                  <span className="tabular-nums">{r.player1Score ?? '–'} – {r.player2Score ?? '–'}</span>
+                ) : liveText ? (
+                  <Link to={`/matches/${m.id}/live`} title="Watch ball by ball" className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-400 hover:underline">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" aria-hidden />
+                    {liveText}
+                  </Link>
+                ) : lm?.target != null ? (
+                  <span className="text-xs">Chase {lm.target}</span>
+                ) : (
+                  '—'
+                ),
+              round: m.roundNumber ?? '—',
+            };
+          })}
           emptyMessage="No matches"
         />
       )}

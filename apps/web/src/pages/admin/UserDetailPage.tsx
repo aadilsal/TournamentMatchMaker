@@ -1,6 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { AdminUserDetail, UserRole } from '@vr-tournament/shared';
+import { DEFAULT_RATING_POINTS } from '@vr-tournament/shared';
 import { apiDelete, apiGet, apiPatch, apiPost } from '@/lib/api';
 import { AdminQueryError, AdminPageHeader, AdminCard, DataTable, StatusBadge, AdminFieldError } from '@/components/admin/AdminUi';
 import {
@@ -147,7 +148,7 @@ export function AdminUserDetailPage() {
   };
 
   const handleUpdateRating = () => {
-    const value = rating || String(user.ratingPoints ?? 650);
+    const value = rating || String(user.ratingPoints ?? DEFAULT_RATING_POINTS);
     const result = validateAdminForm(adminRatingFormSchema, { ratingPoints: value });
     if (!result.ok) {
       setRatingError(result.errors.ratingPoints);
@@ -240,7 +241,7 @@ export function AdminUserDetailPage() {
                 type="number"
                 min={0}
                 max={5000}
-                value={rating || String(user.ratingPoints ?? 650)}
+                value={rating || String(user.ratingPoints ?? DEFAULT_RATING_POINTS)}
                 onChange={(e) => {
                   setRating(e.target.value);
                   setRatingError(undefined);

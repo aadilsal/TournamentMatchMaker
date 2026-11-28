@@ -14,7 +14,10 @@ import {
   settleDrawMatch,
   tournamentLink,
   tournamentStartingSoonNotice,
+  applyMatchResult,
+  tierAfterResult,
   type DrawPairing,
+  type PointsChange,
 } from '@vr-tournament/shared';
 import { ensureTournamentBot } from '../lib/bot-opponent.js';
 import { emitBroadcast, emitToUser } from '../lib/socket-bridge.js';
@@ -26,7 +29,7 @@ type NotificationQueue = {
 /** Side effects collected inside a transaction and sent only after it commits. */
 interface Outbox {
   newMatches: Array<{ matchId: string; player1Id: string; player2Id: string }>;
-  decided: Array<{ matchId: string; winnerId: string; loserId: string }>;
+  decided: Array<{ matchId: string; winnerId: string; loserId: string; points: Record<string, PointsChange> }>;
   finished: Array<{ tournamentId: string; name: string; championId: string | null; playerIds: string[] }>;
   touched: Set<string>;
 }
@@ -350,8 +353,30 @@ async function settleOpenDrawMatches(
       ]
     );
     await recordDrawResult(client, tournamentId, roundNumber, winnerId, loserId);
-    outbox.decided.push({ matchId: match.id, winnerId, loserId });
+    const points = await rateDrawResult(client, winnerId, loserId);
+    outbox.decided.push({ matchId: match.id, winnerId, loserId, points });
   }
+}
+
+/** Same rating rule as the API: +30 / −18, reached tier kept; results against bots are not rated. */
+async function rateDrawResult(client: PoolClient, winnerId: string, loserId: string): Promise<Record<string, PointsChange>> {
+  const rows = await client.query(
+    `SELECT id, rating_points, skill_tier, is_bot FROM users WHERE id = ANY($1) FOR UPDATE`,
+    [[winnerId, loserId]]
+  );
+  if (rows.rows.length !== 2 || rows.rows.some((r) => r.is_bot)) return {};
+  const points: Record<string, PointsChange> = {};
+  for (const r of rows.rows) {
+    const before = Number(r.rating_points);
+    const after = applyMatchResult(before, r.id === winnerId);
+    await client.query(`UPDATE users SET rating_points = $1, skill_tier = $2, updated_at = NOW() WHERE id = $3`, [
+      after,
+      tierAfterResult(Number(r.skill_tier ?? 1), after),
+      r.id,
+    ]);
+    points[r.id as string] = { change: after - before, ratingPoints: after };
+  }
+  return points;
 }
 
 /** Winner moves to the next round; loser is knocked out. Bots are skipped. */
@@ -542,6 +567,7 @@ async function flushOutbox(
           walkover: d.walkover,
           isFinal: d.roundLabel === 'Final',
           nextDrawAt: null,
+          points: decided.points[decided.winnerId] ?? null,
         }),
       },
       `match_won:${decided.matchId}:${decided.winnerId}`
@@ -559,6 +585,7 @@ async function flushOutbox(
           opponentScore: loser.opponentScore,
           walkover: d.walkover,
           buyback: null,
+          points: decided.points[decided.loserId] ?? null,
         }),
       },
       `match_lost:${decided.matchId}:${decided.loserId}`

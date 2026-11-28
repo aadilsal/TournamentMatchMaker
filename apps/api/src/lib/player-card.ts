@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { MatchResultExtended, PlayerCard, PlayerCardTournament } from '@vr-tournament/shared';
 import {
+  INNINGS_HEARTBEAT_TIMEOUT_MS,
   NO_SCORE,
   ballsPerInnings,
   normalizeOvers,
@@ -73,6 +74,20 @@ export async function buildPlayerCard(pool: Pool, userId: string, timeZone?: str
     : { rows: [] as Record<string, unknown>[] };
   const matchOf = new Map(matchRows.rows.map((m) => [m.tournament_id as string, m]));
 
+  // Opponents batting first right now: a started innings with a fresh heartbeat.
+  const openIds = matchRows.rows.filter((m) => m.status !== 'completed').map((m) => m.id as string);
+  const battingRows = openIds.length
+    ? await pool.query(
+        `SELECT a.match_id, a.started_at, a.last_heartbeat_at
+         FROM innings_attempts a
+         WHERE a.match_id = ANY($1) AND a.user_id <> $2
+           AND a.last_heartbeat_at > NOW() - ($3::bigint * INTERVAL '1 millisecond')
+           AND NOT EXISTS (SELECT 1 FROM match_innings mi WHERE mi.match_id = a.match_id AND mi.user_id = a.user_id)`,
+        [openIds, userId, INNINGS_HEARTBEAT_TIMEOUT_MS]
+      )
+    : { rows: [] as Record<string, unknown>[] };
+  const battingOf = new Map(battingRows.rows.map((r) => [r.match_id as string, r]));
+
   const tournaments: PlayerCardTournament[] = tournamentRows.rows.map((t) => {
     const m = matchOf.get(t.id as string);
     const roundNumber = t.round_number != null ? Number(t.round_number) : null;
@@ -90,12 +105,17 @@ export async function buildPlayerCard(pool: Pool, userId: string, timeZone?: str
       const decided = m.status === 'completed';
       const myScore = decided ? (isP1 ? result.player1Score : result.player2Score) : m.my_innings;
       const theirScore = decided ? (isP1 ? result.player2Score : result.player1Score) : m.their_innings;
+      const batting = decided ? undefined : battingOf.get(m.id as string);
       match = {
         id: m.id as string,
         opponent: m.opponent as string,
         state: decided ? 'decided' : m.my_innings != null ? 'waiting_for_opponent' : 'your_turn',
         myScore: (myScore as number | null | undefined) ?? NO_SCORE,
         opponentScore: (theirScore as number | null | undefined) ?? NO_SCORE,
+        opponentBattingSince: batting ? (batting.started_at as Date).toISOString() : null,
+        turnFreesAt: batting
+          ? new Date((batting.last_heartbeat_at as Date).getTime() + INNINGS_HEARTBEAT_TIMEOUT_MS).toISOString()
+          : null,
       };
     }
 
@@ -131,6 +151,7 @@ export async function buildPlayerCard(pool: Pool, userId: string, timeZone?: str
         roundClosesAt: closesAt,
         opponent: match && match.state !== 'decided' ? match.opponent : null,
         matchState: match?.state ?? null,
+        opponentBatting: !!match?.opponentBattingSince,
         timeZone,
       }),
       round:

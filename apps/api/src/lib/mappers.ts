@@ -1,4 +1,4 @@
-import { normalizeOvers } from '@vr-tournament/shared';
+import { DEFAULT_RATING_POINTS, normalizeOvers } from '@vr-tournament/shared';
 import type {
   Booking,
   Buyback,
@@ -88,7 +88,7 @@ export function mapUser(row: UserRow): User {
     latitude: row.latitude ?? null,
     longitude: row.longitude ?? null,
     skillTier: row.skill_tier,
-    ratingPoints: row.rating_points ?? 650,
+    ratingPoints: row.rating_points ?? DEFAULT_RATING_POINTS,
     role: row.role as UserRole,
     hasProfilePicture: !!row.profile_picture?.length,
     isBot: row.is_bot ?? false,

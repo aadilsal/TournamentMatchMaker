@@ -27,6 +27,8 @@ export interface LiveMatchSide {
   score: number | null;
   /** Batting right now (started and still sending heartbeats). */
   batting: boolean;
+  /** Ball-by-ball score while batting, when the headset sends balls. Additive. */
+  live?: { runs: number; wickets: number; overs: string } | null;
 }
 
 export interface LiveMatch {
@@ -92,6 +94,8 @@ export interface ProfileTournament {
 /** Public career page: stats, recent innings and tournament history. */
 export interface PlayerProfileStats {
   username: string;
+  /** Title shown beside the name, e.g. "Six Machine". */
+  displayTitle?: string | null;
   stats: PlayerDashboard['stats'];
   recentMatches: ProfileMatch[];
   tournaments: ProfileTournament[];
@@ -105,6 +109,8 @@ export interface GlobalLeaderboards {
 
 /** The logged-in player's home: career numbers, recent form and tournaments to watch or join. */
 export interface PlayerDashboard {
+  /** Title shown beside the name. */
+  displayTitle?: string | null;
   stats: BattingTotals & {
     matches: number;
     wins: number;
@@ -117,6 +123,8 @@ export interface PlayerDashboard {
     skillTier: number;
     /** Points still needed for the next tier; null at the top tier. */
     nextTier: { tier: number; pointsNeeded: number } | null;
+    /** Points are below the held tier's floor; the tier is kept anyway. */
+    tierProtected?: boolean;
   };
   recentForm: FormEntry[];
   liveTournaments: Array<{ id: string; name: string; overs: number; roundNumber: number; playerCount: number }>;

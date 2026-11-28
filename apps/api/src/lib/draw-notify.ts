@@ -5,6 +5,7 @@ import {
   matchTiedNotice,
   opponentPlayedNotice,
   tournamentLink,
+  type PointsChange,
 } from '@vr-tournament/shared';
 import type { Env } from '../config/env.js';
 import { enqueueNotification } from './bullmq.js';
@@ -52,7 +53,14 @@ function send(env: Env, userId: string, type: string, notice: Notice, extra: Rec
 }
 
 /** A decided draw match: "you're through" / "you're out" (with the buyback offer in round 1). */
-export async function notifyDrawResult(pool: Pool, env: Env, matchId: string, winnerId: string, loserId: string) {
+export async function notifyDrawResult(
+  pool: Pool,
+  env: Env,
+  matchId: string,
+  winnerId: string,
+  loserId: string,
+  points: Record<string, PointsChange> = {}
+) {
   const d = await details(pool, matchId);
   if (!d) return;
   const base = { matchId, tournamentId: d.row.tournament_id, link: d.link };
@@ -72,6 +80,7 @@ export async function notifyDrawResult(pool: Pool, env: Env, matchId: string, wi
     opponentScore: d.scoreOf(winnerId),
     walkover: false,
     buyback: buybackOpen ? { priceCents: Number(d.row.buyback_price_cents), until: d.closesAt } : null,
+    points: points[loserId] ?? null,
   };
 
   if (!d.isBot(winnerId)) {
@@ -88,6 +97,7 @@ export async function notifyDrawResult(pool: Pool, env: Env, matchId: string, wi
         walkover: false,
         isFinal: d.roundLabel === 'Final',
         nextDrawAt: d.roundLabel === 'Final' ? null : d.closesAt,
+        points: points[winnerId] ?? null,
       }),
       base,
       `match-won:${matchId}:${winnerId}`

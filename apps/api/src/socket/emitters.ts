@@ -27,6 +27,14 @@ export function disconnectUser(userId: string, reason = 'Session ended') {
   ioInstance.in(`user:${userId}`).disconnectSockets(true);
 }
 
+/** Public `/live` namespace: fans watching a match or tournament. */
+export function emitLive(rooms: string[], event: string, data: unknown) {
+  if (!ioInstance) return;
+  const live = ioInstance.of('/live');
+  const targets = rooms.filter(Boolean);
+  if (targets.length) live.to(targets).emit(event, data);
+}
+
 export function emitBroadcast(event: string, data: unknown) {
   if (!ioInstance) return;
   ioInstance.emit(event, data);

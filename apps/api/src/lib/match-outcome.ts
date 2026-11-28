@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import type { RedisClient } from './redis.js';
 import type { Env } from '../config/env.js';
-import type { MatchResultExtended } from '@vr-tournament/shared';
+import type { MatchResultExtended, PointsChange } from '@vr-tournament/shared';
 import {
   DRAW_PHASE,
   resolveAbandonedMatch,
@@ -10,6 +10,7 @@ import {
 } from '@vr-tournament/shared';
 import { matchNotificationDetails } from '@vr-tournament/shared';
 import { updateUserRating } from './rating.js';
+import { syncAchievementsQuietly } from './achievements.js';
 import { requeuePlayer, removeFromQueue } from './requeue-player.js';
 import { enqueueNotification } from './bullmq.js';
 import { TournamentsService } from '../modules/tournaments/tournaments.service.js';
@@ -221,6 +222,7 @@ export async function applyMatchWinner(
 
   const client = await pool.connect();
   let winnerNextRound: number | null = null;
+  const points: Record<string, PointsChange> = {};
 
   try {
     await client.query('BEGIN');
@@ -241,8 +243,8 @@ export async function applyMatchWinner(
 
     // A bot is not a rated opponent, and it never takes a place in the standings.
     if (botIds.size === 0) {
-      await updateUserRating(client, winnerId, true);
-      await updateUserRating(client, loserId, false);
+      points[winnerId] = await updateUserRating(client, winnerId, true);
+      points[loserId] = await updateUserRating(client, loserId, false);
     }
 
     // Draw format: winner goes through to the next round's draw, loser is knocked out; no queue.
@@ -339,8 +341,11 @@ export async function applyMatchWinner(
     await removeFromQueue(redis, loserId);
   }
 
+  // New titles and badges from this result (bots are skipped inside).
+  await syncAchievementsQuietly(pool, [winnerId, loserId], env);
+
   if (env && match.phase === DRAW_PHASE) {
-    await notifyDrawResult(pool, env, matchId, winnerId, loserId);
+    await notifyDrawResult(pool, env, matchId, winnerId, loserId, points);
   } else if (env) {
     enqueueNotification(env, {
       userId: winnerId,

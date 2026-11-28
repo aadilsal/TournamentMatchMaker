@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
 import { DrawRoundsView } from '@/components/tournament/DrawRoundsView';
 import { cn } from '@/lib/utils';
+import { buttonVariants } from '@/components/ui/button';
+import { useTournamentLive } from '@/hooks/useLiveScores';
 
 type TabId = 'overview' | 'live' | 'fixtures' | 'players' | 'stats';
 
@@ -21,7 +23,7 @@ export function DrawTournamentTabs({ tournament }: { tournament: Tournament }) {
   const id = tournament.id;
 
   const players = useQuery({ queryKey: ['tournament-players', id], queryFn: () => apiGet<TournamentPlayer[]>(`/tournaments/${id}/players`), refetchInterval: running ? 30_000 : false });
-  const live = useQuery({ queryKey: ['tournament-live', id], queryFn: () => apiGet<TournamentLive>(`/tournaments/${id}/live`), enabled: running, refetchInterval: 15_000 });
+  const live = useTournamentLive(id, running);
   const stats = useQuery({ queryKey: ['tournament-stats', id], queryFn: () => apiGet<TournamentStats>(`/tournaments/${id}/stats`), refetchInterval: running ? 30_000 : false });
 
   const tabs = [
@@ -119,7 +121,7 @@ function LiveRound({ live, loading }: { live?: TournamentLive; loading: boolean 
     <div className="space-y-3">
       <p className="flex flex-wrap items-center gap-2 text-sm">
         <span className="inline-flex items-center gap-1.5 font-semibold"><span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-primary)]" aria-hidden />{live.round.label}</span>
-        {live.round.closesAt && <span className="text-[var(--color-muted-foreground)]">· closes in {timeLeft(live.round.closesAt)} · updates every 15 seconds</span>}
+        {live.round.closesAt && <span className="text-[var(--color-muted-foreground)]">· closes in {timeLeft(live.round.closesAt)} · updates live</span>}
       </p>
       <ul className="grid gap-3 md:grid-cols-2">
         {live.matches.map((m) => {
@@ -130,7 +132,9 @@ function LiveRound({ live, loading }: { live?: TournamentLive; loading: boolean 
                 {s.isBot ? `${s.username} (computer)` : s.username}
                 {s.batting && <span className="ml-2 text-xs font-semibold text-[var(--color-primary)]">● batting</span>}
               </span>
-              <span className="tabular-nums font-semibold">{s.score ?? '—'}</span>
+              <span className="tabular-nums font-semibold">
+                {s.score ?? (s.live ? `${s.live.runs}/${s.live.wickets} (${s.live.overs})` : '—')}
+              </span>
             </div>
           );
           return (
@@ -147,6 +151,15 @@ function LiveRound({ live, loading }: { live?: TournamentLive; loading: boolean 
                 </p>
               )}
               {m.winner && <p className="text-sm text-[var(--color-muted-foreground)]">{m.winner} goes through</p>}
+              {m.state !== 'to_play' && (
+                <Link
+                  to={`/matches/${m.id}/live`}
+                  title="Open the ball-by-ball scorecard"
+                  className={buttonVariants({ variant: m.state === 'batting' ? 'default' : 'outline', size: 'sm', className: 'w-full' })}
+                >
+                  {m.state === 'batting' ? 'Watch live' : 'Scorecard'}
+                </Link>
+              )}
             </li>
           );
         })}

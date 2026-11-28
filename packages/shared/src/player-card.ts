@@ -27,6 +27,10 @@ export interface PlayerCardTournament {
     state: PlayerMatchState;
     myScore: number;
     opponentScore: number;
+    /** The opponent is batting first right now (started, heartbeat fresh); null otherwise. Additive. */
+    opponentBattingSince?: string | null;
+    /** If the opponent stops sending heartbeats, their innings counts as 0 at this time. Additive. */
+    turnFreesAt?: string | null;
   } | null;
 }
 
@@ -79,6 +83,8 @@ export interface StatusTextInput {
   roundClosesAt: string | null;
   opponent: string | null;
   matchState: PlayerMatchState | null;
+  /** The opponent is batting first right now. */
+  opponentBatting?: boolean;
   timeZone?: string;
 }
 
@@ -99,6 +105,8 @@ export function playerStatusText(i: StatusTextInput): string {
     case 'active':
       if (i.matchState === 'waiting_for_opponent')
         return `You've played your ${round}. Waiting for ${i.opponent ?? 'your opponent'}.`;
+      if (i.opponentBatting)
+        return `${i.opponent ?? 'Your opponent'} is batting now. You'll chase their score once they finish.`;
       if (i.opponent) return `${round}: play ${i.opponent} before ${when(i.roundClosesAt, i.timeZone)}.`;
       return `${round} is on. Your match is being drawn.`;
   }
@@ -107,6 +115,7 @@ export function playerStatusText(i: StatusTextInput): string {
 /** Short hello for the headset's menu. */
 export function playerGreeting(username: string, tournaments: readonly PlayerCardTournament[], played?: number): string {
   if (tournaments.some((t) => t.myStatus === 'champion')) return `Congratulations, champion ${username}!`;
-  if (tournaments.some((t) => t.match?.state === 'your_turn')) return `Welcome back, ${username} — your match is ready!`;
+  if (tournaments.some((t) => t.match?.state === 'your_turn' && !t.match.opponentBattingSince))
+    return `Welcome back, ${username} — your match is ready!`;
   return played === 0 ? `Welcome, ${username}!` : `Welcome back, ${username}!`;
 }

@@ -10,10 +10,18 @@ import { formatDate } from '@/lib/format';
 import { QueryError } from '@/components/ui/query-error';
 import { PlayerStatsView } from '@/components/profile/PlayerStatsView';
 import { BackButton } from '@/components/ui/back-button';
+import type { PlayerAchievements } from '@vr-tournament/shared';
+import { AchievementsView } from '@/components/achievements/AchievementsView';
+import { TitleByName } from '@/components/achievements/BadgeArt';
 
 export function PublicProfilePage() {
   const { username } = useParams<{ username: string }>();
 
+  const achievements = useQuery({
+    queryKey: ['achievements', 'player', username],
+    queryFn: () => apiGet<PlayerAchievements>(`/players/${encodeURIComponent(username ?? '')}/achievements`),
+    enabled: !!username,
+  });
   const { data: profile, isLoading, error, refetch } = useQuery({
     queryKey: ['public-profile', username],
     queryFn: () => apiGet<PublicPlayerProfile>(`/players/${username}`),
@@ -60,6 +68,7 @@ export function PublicProfilePage() {
         </div>
         <div className="flex-1 space-y-2">
           <h1 className="text-3xl font-bold">{profile.username}</h1>
+          <TitleByName name={achievements.data?.displayTitle} size="md" />
           <div className="flex flex-wrap gap-3 text-sm text-[var(--color-muted-foreground)]">
             {profile.city && (
               <span className="flex items-center gap-1">
@@ -86,6 +95,12 @@ export function PublicProfilePage() {
       </div>
 
       <PlayerStatsView username={profile.username} />
+      {achievements.data && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-bold">Badges</h2>
+          <AchievementsView data={achievements.data} initialFilter="earned" />
+        </section>
+      )}
     </div>
   );
 }

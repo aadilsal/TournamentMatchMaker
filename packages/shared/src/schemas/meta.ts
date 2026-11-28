@@ -17,6 +17,25 @@ export const metaInningsActionSchema = z.object({
   userId: z.string().uuid(),
 });
 
+/** Balls reported while batting; a batch lets the headset catch up after a dropped connection. */
+export const metaBallsSchema = z.object({
+  userId: z.string().uuid(),
+  balls: z
+    .array(
+      z.object({
+        seq: z.number().int().min(1).max(MAX_OVERS * BALLS_PER_OVER),
+        runs: z.number().int().min(0).max(6),
+        wicket: z.boolean().optional().default(false),
+        totalRuns: z.number().int().min(0).max(999),
+        wicketsLost: z.number().int().min(0).max(MAX_OVERS * BALLS_PER_OVER),
+      })
+    )
+    .min(1)
+    .max(MAX_OVERS * BALLS_PER_OVER),
+});
+
+export type MetaBallsInput = z.infer<typeof metaBallsSchema>;
+
 export const metaSoloTargetSchema = z.object({
   userId: z.string().uuid(),
   tournamentId: z.string().uuid(),

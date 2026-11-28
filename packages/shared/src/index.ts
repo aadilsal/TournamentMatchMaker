@@ -34,3 +34,5 @@ export * from './login-link.js';
 export * from './overs.js';
 export * from './batting-stats.js';
 export * from './tournament-view.js';
+export * from './live-score.js';
+export * from './achievements.js';

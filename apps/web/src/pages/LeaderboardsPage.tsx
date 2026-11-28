@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { TitleByName } from '@/components/achievements/BadgeArt';
 import { useQuery } from '@tanstack/react-query';
 import type { GlobalLeaderboards, LeaderboardEntry } from '@vr-tournament/shared';
 import { WICKETS_MIN_INNINGS_ALL_TIME } from '@vr-tournament/shared';
@@ -23,7 +24,14 @@ function Board({ title, hint, icon: Icon, entries, unit }: { title: string; hint
             <li key={`${e.userId}-${i}`} className={cn('flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-sm', i === 0 && 'bg-[var(--color-primary)]/10')}>
               <span className="flex min-w-0 items-center gap-2">
                 <span className={cn('w-5 text-center tabular-nums font-semibold', i < 3 ? 'text-[var(--color-primary)]' : 'text-[var(--color-muted-foreground)]')}>{i + 1}</span>
-                <Link to={`/players/${encodeURIComponent(e.username)}`} className="truncate hover:underline">{e.username}</Link>
+                <span className="flex min-w-0 flex-col">
+                  <Link to={`/players/${encodeURIComponent(e.username)}`} className="truncate hover:underline">{e.username}</Link>
+                  {e.title && (
+                    <span className="mt-0.5">
+                      <TitleByName name={e.title} />
+                    </span>
+                  )}
+                </span>
               </span>
               <span className="tabular-nums font-semibold">
                 {e.value}

@@ -55,6 +55,11 @@ describe('status text', () => {
     expect(text).toContain('Waiting for zara_vr');
   });
 
+  it('says the opponent is batting instead of "your turn" while they bat first', () => {
+    const text = playerStatusText({ ...common, status: 'active', opponent: 'zara_vr', matchState: 'your_turn', opponentBatting: true });
+    expect(text).toContain('zara_vr is batting now');
+  });
+
   it('celebrates the champion', () => {
     expect(playerStatusText({ ...common, status: 'champion', opponent: null, matchState: null })).toContain('You won Lahore Open');
   });

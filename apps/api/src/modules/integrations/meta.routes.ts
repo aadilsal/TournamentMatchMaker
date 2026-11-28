@@ -5,6 +5,7 @@ import {
   metaPlayerCardQuerySchema,
   metaSoloTargetSchema,
   metaInningsActionSchema,
+  metaBallsSchema,
   metaSubmitScoreSchema,
   metaVerifyLinkCodeSchema,
 } from '@vr-tournament/shared';
@@ -134,6 +135,20 @@ export function createMetaIntegrationRouter(pool: Pool, redis: RedisClient, env:
     async (req, res, next) => {
       try {
         sendSuccess(res, await service.heartbeat(req.params.id as string, req.body.userId));
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+
+  metaApiRouter.post(
+    '/matches/:id/balls',
+    metaPollRateLimit(env),
+    validate(metaMatchIdParamSchema, 'params'),
+    validate(metaBallsSchema),
+    async (req, res, next) => {
+      try {
+        sendSuccess(res, await service.recordBalls(req.params.id as string, req.body));
       } catch (err) {
         next(err);
       }
